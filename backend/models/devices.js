@@ -218,6 +218,22 @@ const deviceVersionsSchema = new Schema({
 });
 
 /**
+ * Device pending job schema
+ */
+const pendingJobSchema = new Schema({
+    // Is there a pending job for the device
+    jobPending: {
+        type: Boolean,
+        default: false
+    },
+    // The ID of the pending job
+    jobId: {
+        type: String,
+        default: null
+    },
+});
+
+/**
  * Version Upgrade Database Schema
  */
 const versionUpgradeSchema = new Schema({
@@ -364,8 +380,8 @@ const deviceSchema = new Schema({
     labels: [String],
     // is modification in progress flag
     pendingDevModification: {
-        type: Boolean,
-        default: false
+        type: pendingJobSchema,
+        default: pendingJobSchema
     }
   },
   {

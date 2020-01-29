@@ -140,7 +140,8 @@ exports.assignRoutes = function(router, permissionResource, subpath, model, form
                         if (resp != null) {
                             if (checkUpdResp) checkUpdResp('PUT', req, res, next, resp, origDoc)
                             .then((checkresp) => {
-                                res.statusCode = 200;
+                                const { status } = checkresp;
+                                res.statusCode = status ? status : 200;
                                 res.setHeader('Content-Type', 'application/json');
                                 return res.json(resp);
                             }, (checkerr) => {

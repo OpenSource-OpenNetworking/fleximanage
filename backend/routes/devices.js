@@ -27,9 +27,11 @@ const mongoose = require('mongoose');
 const mongoConns = require('../mongoConns.js')();
 const createError = require('http-errors');
 const dispatcher = require('../deviceLogic/dispatcher');
+const configs = require('../configs')();
 const { validateDevice } = require('../deviceLogic/validators');
 const logger = require('../logging/logging')({module: module.filename, type: 'req'});
 const DevSwUpdater = require('../deviceLogic/DevSwVersionUpdateManager');
+const deviceQueues = require('../utils/deviceQueue')(configs.get('kuePrefix'),configs.get('redisUrl'));
 const Joi = require('@hapi/joi');
 
 const flexibilling = require("../flexibilling");
@@ -144,7 +146,7 @@ const checkUpdReq = (qtype, req) => new Promise(function(resolve, reject) {
             // Currently we allow only one change at a time to the device,
             // to prevent inconsistencies between the device and the MGMT database.
             // Therefore, we block the request if there's a pending change in the queue.
-            if (mres[0].pendingDevModification) {
+            if (mres[0].pendingDevModification.jobPending) {
                 return reject(new Error('Only one device change is allowed at any time'));
             }
             resolve({'ok':1});
@@ -194,16 +196,20 @@ const updResp = (qtype, req, res, next, resp, origDoc=null) => new Promise(async
     } else if(qtype === 'PUT'){
         // If the change made to the device fields requires a change on the
         // device itself, add a 'modify' job to the device's queue.
+        let result;
         if(origDoc) {
             req.body.method = 'modify';
             try {
-                await dispatcher.apply([origDoc], req, res, next, { newDevice: resp });
+                result = await dispatcher.apply([origDoc], req, res, next, { newDevice: resp });
             } catch(err) {
                 return reject(err);
             }
         }
 
-        resolve({'ok':1});
+        // If a job was queued, the operation is considered asynchronous
+        // and the API call should return 202. Otherwise, return 200
+        const { jobQueued } = result;
+        resolve({'ok':1, status: jobQueued ? 202 : 200});
     } else {
         resolve({'ok':1});
     }
@@ -552,6 +558,24 @@ devicesRouter.route('/:deviceId/apply')
 
         return res.status(200).send({ deviceId: device.id });
     });
+
+// Query device job status
+devicesRouter.route('/:deviceId/jobs/:jobId')
+.options(cors.corsWithOptions, verifyPermission('devices', 'get'), async (req, res) => { res.sendStatus(200); })
+.get(cors.corsWithOptions, async(req, res, next) => {
+    try {
+        const job = await deviceQueues.getJobById(req.params.jobId);
+        if (!job) return next(createError(404));
+
+        const { _state, created_at } = job;
+        return res.status(200).send({
+            status: _state,
+            createdAt: new Date(parseInt(created_at))
+        });
+    } catch (err) {
+        return next(createError(500));
+    }
+});
 
 // Default exports
 module.exports = devicesRouter;

@@ -368,6 +368,30 @@ class DeviceQueues {
         }
     }
 
+  /**
+   * Returns the job object according to the job id.
+   * @param  {string}  jobId  Id of the job to be retrieved
+   * @param  {boolean} strict a flag that states what to do
+   *                          in case the job was not found:
+   *                          true - reject, false - resolve as null
+   * @return {Promise}        for a job object
+   */
+  getJobById(jobId, strict=false) {
+    return new Promise((resolve, reject) => {
+        kue.Job.get(jobId, async (err, job) => {
+            if (err) {
+                // If not in strict mode, don't treat non existing
+                // jobs as error. Simply return null instead of the job.
+                if(err.message.includes('doesnt exist') && !strict) {
+                    return resolve(null);
+                }
+                reject(err);
+            }
+            return resolve(job);
+        });
+    });
+  }
+
     /**
      * Gets the number of jobs for current state
      * @param  {string} state queue state ('complete', 'failed', 'inactive', 'delayed', 'active')

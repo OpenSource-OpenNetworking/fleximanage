@@ -68,7 +68,7 @@ const queueJob = (org, user, tasks, device, removedTunnelsList = []) => {
             );
 
             logger.info("Modify device job queued", {params: {job: job}});
-            resolve();
+            resolve(job.id);
         } catch (err) {
             reject(err);
         }
@@ -173,8 +173,8 @@ const queueModifyDeviceJob = (device, messageParams, user, org) => {
             }
             const tasks = [{ entity: "agent", message: "modify-device", params: messageParams }];
 
-            await queueJob(org, user, tasks, device, removedTunnels);
-            resolve();
+            const jobId = await queueJob(org, user, tasks, device, removedTunnels);
+            resolve(jobId);
         } catch (err) {
             reject(err);
         }
@@ -240,7 +240,28 @@ const setJobPendingInDB = (deviceID, org, flag) => {
         try {
             await devices.update(
                 { _id: deviceID, org: org },
-                { $set: { "pendingDevModification": flag } },
+                { $set: { "pendingDevModification.jobPending": flag } },
+                { upsert: false }
+            );
+        } catch (err) {
+            return reject(err);
+        }
+        return resolve();
+    });
+};
+/**
+ * Sets the pending job ID in the database
+ * @param  {string}  deviceID the id of the device
+ * @param  {string}  org      the organization the device belongs to
+ * @param  {string}  jobId    the id of the job
+ * @return {Promise}          a promise for updating the job ID in the database
+ */
+const setJobIdInDB = (deviceID, org, jobId) => {
+    return new Promise(async(resolve, reject) => {
+        try {
+            await devices.update(
+                { _id: deviceID, org: org },
+                { $set: { "pendingDevModification.jobId": jobId } },
                 { upsert: false }
             );
         } catch (err) {
@@ -473,13 +494,14 @@ const apply = async(device, req, res, next, data) => {
             modifyParams.modify_interfaces.interfaces = interfacesDiff;
         }
 
-        const modified =
+        const shouldQueueJob =
             has(modifyParams, "modify_routes") ||
             has(modifyParams, "modify_router") ||
             has(modifyParams, "modify_interfaces");
+        let jobId;
         try {
             // Queue job only if the device has changed
-            if(modified) {
+            if(shouldQueueJob) {
                 // First, go over assigned and modified
                 // interfaces and make sure they are valid
                 const assign = has(modifyParams, "modify_router.assign") ? modifyParams.modify_router.assign : [];
@@ -492,15 +514,20 @@ const apply = async(device, req, res, next, data) => {
                     return reject(new Error(err));
                 }
                 await setJobPendingInDB(device[0]._id, org, true);
-                await queueModifyDeviceJob(device[0], modifyParams, user, org);
+                jobId = await queueModifyDeviceJob(device[0], modifyParams, user, org);
+                await setJobIdInDB(device[0]._id, org, jobId);
             }
-            return resolve();
+            // Set the 'Location' header in the response header
+            res.set('Location', `api/devices/${device[0]._id}/jobs/${jobId}`)
+            data.newDevice.pendingDevModification.jobId = jobId;
+            return resolve({ jobQueued: shouldQueueJob });
         } catch (err) {
             logger.error("Failed to queue modify device job", {
                 params: { err: err.message, device: device[0]._id }
             });
             try {
                 await setJobPendingInDB(device[0]._id, org, false);
+                await setJobIdInDB(device[0]._id, org, null);
             } catch (err) {
                 logger.error("Failed to set job pending flag in db", {
                     params: { err: err.message, device: device[0]._id }
@@ -534,6 +561,7 @@ const complete = async(jobId, res) => {
     }
     try {
         await setJobPendingInDB(res.device, res.org, false);
+        await setJobIdInDB(res.device, res.org, null);
     } catch (err) {
         logger.error("Failed to set job pending flag in db", {
             params: { err: err.message, jobId: jobId, res: res }
@@ -565,13 +593,6 @@ const error = async (jobId, res) => {
             params: { jobId: jobId, res: res, err: err.message }
         });
     }
-    try {
-        await setJobPendingInDB(res.device, res.org, false);
-    } catch (err) {
-        logger.error("Failed to set job pending flag in db", {
-            params: { err: err.message, jobId: jobId, res: res }
-        });
-    }
 };
 
 /**
@@ -600,6 +621,7 @@ const remove = async (job) => {
         }
         try {
             await setJobPendingInDB(origDevice, org, false);
+            await setJobIdInDB(origDevice, org, null);
         } catch (err) {
             logger.error("Failed to set job pending flag in db", {
                 params: { err: err.message, job: job }
