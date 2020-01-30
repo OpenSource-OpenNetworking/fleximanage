@@ -570,54 +570,26 @@ const complete = async(jobId, res) => {
 };
 
 /**
- * Called when modify device job fails and
- * reverts the changes in the database.
- * @async
- * @param  {number} jobId Kue job ID number
- * @param  {Object} res   job result
- * @return {void}
- */
-const error = async (jobId, res) => {
-    if (!res || !res.origDevice) {
-        logger.warn('Got an invalid job result', {params: {res: res, jobId: jobId}});
-        return;
-    }
-    logger.warn('Rolling back device changes', {params: {jobId: jobId, res: res}});
-    try {
-        // First rollback changes and only then reconstruct the tunnels. This is
-        // done to make sure tunnels are reconstructed with the previous values.
-        await rollBackDeviceChanges(res.origDevice);
-        await reconstructTunnels(res.tunnels, res.org, res.user);
-    } catch (err) {
-        logger.error("Device change rollback failed", {
-            params: { jobId: jobId, res: res, err: err.message }
-        });
-    }
-};
-
-/**
  * Called when modify-device job is removed either
  * by user or due to expiration. This method should run
- * only for tasks that were deleted before completion/failure
+ * only for tasks that were deleted before completion
  * @async
  * @param  {Object} job Kue job
  * @return {void}
  */
 const remove = async (job) => {
-    // We rollback changes only for pending jobs, as non-pending
-    // jobs are covered by the complete/error callbacks
-    if(['inactive', 'delayed', 'active'].includes(job._state)) {
+    // We rollback changes only for pending jobs, as
+    // non-pending jobs are covered by the complete callback
+    if(['inactive', 'delayed', 'active', 'failed'].includes(job._state)) {
         logger.info('Rolling back device changes for removed task', {params: {job: job}});
-        const { org, user, origDevice, tunnels } = job.data.response.data;
+        const { org, origDevice } = job.data.response.data;
         try {
-            // First rollback changes and only then reconstruct the tunnels. This is
-            // done to make sure tunnels are reconstructed with the previous values.
             await rollBackDeviceChanges(origDevice);
-            await reconstructTunnels(tunnels, org, user);
         } catch (err) {
             logger.error("Device change rollback failed", {
                 params: { job: job, err: err.message }
             });
+            throw(err);
         }
         try {
             await setJobPendingInDB(origDevice, org, false);
@@ -626,6 +598,7 @@ const remove = async (job) => {
             logger.error("Failed to set job pending flag in db", {
                 params: { err: err.message, job: job }
             });
+            throw(err);
         }
     }
 };
@@ -633,6 +606,5 @@ const remove = async (job) => {
 module.exports = {
     apply: apply,
     complete: complete,
-    error: error,
     remove: remove,
 };

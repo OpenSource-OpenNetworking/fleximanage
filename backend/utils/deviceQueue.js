@@ -335,10 +335,10 @@ class DeviceQueues {
     iterateJobsIdsByOrg(org, jobIDs, callback) {
         return new Promise((resolve, reject) => {
             try {
-                jobIDs.forEach(async (id) => {
-                    await kue.Job.get(id, async (err, job) => {
-                        if (err) reject(err);
-                        if (!job) reject(new Error('DeviceQueues: Iterated job not found for ID=' + id));
+                jobIDs.forEach((id) => {
+                    kue.Job.get(id, (err, job) => {
+                        if (err) return reject(err);
+                        if (!job) return reject(new Error('DeviceQueues: Iterated job not found for ID=' + id));
                         if (!job.data.metadata.org === org)
                             reject(new Error('DeviceQueues: Iteration org not authorized, org=' + org));
                         callback(job);
@@ -350,6 +350,18 @@ class DeviceQueues {
             }
         });
     }
+
+    async removeJobById(jobId) {
+        const job = await this.getJobById(jobId);
+        if (!job) return null;
+
+        const { method } = job.data.response;
+        await this.callRegisteredCallback(method, job);
+        await job.remove((err) => { if (err) throw err; });
+
+        return job;
+    };
+
     /**
      * Removes all jobs in the jobIDs array according
      * to an organizations id.
@@ -455,7 +467,7 @@ class DeviceQueues {
      */
     callRegisteredCallback(name, job) {
         if (this.removeCallbacks.hasOwnProperty(name)) {
-            this.removeCallbacks[name](job);
+            return this.removeCallbacks[name](job);
         }
     }
 }

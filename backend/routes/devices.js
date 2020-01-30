@@ -560,7 +560,7 @@ devicesRouter.route('/:deviceId/apply')
     });
 
 // Query device job status
-devicesRouter.route('/:deviceId/jobs/:jobId')
+devicesRouter.route('/:deviceId/jobs/:jobId/status')
 .options(cors.corsWithOptions, verifyPermission('devices', 'get'), async (req, res) => { res.sendStatus(200); })
 .get(cors.corsWithOptions, async(req, res, next) => {
     try {
@@ -572,6 +572,19 @@ devicesRouter.route('/:deviceId/jobs/:jobId')
             status: _state,
             createdAt: new Date(parseInt(created_at))
         });
+    } catch (err) {
+        return next(createError(500));
+    }
+});
+
+devicesRouter.route('/:deviceId/jobs/:jobId')
+.options(cors.corsWithOptions, verifyPermission('devices', 'get'), async (req, res) => { res.sendStatus(200); })
+.delete(cors.corsWithOptions, async(req, res, next) => {
+    try {
+        const job = await deviceQueues.removeJobById(req.params.jobId);
+        if (!job) return next(createError(404));
+
+        return res.status(204).send();
     } catch (err) {
         return next(createError(500));
     }

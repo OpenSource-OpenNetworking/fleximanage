@@ -49,7 +49,7 @@ const methods = {
     'modify': {
         apply:modify.apply,
         complete:modify.complete,
-        error:modify.error,
+        error:errorNOOP,
         remove:modify.remove
     },
     'tunnels': {
