@@ -287,7 +287,8 @@ const rollBackDeviceChanges = (origDevice) => {
                 { _id: _id, org: org },
                 { $set: {
                         "defaultRoute": origDevice.defaultRoute,
-                        "interfaces": origDevice.interfaces
+                        "interfaces": origDevice.interfaces,
+                        staticroutes: origDevice.staticroutes
                     }
                 },
                 { upsert: false }

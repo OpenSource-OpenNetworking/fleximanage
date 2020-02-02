@@ -562,8 +562,11 @@ devicesRouter.route('/:deviceId/apply')
 // Query device job status
 devicesRouter.route('/:deviceId/jobs/:jobId/status')
 .options(cors.corsWithOptions, verifyPermission('devices', 'get'), async (req, res) => { res.sendStatus(200); })
-.get(cors.corsWithOptions, async(req, res, next) => {
+.get(cors.corsWithOptions, verifyPermission('devices', 'get'), async(req, res, next) => {
     try {
+        const device = await devices.findOne({ _id: req.params.deviceId });
+        if(!device) return next(createError(404, "Device not found"));
+
         const job = await deviceQueues.getJobById(req.params.jobId);
         if (!job) return next(createError(404));
 
@@ -578,9 +581,39 @@ devicesRouter.route('/:deviceId/jobs/:jobId/status')
 });
 
 devicesRouter.route('/:deviceId/jobs/:jobId')
-.options(cors.corsWithOptions, verifyPermission('devices', 'get'), async (req, res) => { res.sendStatus(200); })
-.delete(cors.corsWithOptions, async(req, res, next) => {
+.options(cors.corsWithOptions, verifyPermission('devices', 'post'), async (req, res) => { res.sendStatus(200); })
+.post(cors.corsWithOptions, verifyPermission('devices', 'post'), async(req, res, next) => {
+    if(req.query.op !== 'retry') return next(createError(400));
     try {
+        const device = await devices.findOne(
+            { _id: req.params.deviceId },
+            "pendingDevModification.jobId"
+        );
+        if(!device) return next(createError(404, "Device not found"));
+
+        // Allow resending the last failed job only
+        const { deviceId, jobId } = req.params;
+        if (jobId !== device.pendingDevModification.jobId) {
+            return next(createError(400, "Bad job ID"));
+        }
+        const job = await deviceQueues.retryJob(jobId);
+        if (!job) return next(createError(404));
+
+        res.set('Location', `api/devices/${deviceId}/jobs/${jobId}`);
+        const { _state } = job;
+        return res.status(202).send({
+            status: _state,
+            retriedAt: new Date()
+        });
+    } catch (err) {
+        return next(createError(500));
+    }
+})
+.delete(cors.corsWithOptions, verifyPermission('devices', 'del'), async(req, res, next) => {
+    try {
+        const device = await devices.findOne({ _id: req.params.deviceId });
+        if(!device) return next(createError(404, "Device not found"));
+
         const job = await deviceQueues.removeJobById(req.params.jobId);
         if (!job) return next(createError(404));
 

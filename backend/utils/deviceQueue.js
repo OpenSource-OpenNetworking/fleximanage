@@ -351,15 +351,36 @@ class DeviceQueues {
         });
     }
 
+    /**
+     * Retries a failed job
+     * @param  {string}  jobId Job id of the retried job
+     * @return {Promise}       A promise for requeuing the job
+     */
+    async retryJob(jobId){
+        const job = await this.getJobById(jobId);
+        if (!job) return null;
+
+        return new Promise((resolve, reject) => {
+            job.state('inactive').save((err) => {
+                if (err) return reject(err);
+                return resolve(job);
+            });
+        });
+    }
+
     async removeJobById(jobId) {
         const job = await this.getJobById(jobId);
         if (!job) return null;
 
         const { method } = job.data.response;
         await this.callRegisteredCallback(method, job);
-        await job.remove((err) => { if (err) throw err; });
 
-        return job;
+        return new Promise((resolve, reject) => {
+            job.remove((err) => {
+                if (err) return reject(err);
+                return resolve(job);
+            });
+        });
     };
 
     /**
