@@ -19,6 +19,7 @@ const deviceQueues = require('../utils/deviceQueue')(configs.get('kuePrefix'),co
 const {
     prepareTunnelRemoveJob,
     prepareTunnelAddJob,
+    queueTunnelJob,
     queueTunnel
 } = require("../deviceLogic/tunnels");
 const { validateModifyDeviceMsg } = require('./validators');
@@ -42,14 +43,14 @@ const prepareIfcParams = (interfaces) => {
 };
 /**
  * Queues a modify-device job to the device queue.
- * @param  {string}  org                   the organization to which the user belongs
- * @param  {string}  user                  the user that requested the job
- * @param  {Array}   tasks                 the message to be sent to the device
- * @param  {Object}  device                the device to which the job should be queued
- * @param  {Array}   removedTunnelsList=[] tunnels that have been removed as part of the device modification
- * @return {Promise}                       a promise for queuing a job
+ * @param  {string}  org                the organization to which the user belongs
+ * @param  {string}  user               the user that requested the job
+ * @param  {Array}   tasks              the message to be sent to the device
+ * @param  {Object}  device             the device to which the job should be queued
+ * @param  {Object}  affectedTunnels    a map object of all tunnels to remove/reconstruct after the change.
+ * @return {Promise}                    a promise for queuing a job
  */
-const queueJob = (org, user, tasks, device, removedTunnelsList = []) => {
+const queueJob = (org, user, tasks, device, affectedTunnels) => {
     return new Promise(async (resolve, reject) => {
         try {
             const job = await deviceQueues.addJob(
@@ -59,7 +60,7 @@ const queueJob = (org, user, tasks, device, removedTunnelsList = []) => {
               // Response data
               {
                 method: "modify",
-                data: { device: device._id, org: org, user: user, origDevice: device, tunnels: removedTunnelsList }
+                data: { device: device._id, org: org, user: user, origDevice: device, tunnels: affectedTunnels }
               },
               // Metadata
               { priority: "medium", attempts: 2, removeOnComplete: false },
@@ -76,7 +77,7 @@ const queueJob = (org, user, tasks, device, removedTunnelsList = []) => {
 };
 /**
  * Performs required tasks before device modification
- * can take place. It removes all tunnels connected to
+ * can take place. It creates a list of all tunnels connected to
  * the modified interfaces and then queues the modify device job.
  * @param  {Object}  device        original device object, before the changes
  * @param  {Object}  messageParams device changes that will be sent to the device
@@ -86,78 +87,64 @@ const queueJob = (org, user, tasks, device, removedTunnelsList = []) => {
  */
 const queueModifyDeviceJob = (device, messageParams, user, org) => {
     return new Promise(async(resolve, reject) => {
-        const removedTunnels = [];
-        const interfacesIdsSet = new Set();
+        const assignedSet = new Set();
+        const unassignedSet = new Set();
         const modifiedIfcsSet = new Set();
+        const tunnelReconstructObj = {};
         messageParams.reconnect = false;
 
         // Changes in the interfaces require reconstruction of all tunnels
         // connected to these interfaces (since the tunnels parameters change).
-        // Maintain all interfaces that have changed in a set that will
-        // be used later to find all the tunnels that should be reconstructed.
-        // We use a set, since multiple changes can be done in a single modify-device
-        // message, hence the interface might appear in both modify-router and
-        // modify-interfaces objects, and we want to remove the tunnel only once.
+        // Maintain all interfaces that have changed in a set that will be used
+        // later to find all the tunnels that should be removed/reconstructed.
         if(has(messageParams, 'modify_router')) {
             const { assign, unassign } = messageParams.modify_router;
-            (assign || []).forEach(ifc => { interfacesIdsSet.add(ifc._id); });
-            (unassign || []).forEach(ifc => { interfacesIdsSet.add(ifc._id); });
+            (assign || []).forEach(ifc => { assignedSet.add(ifc._id.toString()); });
+            (unassign || []).forEach(ifc => { unassignedSet.add(ifc._id.toString()); });
         }
         if(has(messageParams, 'modify_interfaces')) {
             const { interfaces } = messageParams.modify_interfaces;
             interfaces.forEach(ifc => {
-                interfacesIdsSet.add(ifc._id);
-                modifiedIfcsSet.add(ifc._id);
+                const _id = ifc._id.toString();
+                if (!assignedSet.has(_id) && !unassignedSet.has(_id)) {
+                    modifiedIfcsSet.add(_id);
+                }
             });
         }
 
         try {
-            for(const ifc of interfacesIdsSet) {
-                // First, remove all active tunnels connected
-                // via this interface, on all relevant devices.
-                const tunnels = await tunnelsModel
-                    .find({
-                        'isActive':true,
-                        $or: [{ interfaceA: ifc._id }, { interfaceB: ifc._id }]
-                    })
-                    .populate("deviceA")
-                    .populate("deviceB");
+            // Only interfaces that will be modified or unassigned
+            // have effect on the tunnel reconstruction:
+            // Modified interfaces require reconstruction of the tunnels
+            // Unassigned interfaces require removal of the tunnels
+            const tunnelIfcsSet = [...unassignedSet, ...modifiedIfcsSet];
+            const tunnels = await tunnelsModel
+                .find({
+                    'isActive':true,
+                    $or: [
+                        { interfaceA: { $in: tunnelIfcsSet } },
+                        { interfaceB: { $in: tunnelIfcsSet } }
+                    ]
+                },
+                {
+                    '_id': 1,
+                    'num': 1,
+                    'interfaceA': 1,
+                    'interfaceB': 1
+                })
 
-                for(const tunnel of tunnels) {
-                    let { deviceA, deviceB } = tunnel;
+            tunnels.forEach(tunnel => {
+                const [ifcA, ifcB] = [
+                    tunnel.interfaceA.toString(),
+                    tunnel.interfaceB.toString()
+                ];
 
-                    // Since the interface changes have already been updated in the database
-                    // we have to use the original device for creating the tunnel-remove message.
-                    if (deviceA._id.toString() == device._id.toString()) deviceA = device;
-                    else deviceB = device;
+                tunnelReconstructObj[tunnel._id] = {
+                  reconstruct:
+                    !unassignedSet.has(ifcA) && !unassignedSet.has(ifcB)
+                };
+            });
 
-                    const ifcA = deviceA.interfaces.find(ifc => {
-                        return ifc._id == tunnel.interfaceA.toString();
-                    });
-                    const ifcB = deviceB.interfaces.find(ifc => {
-                        return ifc._id == tunnel.interfaceB.toString();
-                    });
-
-                    const [tasksDeviceA, tasksDeviceB] = prepareTunnelRemoveJob(tunnel.num, ifcA, ifcB);
-                    await queueTunnel(
-                        false,
-                        `Delete tunnel between (${deviceA.hostname}, ${ifcA.name}) and (${deviceB.hostname}, ${ifcB.name})`,
-                        tasksDeviceA,
-                        tasksDeviceB,
-                        user,
-                        org,
-                        deviceA.machineId,
-                        deviceB.machineId,
-                        deviceA._id,
-                        deviceB._id
-                    );
-                    // Maintain a list of all removed tunnels for adding them back
-                    // after the interface changes are applied on the device.
-                    // Add the tunnel to this list only if the interface connected
-                    // to this tunnel has changed any property except for 'isAssigned'
-                    if(modifiedIfcsSet.has(ifc._id)) removedTunnels.push(tunnel._id);
-                }
-            }
             // Prepare and queue device modification job
             if(has(messageParams, 'modify_router.assign')) {
                 messageParams.modify_router.assign = prepareIfcParams(messageParams.modify_router.assign);
@@ -171,9 +158,9 @@ const queueModifyDeviceJob = (device, messageParams, user, org) => {
                 messageParams.modify_interfaces.interfaces = prepareIfcParams(messageParams.modify_interfaces.interfaces);
                 messageParams.reconnect = true;
             }
-            const tasks = [{ entity: "agent", message: "modify-device", params: messageParams }];
 
-            const jobId = await queueJob(org, user, tasks, device, removedTunnels);
+            const tasks = [{ entity: "agent", message: "modify-device", params: messageParams }];
+            const jobId = await queueJob(org, user, tasks, device, tunnelReconstructObj);
             resolve(jobId);
         } catch (err) {
             reject(err);
@@ -181,23 +168,24 @@ const queueModifyDeviceJob = (device, messageParams, user, org) => {
     });
 };
 /**
- * Reconstructs tunnels that were removed before
- * sending a modify-device message to a device.
- * @param  {Array}   removedTunnels an array of ids of the removed tunnels
- * @param  {string}  org            the organization to which the tunnels belong
- * @param  {string}  user           the user that requested the device change
- * @return {Promise}                a promise for reconstructing tunnels
+ * Reconstructs/removes tunnels that might be
+ * affected by the device changes.
+ * @param  {int}     deviceId          the ID of the device that was changed
+ * @param  {Array}   affectedTunnels   a map object of all tunnels to remove/reconstruct after the change
+ * @param  {string}  org               the organization to which the tunnels belong
+ * @return {Promise}                   a promise for reconstructing tunnels
  */
-const reconstructTunnels = (removedTunnels, org, user) => {
+const reconstructTunnels = (deviceId, affectedTunnels, org) => {
     return new Promise(async(resolve, reject) => {
         try {
+            const tunnelIds = Object.keys(affectedTunnels);
             const tunnels = await tunnelsModel
-                .find({ _id: { $in: removedTunnels }, 'isActive':true })
+                .find({ _id: { $in: tunnelIds }, 'isActive':true })
                 .populate("deviceA")
                 .populate("deviceB");
 
             for(const tunnel of tunnels) {
-                const { deviceA, deviceB } = tunnel;
+                const { deviceA, deviceB, num } = tunnel;
                 const ifcA = deviceA.interfaces.find(ifc => {
                     return ifc._id == tunnel.interfaceA.toString();
                 });
@@ -205,20 +193,43 @@ const reconstructTunnels = (removedTunnels, org, user) => {
                     return ifc._id == tunnel.interfaceB.toString();
                 });
 
-                const { agent } = deviceB.versions;
-                const [tasksDeviceA, tasksDeviceB] = prepareTunnelAddJob(tunnel.num, ifcA, ifcB, agent);
-                await queueTunnel(
-                    true,
-                    `Add tunnel between (${deviceA.hostname}, ${ifcA.name}) and (${deviceB.hostname}, ${ifcB.name})`,
-                    tasksDeviceA,
-                    tasksDeviceB,
-                    user,
-                    org,
-                    deviceA.machineId,
-                    deviceB.machineId,
+                // Don't queue a remove-tunnel job to the device that
+                // was changed, as that device removes its tunnel locally.
+                let [tasksDeviceA, tasksDeviceB] = prepareTunnelRemoveJob(num, ifcA, ifcB);
+                const [removeTask, deviceMachineId, target] =
+                    deviceA._id.toString() === deviceId ?
+                        [tasksDeviceB, deviceB.machineId, 'deviceBconf'] :
+                        [tasksDeviceA, deviceA.machineId, 'deviceAconf'];
+
+                await queueTunnelJob(
+                    'deltunnels',
+                    `Remove tunnel between (${deviceA.hostname}, ${ifcA.name}) and (${deviceB.hostname}, ${ifcB.name})`,
+                    removeTask,
+                    deviceMachineId,
                     deviceA._id,
-                    deviceB._id
+                    deviceB._id,
+                    target,
+                    'system (device modification)',
+                    org,
                 );
+                // Re-add the tunnel only if it was marked as requiring reconstruction
+                const { _id } = tunnel;
+                if (affectedTunnels[_id].reconstruct) {
+                    const { agent } = deviceB.versions;
+                    [tasksDeviceA, tasksDeviceB] = prepareTunnelAddJob(num, ifcA, ifcB, agent);
+                    await queueTunnel(
+                        true,
+                        `Add tunnel between (${deviceA.hostname}, ${ifcA.name}) and (${deviceB.hostname}, ${ifcB.name})`,
+                        tasksDeviceA,
+                        tasksDeviceB,
+                        'system (device modification)',
+                        org,
+                        deviceA.machineId,
+                        deviceB.machineId,
+                        deviceA._id,
+                        deviceB._id
+                    );
+                }
             }
             resolve();
         } catch (err) {
@@ -554,7 +565,7 @@ const complete = async(jobId, res) => {
     }
     logger.info("Device modification complete", {params: {result: res, jobId: jobId}});
     try {
-        await reconstructTunnels(res.tunnels, res.org, res.user);
+        await reconstructTunnels(res.device, res.tunnels, res.org);
     } catch (err) {
         logger.error("Tunnel reconstruction failed", {
             params: { jobId: jobId, res: res, err: err.message }

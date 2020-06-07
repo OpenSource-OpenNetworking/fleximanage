@@ -472,6 +472,30 @@ const addTunnel = (user, org, tunnelnum, deviceA, deviceB,
         reject(new Error("Unable to store tunnel"));
     });
 };
+
+const queueTunnelJob = async (method, title, devTasks, devMachineId, devAObjId, devBObjId, target, user, org) => {
+    return deviceQueues.addJob(
+        devMachineId, user, org,
+      // Data
+      { title: title, tasks: devTasks },
+      // Response data
+      {
+        method: method,
+        data: {
+          username: user,
+          org: org,
+          deviceA: devAObjId,
+          deviceB: devBObjId,
+          target: target
+        }
+      },
+      // Metadata
+      { priority: "normal", attempts: 1, removeOnComplete: false },
+      // Complete callback
+      null
+    );
+};
+
 /**
  * Queues the tunnel creation/deletion jobs to both
  * of the devices that are connected via the tunnel
@@ -491,39 +515,46 @@ const queueTunnel = async (isAdd, title, tasksDeviceA, tasksDeviceB, user, org, 
     devAOid, devBOid) => {
 
     return new Promise((resolve, reject) => {
+        method = isAdd ? 'tunnels' : 'deltunnels';
         const devices = { deviceA: devAOid, deviceB:devBOid };
-        deviceQueues.addJob(devAmachineID, user, org,
-            // Data
-            {'title':title,
-             'tasks':tasksDeviceA},
-            // Response data
-            {method:((isAdd)?'tunnels':'deltunnels'),
-             data:{'username':user, 'org':org, 'deviceA':devAOid, 'deviceB':devBOid, 'target':'deviceAconf'}},
-            // Metadata
-            {priority:'normal', attempts:1, removeOnComplete:false},
-            // Complete callback
-            null)
-        .then((job) => {
-            logger.info(`${(isAdd) ? 'Add' : 'Del'} tunnel job queued`, {params: {devices: devices}, job: job});
+        queueTunnelJob(
+            method,
+            title,
+            tasksDeviceA,
+            devAmachineID,
+            devAOid,
+            devBOid,
+            'deviceAconf',
+            user,
+            org
+        )
+          .then(job => {
+            logger.info(`${isAdd ? "Add" : "Del"} tunnel job queued`, {
+              params: { devices: devices },
+              job: job
+            });
             resolve(job.id);
-        })
-        .catch((err) => {
-            logger.error("Error queuing tunnel device A", {params: {deviceID: devAmachineID, reason: err.message}});
-            reject({"error": "Error queuing tunnel for device ID=" +
-                devAmachineID});
-        });
+          })
+          .catch(err => {
+            logger.error("Error queuing tunnel device A", {
+              params: { deviceID: devAmachineID, reason: err.message }
+            });
+            reject({
+              error: "Error queuing tunnel for device ID=" + devAmachineID
+            });
+          });
 
-        deviceQueues.addJob(devBmachineID, user, org,
-            // Data
-            {'title':title,
-             'tasks':tasksDeviceB},
-            // Response data
-            {method:((isAdd)?'tunnels':'deltunnels'),
-             data:{'username':user, 'org':org, 'deviceA':devAOid, 'deviceB':devBOid, 'target':'deviceBconf'}},
-            // Metadata
-            {priority:'normal', attempts:1, removeOnComplete:false},
-            // Complete callback
-            null)
+        queueTunnelJob(
+            method,
+            title,
+            tasksDeviceB,
+            devBmachineID,
+            devAOid,
+            devBOid,
+            'deviceBconf',
+            user,
+            org
+        )
         .then((job) => {
             logger.info(`${(isAdd) ? 'Add' : 'Del'} tunnel job queued`, {params: {devices: devices}, job: job});
             resolve(job.id);
@@ -818,5 +849,6 @@ module.exports = {
     },
     prepareTunnelRemoveJob: prepareTunnelRemoveJob,
     prepareTunnelAddJob: prepareTunnelAddJob,
-    queueTunnel: queueTunnel
+    queueTunnel: queueTunnel,
+    queueTunnelJob: queueTunnelJob
 };
