@@ -18,6 +18,7 @@
 // File used to dispatch the apply logic to the right function
 const start = require('./start');
 const stop = require('./stop');
+const reset = require('./reset');
 const modify = require('./modifyDevice');
 const tunnels = require('./tunnels');
 const staticroutes = require('./staticroutes');
@@ -51,6 +52,11 @@ const methods = {
     apply: stop.apply,
     complete: stop.complete,
     error: errorNOOP
+  },
+  reset: {
+    apply: reset.apply,
+    complete: reset.complete,
+    error: reset.error
   },
   modify: {
     apply: modify.apply,
