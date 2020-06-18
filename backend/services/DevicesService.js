@@ -115,7 +115,8 @@ class DevicesService {
       'policies',
       // Internal array, objects
       'labels',
-      'upgradeSchedule']);
+      'upgradeSchedule',
+      'sync']);
     retDevice.deviceStatus = (retDevice.deviceStatus === '1');
 
     // pick interfaces
@@ -1327,6 +1328,35 @@ class DevicesService {
       if (session) session.abortTransaction();
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
+        e.status || 500
+      );
+    }
+  }
+
+  /**
+   * Get Device Status Information
+   *
+   * id String Numeric ID of the Device to retrieve configuration
+   * org String Organization to be filtered by (optional)
+   * returns DeviceStatus
+   **/
+  static async devicesIdStatusGET ({ id, org }, { user }) {
+    try {
+      const orgList = await getAccessTokenOrgList(user, org, false);
+      const { sync, machineId, isApproved } = await devices.findOne(
+        { _id: id, org: { $in: orgList } },
+        'sync machineId isApproved'
+      ).lean();
+
+      const isConnected = connections.isConnected(machineId);
+      return Service.successResponse({
+        sync,
+        isApproved,
+        connection: `${isConnected ? '' : 'dis'}connected`
+      });
+    } catch (e) {
+      return Service.rejectResponse(
+        e.message || 'Invalid input',
         e.status || 500
       );
     }

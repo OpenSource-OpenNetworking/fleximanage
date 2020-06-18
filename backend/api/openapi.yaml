@@ -1141,6 +1141,71 @@ paths:
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
+  /devices/{id}/status:
+    get:
+      operationId: devicesIdStatusGET
+      parameters:
+      - description: Numeric ID of the Device to retrieve configuration
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceStatus'
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get Device Status Information
+      tags:
+      - Devices
+      x-swagger-router-controller: Devices
+      x-openapi-router-controller: DevicesController
+      x-openapi-router-service: DevicesService
 #
 #  /devices/register:
 #    post:
@@ -6160,6 +6225,7 @@ components:
         account: account
         ipList: ipList
         dhcp: dhcp list
+        sync: device sync status
       properties:
         _id:
           maxLength: 24
@@ -6213,6 +6279,8 @@ components:
           type: array
         versions:
           $ref: '#/components/schemas/DeviceVersion'
+        sync:
+          $ref: '#/components/schemas/DeviceSyncStatus'
       type: object
     UpgradeSchedule:
       example:
@@ -6317,6 +6385,18 @@ components:
           $ref: '#/components/schemas/DeviceVersion'
         versionDeadLite:
           type: string
+    DeviceSyncStatus:
+      example:
+        state: sync state
+      properties:
+        state:
+          enum:
+          - synced
+          - syncing
+          - not-synced
+          type: string
+      required:
+        - state
     Role:
       enum:
       - owner
@@ -6389,11 +6469,27 @@ components:
         username:
           type: string
       type: object
-    DeviceStatus:
+    DeviceConnectionStatus:
       enum:
       - connected
       - disconnected
       type: string
+    DeviceStatus:
+      example:
+        sync: sync status
+        connection: connection status
+        isApproved: true
+      properties:
+        sync:
+          $ref: '#/components/schemas/DeviceSyncStatus'
+        connection:
+          $ref: '#/components/schemas/DeviceConnectionStatus'
+        isApproved:
+          type: boolean
+      required:
+        - sync
+        - connection
+        - isApproved
     DeviceRouteInformation:
       example:
         osRoutes:
@@ -6414,7 +6510,7 @@ components:
         - metric: 6
       properties:
         status:
-          $ref: '#/components/schemas/DeviceStatus'
+          $ref: '#/components/schemas/DeviceConnectionStatus'
         osRoutes:
           items:
             $ref: '#/components/schemas/DeviceRouteOs'
@@ -6474,7 +6570,7 @@ components:
         status: connected
       properties:
         status:
-          $ref: '#/components/schemas/DeviceStatus'
+          $ref: '#/components/schemas/DeviceConnectionStatus'
         configuration:
           items:
             $ref: '#/components/schemas/DeviceConfigurationItem'
@@ -6500,7 +6596,7 @@ components:
         status: connected
       properties:
         status:
-          $ref: '#/components/schemas/DeviceStatus'
+          $ref: '#/components/schemas/DeviceConnectionStatus'
         logs:
           items:
             type: string

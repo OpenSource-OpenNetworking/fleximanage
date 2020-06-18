@@ -130,6 +130,10 @@ class DevicesController {
   async devicesIdDhcpPOST (request, response) {
     await Controller.handleRequest(request, response, this.service.devicesIdDhcpPOST);
   }
+
+  async devicesIdStatusGET (request, response) {
+    await Controller.handleRequest(request, response, this.service.devicesIdStatusGET);
+  }
 }
 
 module.exports = DevicesController;
