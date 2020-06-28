@@ -407,6 +407,23 @@ const deviceSyncSchema = new Schema({
       'not-synced'
     ],
     default: 'synced'
+  },
+  hash: {
+    type: String,
+    default: ''
+  },
+  trials: {
+    type: Number,
+    default: 0
+  },
+  autoSync: {
+    type: String,
+    enum: ['on', 'off'],
+    default: 'on'
+  },
+  failedJobRetried: {
+    type: Boolean,
+    default: false
   }
 });
 

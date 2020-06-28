@@ -47,14 +47,20 @@ class DeviceStatus {
     this.generateDevStatsNotifications = this.generateDevStatsNotifications.bind(this);
     this.getDeviceStatus = this.getDeviceStatus.bind(this);
     this.setDeviceStatus = this.setDeviceStatus.bind(this);
+    this.registerSyncUpdateFunc = this.registerSyncUpdateFunc.bind(this);
 
     // Task information
+    this.updateSyncStatus = async () => {};
     this.taskInfo = {
       name: 'poll_status',
       func: this.periodicPollDevices,
       handle: null,
       period: 10000
     };
+  }
+
+  registerSyncUpdateFunc (func) {
+    this.updateSyncStatus = func;
   }
 
   /**
@@ -138,6 +144,12 @@ class DeviceStatus {
             this.updateAnalyticsInterfaceStats(deviceID, deviceInfo, msg.message);
             this.updateUserDeviceStats(deviceInfo.org, deviceID, msg.message);
             this.generateDevStatsNotifications();
+            this.updateDeviceSyncStatus(
+              deviceInfo.org,
+              deviceInfo.deviceObj,
+              deviceID,
+              msg.hash
+            );
           } else {
             this.setDeviceStatsField(deviceID, 'state', 'stopped');
           }
@@ -160,6 +172,17 @@ class DeviceStatus {
           periodic: { task: this.taskInfo }
         });
       });
+  }
+
+  async updateDeviceSyncStatus (org, deviceId, machineId, hash) {
+    try {
+      await this.updateSyncStatus(org, deviceId, machineId, hash);
+    } catch (err) {
+      logger.error('Failed to update device sync status', {
+        params: { deviceID: deviceId, err: err.message },
+        periodic: { task: this.taskInfo }
+      });
+    }
   }
 
   /**

@@ -19,6 +19,7 @@ const Joi = require('@hapi/joi');
 const Devices = require('./Devices');
 const createError = require('http-errors');
 const { devices } = require('../models/devices');
+const tunnelsModel = require('../models/tunnels');
 const logger = require('../logging/logging')({ module: module.filename, type: 'websocket' });
 const notificationsMgr = require('../notifications/notifications')();
 const { verifyAgentVersion, isSemVer, isVppVersion } = require('../versioning');
@@ -360,7 +361,42 @@ class Connections {
 
     // Query device for additional required information. Only after getting the device's
     // response and updating the information, the device can be considered ready.
-    this.sendDeviceInfoMsg(device);
+    this.sendDeviceInfoMsg(device, info.deviceObj);
+  }
+
+  async getTunnelsWithEmptyKeys (deviceId) {
+    // Retrieve all device's tunnels that
+    // don't have tunnel parameters
+    const result = await tunnelsModel.find({
+      $and: [
+        { $or: [{ deviceA: deviceId }, { deviceB: deviceId }] },
+        { isActive: true },
+        {
+          $or: [
+            { tunnelKeys: { $exists: false } },
+            { tunnelKeys: null }
+          ]
+        }
+      ]
+    });
+    return result.map(tunnel => tunnel.num);
+  }
+
+  async updateTunnelKeys (tunnels) {
+    // Update all tunnels with the keys sent by the device
+    const tunnelsOps = [];
+    for (const tunnel of tunnels) {
+      const { id, key1, key2, key3, key4 } = tunnel;
+      tunnelsOps.push({
+        updateOne:
+          {
+            filter: { num: id },
+            update: { $set: { tunnelKeys: { key1, key2, key3, key4 } } },
+            upsert: false
+          }
+      });
+    }
+    return tunnelsModel.bulkWrite(tunnelsOps);
   }
 
   /**
@@ -368,10 +404,11 @@ class Connections {
    * should reply with information regarding the software
    * versions of the different components running on it.
    * @async
-   * @param  {string} device device machine id
+   * @param  {string} machineId device machine id
+   * @param  {string} deviceId device mongodb id
    * @return {void}
    */
-  async sendDeviceInfoMsg (device) {
+  async sendDeviceInfoMsg (machineId, deviceId) {
     const validateDevInfoMessage = msg => {
       const devInfoMsgObj = Joi.extend(joi => ({
         base: joi.object().keys({
@@ -393,7 +430,8 @@ class Connections {
               .keys({ version: Joi.string().required() })
               .required()
           }),
-          network: joi.object().optional()
+          network: joi.object().optional(),
+          tunnels: joi.array().optional()
         }),
         name: 'versions',
         language: {
@@ -434,14 +472,19 @@ class Connections {
     };
 
     try {
-      logger.info('Device info message sent', { params: { deviceId: device } });
+      const emptyTunnels = await this.getTunnelsWithEmptyKeys(deviceId);
+      const message = { entity: 'agent', message: 'get-device-info', params: {} };
+      if (emptyTunnels.length > 0) {
+        message.params.tunnels = emptyTunnels;
+      }
       const deviceInfo = await this.deviceSendMessage(
         null,
-        device,
-        { entity: 'agent', message: 'get-device-info' },
+        machineId,
+        message,
         validateDevInfoMessage
       );
 
+      logger.info('Device info message sent', { params: { deviceId: deviceId } });
       if (!deviceInfo.ok) {
         throw new Error(`device reply: ${deviceInfo.message}`);
       }
@@ -454,22 +497,27 @@ class Connections {
       }
 
       await devices.updateOne(
-        { machineId: device },
+        { _id: deviceId },
         { $set: { versions: versions } },
         { runValidators: true }
       );
 
+      const { tunnels } = deviceInfo.message;
+      if (tunnels) {
+        await this.updateTunnelKeys(tunnels);
+      }
+
       logger.info('Device info message response received', {
-        params: { deviceId: device, message: deviceInfo }
+        params: { deviceId: deviceId, message: deviceInfo }
       });
 
-      this.devices.updateDeviceInfo(device, 'ready', true);
-      this.callRegisteredCallbacks(this.connectCallbacks, device);
+      this.devices.updateDeviceInfo(machineId, 'ready', true);
+      this.callRegisteredCallbacks(this.connectCallbacks, machineId);
     } catch (err) {
       logger.error('Failed to receive info from device', {
-        params: { device: device, err: err.message }
+        params: { device: machineId, err: err.message }
       });
-      this.deviceDisconnect(device);
+      this.deviceDisconnect(machineId);
     }
   }
 

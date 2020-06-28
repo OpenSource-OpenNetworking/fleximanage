@@ -90,7 +90,7 @@ const complete = (jobId, res) => {
 };
 
 /**
- * Called when reset device job failed and
+ * Called when reset device job failed
  * @param  {number} jobId Kue job ID number
  * @param  {Object} res   device object ID and organization
  * @return {void}

@@ -28,6 +28,8 @@ const {
 } = require('../deviceLogic/tunnels');
 const { validateModifyDeviceMsg } = require('./validators');
 const tunnelsModel = require('../models/tunnels');
+const { devices } = require('../models/devices');
+const { isIPv4Address } = require('./validators');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 const has = require('lodash/has');
 const omit = require('lodash/omit');
@@ -217,34 +219,34 @@ const queueModifyDeviceJob = async (device, messageParams, user, org) => {
     modificationMessage.reconnect = true;
   }
 
-  const tasks = [];
+  const tasks = [[]];
   if (Object.keys(modificationMessage).length !== 0) {
-    tasks.push([
+    tasks[0].push(
       {
         entity: 'agent',
         message: 'modify-device',
         params: modificationMessage
       }
-    ]);
+    );
   }
 
   if (has(messageParams, 'modify_dhcp_config')) {
     const { dhcpRemove, dhcpAdd } = messageParams.modify_dhcp_config;
 
     if (dhcpRemove.length !== 0) {
-      tasks.push([{
+      tasks[0].push({
         entity: 'agent',
         message: 'remove-dhcp-config',
         params: dhcpRemove
-      }]);
+      });
     }
 
     if (dhcpAdd.length !== 0) {
-      tasks.push([{
+      tasks[0].push({
         entity: 'agent',
         message: 'add-dhcp-config',
         params: dhcpAdd
-      }]);
+      });
     }
   }
 
@@ -276,7 +278,7 @@ const reconstructTunnels = async (removedTunnels, org, user) => {
     });
 
     const { agent } = deviceB.versions;
-    const [tasksDeviceA, tasksDeviceB] = prepareTunnelAddJob(
+    const [tasksDeviceA, tasksDeviceB] = await prepareTunnelAddJob(
       tunnel.num,
       ifcA,
       ifcB,
@@ -685,7 +687,122 @@ const complete = async (jobId, res) => {
   }
 };
 
+/**
+ * Complete handler for sync job
+ * @return void
+ */
+const completeSync = async (jobId, jobsData) => {
+  // Currently not implemented. "Modify-device" complete
+  // callback reconstructs the tunnels by queuing "add-tunnel"
+  // jobs to all devices that might be affected by the change.
+  // Since at the moment, the agent does not support adding an
+  // already existing tunnel we cannot reconstruct the tunnels
+  // as part of the sync complete handler.
+};
+
+/**
+ * Creates the interfaces, static routes and
+ * DHCP sections in the full sync job.
+ * @return Array
+ */
+const sync = async (deviceId, org) => {
+  const { interfaces, staticroutes, dhcp } = await devices.findOne(
+    { _id: deviceId },
+    {
+      interfaces: 1,
+      staticroutes: 1,
+      dhcp: 1
+    }
+  )
+    .lean()
+    .populate('interfaces.pathlabels', '_id type');
+
+  // Prepare add-interface message
+  const deviceConfRequests = [];
+  for (const ifc of interfaces) {
+    // Skip unassigned/un-typed interfaces, as they
+    // cannot be part of the device configuration
+    if (!ifc.isAssigned || ifc.type.toLowerCase() === 'none') continue;
+
+    const {
+      pciaddr,
+      IPv4,
+      IPv6,
+      IPv4Mask,
+      IPv6Mask,
+      routing,
+      type,
+      pathlabels,
+      gateway
+    } = ifc;
+    // Non-DIA interfaces should not be
+    // sent to the device
+    const labels = pathlabels.filter(
+      (label) => label.type === 'DIA'
+    );
+    // Skip interfaces with invalid IPv4 addresses.
+    // Currently we allow empty IPv6 address
+    if (!isIPv4Address(IPv4, IPv4Mask)) continue;
+
+    const ifcInfo = {
+      pci: pciaddr,
+      addr: `${IPv4}/${IPv4Mask}`,
+      addr6: `${(IPv6 && IPv6Mask ? `${IPv6}/${IPv6Mask}` : '')}`,
+      routing,
+      type,
+      multilink: { labels: labels.map((label) => label._id.toString()) }
+    };
+    if (ifc.type === 'WAN') ifcInfo.gateway = gateway;
+
+    deviceConfRequests.push({
+      entity: 'agent',
+      message: 'add-interface',
+      params: ifcInfo
+    });
+  }
+
+  // Prepare add-route message
+  staticroutes.forEach(route => {
+    const { ifname, gateway, destination, metric } = route;
+    deviceConfRequests.push({
+      entity: 'agent',
+      message: 'add-route',
+      params: {
+        addr: destination,
+        via: gateway,
+        pci: ifname,
+        metric
+      }
+    });
+  });
+
+  // Prepare add-dhcp-config message
+  dhcp.forEach(entry => {
+    const { rangeStart, rangeEnd, dns, macAssign } = entry;
+
+    deviceConfRequests.push({
+      entity: 'agent',
+      message: 'add-dhcp-config',
+      params: {
+        interface: entry.interface,
+        range_start: rangeStart,
+        range_end: rangeEnd,
+        dns: dns,
+        mac_assign: macAssign
+      }
+    });
+  });
+
+  return {
+    requests: deviceConfRequests,
+    completeCbData: {},
+    callComplete: false
+  };
+};
+
 module.exports = {
   apply: apply,
-  complete: complete
+  complete: complete,
+  completeSync: completeSync,
+  sync: sync
 };

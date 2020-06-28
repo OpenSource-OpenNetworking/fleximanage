@@ -330,6 +330,29 @@ const complete = async (jobId, res) => {
 };
 
 /**
+ * Complete handler for sync job
+ * @return void
+ */
+const completeSync = async (jobId, jobsData) => {
+  try {
+    for (const data of jobsData) {
+      // Convert the data to the format
+      // expected by the complete handler
+      const { org, deviceId, op } = data;
+      await complete(jobId, {
+        policy: {
+          org, op, device: { _id: deviceId }
+        }
+      });
+    }
+  } catch (err) {
+    logger.error('Multi link policy sync complete callback failed', {
+      params: { jobsData, reason: err.message }
+    });
+  }
+};
+
+/**
  * Called when add/remove policy job fails and
  * Updates the status of the policy in the database.
  * @async
@@ -410,9 +433,82 @@ const remove = async (job) => {
   }
 };
 
+/**
+ * Creates the policies section in the full sync job.
+ * @return Object
+ */
+const sync = async (deviceId, org) => {
+  const { policies } = await devices.findOne(
+    { _id: deviceId },
+    { 'policies.multilink': 1 }
+  )
+    .lean();
+
+  const { policy, status } = policies.multilink;
+
+  // No need to take care of no policy cases,
+  // as the device removes the policy in the
+  // beginning of the full sync process
+  const requests = [];
+  const completeCbData = [];
+  let callComplete = false;
+  if (status.startsWith('install')) {
+    const mLPolicy = await MultiLinkPolicies.findOne(
+      {
+        _id: policy
+      },
+      {
+        rules: 1,
+        name: 1,
+        'rules.enabled': 1,
+        'rules.priority': 1,
+        'rules._id': 1,
+        'rules.classification': 1,
+        'rules.action': 1
+      }
+    );
+
+    // Nothing to do if the policy was not found.
+    // The policy will be removed by the device
+    // at the beginning of the sync process
+    if (mLPolicy) {
+      const params = {};
+      params.id = policy;
+      params.rules = [];
+      mLPolicy.rules.forEach(rule => {
+        const { _id, priority, action, classification, enabled } = rule;
+        if (enabled) {
+          params.rules.push({
+            id: _id,
+            priority: priority,
+            classification: classification,
+            action: action
+          });
+        }
+      });
+      // Push policy task and relevant data for sync complete handler
+      requests.push({ entity: 'agent', message: 'add-multilink-policy', params });
+      completeCbData.push({
+        org,
+        deviceId,
+        op: 'install'
+      });
+      callComplete = true;
+    }
+  }
+
+  return {
+    requests,
+    completeCbData,
+    callComplete
+  };
+};
+
 module.exports = {
   apply: apply,
   complete: complete,
+  completeSync: completeSync,
   error: error,
-  remove: remove
+  remove: remove,
+  sync: sync
 };

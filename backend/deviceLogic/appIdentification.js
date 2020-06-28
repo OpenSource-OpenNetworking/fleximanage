@@ -122,6 +122,22 @@ const complete = async (jobId, res) => {
 };
 
 /**
+ * Complete handler for sync job
+ * @return void
+ */
+const completeSync = async (jobId, jobsData) => {
+  try {
+    for (const data of jobsData) {
+      await complete(jobId, data);
+    }
+  } catch (err) {
+    logger.error('App identification sync complete callback failed', {
+      params: { jobsData, reason: err.message }
+    });
+  }
+};
+
+/**
  * Reset last request time for failed or removed jobs
  * This will allow resending a new identical job
  * @param {String} jobId - Failed job ID
@@ -304,10 +320,44 @@ const getDevicesAppIdentificationJobInfo = async (org, client, deviceIdList, isI
   return ret;
 };
 
+/**
+ * Creates the application identification section in the full sync job.
+ * @return Object
+ */
+const sync = async (deviceId, org) => {
+  const {
+    installIds,
+    message,
+    params,
+    deviceJobResp
+  } = await getDevicesAppIdentificationJobInfo(
+    org,
+    null,
+    [deviceId],
+    true
+  );
+  const request = [];
+  const completeCbData = [];
+  let callComplete = false;
+  if (installIds[deviceId.toString()]) {
+    request.push({ entity: 'agent', message: message, params });
+    completeCbData.push({ deviceId, requestTime: deviceJobResp.requestTime });
+    callComplete = true;
+  }
+
+  return {
+    requests: request,
+    completeCbData,
+    callComplete
+  };
+};
+
 module.exports = {
   apply: apply,
   complete: complete,
+  completeSync: completeSync,
   error: error,
   remove: remove,
+  sync: sync,
   getDevicesAppIdentificationJobInfo: getDevicesAppIdentificationJobInfo
 };

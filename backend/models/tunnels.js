@@ -19,6 +19,31 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const mongoConns = require('../mongoConns.js')();
 
+// Tunnels params schema
+const tunnelKeysSchema = new Schema({
+  _id: false,
+  key1: {
+    type: String,
+    default: '',
+    required: true
+  },
+  key2: {
+    type: String,
+    default: '',
+    required: true
+  },
+  key3: {
+    type: String,
+    default: '',
+    required: true
+  },
+  key4: {
+    type: String,
+    default: '',
+    required: true
+  }
+});
+
 /**
  * Tunnels Database Schema
  */
@@ -65,6 +90,12 @@ const tunnelSchema = new Schema({
     type: Boolean,
     default: false
   },
+  // Tunnel keys
+  tunnelKeys: {
+    type: tunnelKeysSchema,
+    default: null
+  },
+
   // The path label assigned to the tunnel
   pathlabel: {
     type: Schema.Types.ObjectId,

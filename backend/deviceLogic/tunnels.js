@@ -224,6 +224,22 @@ const completeTunnelAdd = (jobId, res) => {
 };
 
 /**
+ * Complete handler for sync job
+ * @return void
+ */
+const completeSync = async (jobId, jobsData) => {
+  try {
+    for (const data of jobsData) {
+      await completeTunnelAdd(jobId, data);
+    }
+  } catch (err) {
+    logger.error('Tunnels sync complete callback failed', {
+      params: { jobsData, reason: err.message }
+    });
+  }
+};
+
+/**
  * Error tunnel add, called for each of the
  * devices that are connected by the tunnel.
  * @param  {number} jobId Kue job ID
@@ -576,10 +592,25 @@ const queueTunnel = async (
  * @param  {string} devBagentVer device B version
  * @return {[{entity: string, message: string, params: Object}]} an array of tunnel-add jobs
  */
-const prepareTunnelAddJob = (tunnelnum, deviceAIntf, deviceBIntf, devBagentVer, pathLabel) => {
-  // Generate from the tunnel ID: IP A/B, MAC A/B, SA A/B, 4 IPsec Keys
+const prepareTunnelAddJob = async (
+  tunnelnum,
+  deviceAIntf,
+  deviceBIntf,
+  devBagentVer,
+  pathLabel
+) => {
+  // Extract tunnel keys from the database
+  const tunnel = await tunnelsModel.findOne({ num: tunnelnum });
+  if (!tunnel) throw new Error(`Tunnel ${tunnelnum} not found`);
+
   const tunnelParams = generateTunnelParams(tunnelnum);
-  const tunnelKeys = generateRandomKeys();
+
+  const tunnelKeys = {
+    key1: tunnel.tunnelKeys.key1,
+    key2: tunnel.tunnelKeys.key2,
+    key3: tunnel.tunnelKeys.key3,
+    key4: tunnel.tunnelKeys.key4
+  };
 
   const tasksDeviceA = [];
   const tasksDeviceB = [];
@@ -604,7 +635,8 @@ const prepareTunnelAddJob = (tunnelnum, deviceAIntf, deviceBIntf, devBagentVer, 
   };
 
   paramsDeviceA.src = deviceAIntf.IPv4;
-  paramsDeviceA.dst = ((deviceBIntf.PublicIP === '') ? deviceBIntf.IPv4 : deviceBIntf.PublicIP);
+  paramsDeviceA.dst =
+    deviceBIntf.PublicIP === '' ? deviceBIntf.IPv4 : deviceBIntf.PublicIP;
   paramsDeviceA['tunnel-id'] = tunnelnum;
   paramsIpsecDeviceA['local-sa'] = paramsSaAB;
   paramsIpsecDeviceA['remote-sa'] = paramsSaBA;
@@ -620,7 +652,8 @@ const prepareTunnelAddJob = (tunnelnum, deviceAIntf, deviceBIntf, devBagentVer, 
   };
 
   paramsDeviceB.src = deviceBIntf.IPv4;
-  paramsDeviceB.dst = ((deviceAIntf.PublicIP === '') ? deviceAIntf.IPv4 : deviceAIntf.PublicIP);
+  paramsDeviceB.dst =
+    deviceAIntf.PublicIP === '' ? deviceAIntf.IPv4 : deviceAIntf.PublicIP;
   paramsDeviceB['tunnel-id'] = tunnelnum;
 
   // const majorAgentVersion = getMajorVersion(devBagentVer);
@@ -648,10 +681,18 @@ const prepareTunnelAddJob = (tunnelnum, deviceAIntf, deviceBIntf, devBagentVer, 
   };
 
   // Saving configuration for device A
-  tasksDeviceA.push({ entity: 'agent', message: 'add-tunnel', params: paramsDeviceA });
+  tasksDeviceA.push({
+    entity: 'agent',
+    message: 'add-tunnel',
+    params: paramsDeviceA
+  });
 
   // Saving configuration for device B
-  tasksDeviceB.push({ entity: 'agent', message: 'add-tunnel', params: paramsDeviceB });
+  tasksDeviceB.push({
+    entity: 'agent',
+    message: 'add-tunnel',
+    params: paramsDeviceB
+  });
 
   return [tasksDeviceA, tasksDeviceB];
 };
@@ -689,6 +730,9 @@ const addTunnel = async (
     params: { devices: devicesInfo }
   });
 
+  // Generate IPsec Keys and store them in the database
+  const { key1, key2, key3, key4 } = generateRandomKeys();
+
   await tunnelsModel.findOneAndUpdate(
     // Query, use the org and tunnel number
     {
@@ -704,14 +748,20 @@ const addTunnel = async (
       interfaceA: deviceAIntf._id,
       deviceB: deviceB._id,
       interfaceB: deviceBIntf._id,
-      pathlabel: pathLabel
+      pathlabel: pathLabel,
+      tunnelKeys: {
+        key1,
+        key2,
+        key3,
+        key4
+      }
     },
     // Options
     { upsert: true }
   );
 
   const { agent } = deviceB.versions;
-  const [tasksDeviceA, tasksDeviceB] = prepareTunnelAddJob(
+  const [tasksDeviceA, tasksDeviceB] = await prepareTunnelAddJob(
     tunnelnum,
     deviceAIntf,
     deviceBIntf,
@@ -879,9 +929,15 @@ const oneTunnelDel = async (tunnelID, user, org) => {
     // Query
     { _id: mongoose.Types.ObjectId(tunnelID), org: org },
     // Update
-    { isActive: false, deviceAconf: false, deviceBconf: false },
+    {
+      isActive: false,
+      deviceAconf: false,
+      deviceBconf: false,
+      tunnelKeys: null
+    },
     // Options
-    { upsert: false, new: true });
+    { upsert: false, new: true }
+  );
 
   if (resp === null) throw new Error('Error deleting tunnel');
 
@@ -1000,6 +1056,91 @@ const delTunnel = async (
 };
 
 /**
+ * Creates the tunnels section in the full sync job.
+ * @return Array
+ */
+const sync = async (deviceId, org) => {
+  // Get all active tunnels of the devices
+  const tunnels = await tunnelsModel.find(
+    {
+      $and: [
+        { org },
+        { $or: [{ deviceA: deviceId }, { deviceB: deviceId }] },
+        { isActive: true }
+      ]
+    },
+    {
+      _id: 0,
+      num: 1,
+      deviceA: 1,
+      deviceB: 1,
+      interfaceA: 1,
+      interfaceB: 1,
+      pathlabel: 1
+    }
+  )
+    .populate('deviceA', 'interfaces')
+    .populate('deviceB', 'interfaces')
+    .lean();
+
+  // Create add-tunnel messages
+  const tunnelsRequests = [];
+  const completeCbData = [];
+  let callComplete = false;
+  for (const tunnel of tunnels) {
+    const {
+      num,
+      deviceA,
+      deviceB,
+      interfaceA,
+      interfaceB,
+      pathlabel
+    } = tunnel;
+
+    const ifcA = deviceA.interfaces.find(
+      (ifc) => ifc._id.toString() === interfaceA.toString()
+    );
+    const ifcB = deviceB.interfaces.find(
+      (ifc) => ifc._id.toString() === interfaceB.toString()
+    );
+    const [tasksA, tasksB] = await prepareTunnelAddJob(
+      num,
+      ifcA,
+      ifcB,
+      '',
+      pathlabel
+    );
+    // Add the tunnel only for the device that is being synced
+    const deviceTasks =
+      deviceId.toString() === deviceA._id.toString() ? tasksA : tasksB;
+    tunnelsRequests.push({
+      entity: 'agent',
+      message: 'add-tunnel',
+      params: deviceTasks[0].params
+    });
+
+    // Store the data required by the complete callback
+    const target =
+      deviceId.toString() === deviceA._id.toString()
+        ? 'deviceAconf'
+        : 'deviceBconf';
+    completeCbData.push({
+      org,
+      username: 'system',
+      tunnelId: num,
+      target
+    });
+    callComplete = true;
+  };
+
+  return {
+    requests: tunnelsRequests,
+    completeCbData,
+    callComplete
+  };
+};
+
+/**
  * Generates various tunnel parameters that will
  * be used for creating the tunnel.
  * @param  {number} tunnelNum tunnel id
@@ -1059,6 +1200,8 @@ module.exports = {
   error: {
     errorTunnelAdd: errorTunnelAdd
   },
+  sync: sync,
+  completeSync: completeSync,
   prepareTunnelRemoveJob: prepareTunnelRemoveJob,
   prepareTunnelAddJob: prepareTunnelAddJob,
   queueTunnel: queueTunnel,

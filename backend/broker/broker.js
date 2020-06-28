@@ -25,6 +25,8 @@ const devUtils = require('./utils');
 const async = require('async');
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
 const dispatcher = require('../deviceLogic/dispatcher');
+const { updateSyncStatus } = require('../deviceLogic/sync');
+const connections = require('../websocket/Connections')();
 const omit = require('lodash/omit');
 
 /**
@@ -90,7 +92,7 @@ const deviceProcessor = async (job) => {
     // 1. Loop on all job transaction messages
     // 2. Send to device over a web socket
     // 3. Update transaction job progress
-    async.waterfall(operations, (error, results) => {
+    async.waterfall(operations, async (error, results) => {
       if (error) {
         logger.error('Job error', { params: { job: logJob, err: error.message }, job: logJob });
         // Call error callback only if the job reached maximal retries
@@ -109,7 +111,21 @@ const deviceProcessor = async (job) => {
         }
         reject(error.message);
       } else {
-        logger.info('Job completed', { params: { job: logJob, results: results }, job: logJob });
+        logger.info('Job completed', {
+          params: { job: logJob, results: results.message },
+          job: logJob
+        });
+        // Device configuration hash is included in every job
+        // response. Use it to update the device's sync status
+        try {
+          const { deviceObj } = connections.getDeviceInfo(mId);
+          await updateSyncStatus(org, deviceObj, mId, results.hash);
+        } catch (err) {
+          logger.error('Device sync status update failed', {
+            params: { err: err.message, machineId: mId }
+          });
+          return reject(err.message);
+        }
         // Dispatch the response for Job completion
         // In the past this was called from job complete event but there were some missing events
         // So moved the dispatcher to here

@@ -233,7 +233,12 @@ const getAllOrganizationLanSubnets = async orgId => {
   return subnets;
 };
 
+const isIPv4Address = (ip, mask) => {
+  return net.isIPv4(ip) && !isEmpty(mask);
+};
+
 module.exports = {
+  isIPv4Address,
   validateDevice: validateDevice,
   validateModifyDeviceMsg: validateModifyDeviceMsg,
   getAllOrganizationLanSubnets: getAllOrganizationLanSubnets
