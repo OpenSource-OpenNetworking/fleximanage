@@ -55,8 +55,7 @@ class AppRulesUpdateManager {
       params: { appRulesUri: this.appRulesUri }
     });
     try {
-      const result = await fetchUtils.fetchWithRetry(this.appRulesUri, 3);
-      const body = await result.json();
+      const body = await fetchUtils.fetchWithRetry(this.appRulesUri, 3);
       logger.debug('Imported app identifications response received', {
         params: { time: body.meta.time, rulesCount: body.applications.length }
       });

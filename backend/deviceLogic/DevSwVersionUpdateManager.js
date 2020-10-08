@@ -124,8 +124,7 @@ class SwVersionUpdateManager {
     try {
       // eslint-disable-next-line no-template-curly-in-string
       const emailUrl = this.notificationEmailUri.replace('${version}', versions.device);
-      const res = await fetchUtils.fetchWithRetry(emailUrl, 3);
-      let { subject, body } = await res.json();
+      let { subject, body } = await fetchUtils.fetchWithRetry(emailUrl, 3);
       body = unescape(body);
 
       // Fetch all relevant memberships and send the notification email to their users.
@@ -244,8 +243,7 @@ class SwVersionUpdateManager {
      */
   async pollDevSwRepo () {
     try {
-      const res = await fetchUtils.fetchWithRetry(this.swRepoUri, 3);
-      const body = await res.json();
+      const body = await fetchUtils.fetchWithRetry(this.swRepoUri, 3);
       const versions = this.createVersionsObject(body);
       const deadline = new Date(body.distributionDueDate);
 

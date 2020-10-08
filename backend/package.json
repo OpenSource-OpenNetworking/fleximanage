@@ -1,6 +1,6 @@
 {
   "name": "flexiwansite",
-  "version": "1.1.30",
+  "version": "1.1.31",
   "private": true,
   "license": "GNU Affero General Public License",
   "scripts": {
@@ -27,6 +27,7 @@
     "express-openapi-validator": "^3.9.1",
     "express-rate-limit": "^5.0.0",
     "express-winston": "^3.3.0",
+    "fetch-with-proxy": "^2.0.1",
     "filenamify": "^4.1.0",
     "form-data": "^2.3.3",
     "google-libphonenumber": "^3.2.6",
@@ -40,7 +41,6 @@
     "mongodb": "^3.1.8",
     "mongoose": "^5.7.1",
     "morgan": "^1.9.1",
-    "node-fetch": "^2.6.0",
     "nodemailer": "^6.3.0",
     "passport": "^0.4.0",
     "passport-jwt": "^4.0.0",

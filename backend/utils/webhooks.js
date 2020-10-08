@@ -1,7 +1,7 @@
 /**
  * This module sends info to web hooks
  */
-const fetch = require('node-fetch');
+const fetch = require('fetch-with-proxy').default;
 
 class WebHooks {
   constructor () {

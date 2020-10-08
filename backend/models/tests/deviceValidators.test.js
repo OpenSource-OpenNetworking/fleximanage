@@ -144,8 +144,41 @@ describe('validateMachineID', () => {
         ${'N9B35T0Z'}                                   | ${false}
         ${'C9B3.F0D'}                                   | ${false}
         ${'C9B3_F0D'}                                   | ${false}
-  `('Should return $result if machine ID is $list', ({ id, result }) => {
+  `('Should return $result if machine ID is $id', ({ id, result }) => {
     expect(validators.validateMachineID(id)).toEqual(result);
+  });
+});
+
+describe('validateSerial', () => {
+  const tooLongSerial = 'ABCDEFGHI-123456789-JKLMNOPQR-012345678-STUVWXYZ.#' +
+  'ABCDEFGHI 123456789 JKLMNOPQR 012345678 STUVWXYZ%:' +
+  'ABCDEFGHI_123456789_JKLMNOPQR_012345678_STUVWXYZ()' +
+  'abcdefghi-123456789-jklmnopqr-012345678-stuvwxyz[]' +
+  'ABCDEFGHI-123456789-JKLMNOPQR-012345678-STUVWXYZ/#01';
+
+  const maxSerial = 'ABCDEFGHI-123456789-JKLMNOPQR-012345678-STUVWXYZ.#' +
+  'ABCDEFGHI 123456789 JKLMNOPQR 012345678 STUVWXYZ%:' +
+  'ABCDEFGHI_123456789_JKLMNOPQR_012345678_STUVWXYZ()' +
+  'ABCDEFGHI-123456789-JKLMNOPQR-012345678-STUVWXYZ[]' +
+  'ABCDEFGHI-123456789-JKLMNOPQR-012345678-STUVWXYZ/#';
+  it.each`
+        id                                              | result
+        ${'C9B35F0D-DF7C-43D5-8F8F-C2C576FEBAF7'}       | ${true}
+        ${''}                                           | ${true}
+        ${'S/N-12#45%RD'}                               | ${true}
+        ${'(0123:ERF789:abz)'}                          | ${true}
+        ${'[0123:ERF789:eft]'}                          | ${true}
+        ${maxSerial}                                    | ${true}
+        ${''}                                           | ${true}
+        ${null}                                         | ${false}
+        ${undefined}                                    | ${false}
+        ${tooLongSerial}                                | ${false}
+        ${'N9B@T0Z'}                                    | ${false}
+        ${'C9B3>F0D'}                                   | ${false}
+        ${'C9B3!F0D'}                                   | ${false}
+        ${'C9B3<F0D'}                                   | ${false}
+  `('Should return $result if serial is $id', ({ id, result }) => {
+    expect(validators.validateSerial(id)).toEqual(result);
   });
 });
 

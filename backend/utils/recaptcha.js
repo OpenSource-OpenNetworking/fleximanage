@@ -1,7 +1,7 @@
 /**
  * This module verifies google recaptcha
  */
-const fetch = require('node-fetch');
+const fetch = require('fetch-with-proxy').default;
 const verifyURL = 'https://www.google.com/recaptcha/api/siteverify';
 
 class ReCaptcha {

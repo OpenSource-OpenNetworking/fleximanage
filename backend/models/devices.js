@@ -506,7 +506,7 @@ const deviceSchema = new Schema({
   },
   serial: {
     type: String,
-    maxlength: [50, 'Serial number length must be at most 50'],
+    maxlength: [250, 'Serial number length must be at most 250'],
     validate: {
       validator: validators.validateSerial,
       message: 'Not a valid serial number'

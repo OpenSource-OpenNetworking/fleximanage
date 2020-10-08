@@ -152,7 +152,7 @@ connectRouter.route('/register')
                     hostname: req.body.machine_name,
                     ipList: req.body.ip_list,
                     machineId: req.body.machine_id,
-                    serial: req.body.serial,
+                    serial: req.body.serial || '0',
                     fromToken: resp[0].name,
                     interfaces: ifs,
                     deviceToken: deviceToken,
