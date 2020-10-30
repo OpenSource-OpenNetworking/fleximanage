@@ -1931,7 +1931,7 @@ paths:
       - bearerAuth: []
       summary: Add DHCP server
       tags:
-      - Devices
+      - DHCP
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
@@ -2014,7 +2014,7 @@ paths:
       - bearerAuth: []
       summary: Retrieve device DHCP information
       tags:
-      - Devices
+      - DHCP
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
@@ -2087,7 +2087,7 @@ paths:
       - bearerAuth: []
       summary: Get DHCP by ID
       tags:
-      - Devices
+      - DHCP
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
@@ -2173,7 +2173,7 @@ paths:
       - bearerAuth: []
       summary: Delete DHCP
       tags:
-      - Devices
+      - DHCP
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
@@ -2260,7 +2260,7 @@ paths:
       - bearerAuth: []
       summary: Modify DHCP
       tags:
-      - Devices
+      - DHCP
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
@@ -2342,7 +2342,7 @@ paths:
       - bearerAuth: []
       summary: ReApply DHCP
       tags:
-      - Devices
+      - DHCP
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
