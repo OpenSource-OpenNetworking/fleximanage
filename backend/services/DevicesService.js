@@ -1257,20 +1257,37 @@ class DevicesService {
 
       const deleteDhcpObj = deleteDhcp[0].toObject();
 
-      // If previous status was del-wait, no need to resend the job
-      if (deleteDhcpObj.status !== 'del-wait') {
-        const copy = Object.assign({}, deleteDhcpObj);
-        copy.org = orgList[0];
-        copy.method = 'dhcp';
-        copy._id = dhcpId;
-        copy.action = 'del';
-        const { ids } = await dispatcher.apply(device, copy.method, user, copy);
-        response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+      const majorAgentVersion = getMajorVersion(device.versions.agent);
+
+      if (majorAgentVersion < 2) {
+        // If previous status was del-wait, no need to resend the job
+        if (deleteDhcpObj.status !== 'del-wait') {
+          const copy = Object.assign({}, deleteDhcpObj);
+          copy.org = orgList[0];
+          copy.method = 'dhcp';
+          copy._id = dhcpId;
+          copy.action = 'del';
+          const { ids } = await dispatcher.apply(device, copy.method, user, copy);
+          response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+        }
+
+        // If force delete specified, delete the entry regardless of the job status
+        if (isForce) {
+          await devices.findOneAndUpdate(
+            { _id: device._id },
+            {
+              $pull: {
+                dhcp: {
+                  _id: mongoose.Types.ObjectId(dhcpId)
+                }
+              }
+            }
+          );
+        }
       }
 
-      // If force delete specified, delete the entry regardless of the job status
-      if (isForce) {
-        await devices.findOneAndUpdate(
+      if (majorAgentVersion >= 2) {
+        const updDevice = await devices.findOneAndUpdate(
           { _id: device._id },
           {
             $pull: {
@@ -1278,8 +1295,17 @@ class DevicesService {
                 _id: mongoose.Types.ObjectId(dhcpId)
               }
             }
-          }
+          },
+          { new: true }
         );
+
+        if (device) {
+          const { ids } = await dispatcher.apply([device], 'modify', user, {
+            org: orgList[0],
+            newDevice: updDevice
+          });
+          response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+        }
       }
 
       return Service.successResponse({}, 202);
