@@ -34,6 +34,7 @@ const dispatcher = require('../deviceLogic/dispatcher');
 const { validateDevice } = require('../deviceLogic/validators');
 const { getAllOrganizationLanSubnets } = require('../utils/deviceUtils');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
+const { getMajorVersion } = require('../versioning');
 
 class DevicesService {
   /**
@@ -1593,8 +1594,8 @@ class DevicesService {
       const dhcp = new dhcpModel(dhcpData);
       dhcp.$session(session);
 
-      await devices.findOneAndUpdate(
-        { _id: deviceObject._id },
+      const updDevice = await devices.findOneAndUpdate(
+        { _id: deviceObject._id, org: { $in: orgList } },
         {
           $push: {
             dhcp: dhcp
@@ -1603,18 +1604,36 @@ class DevicesService {
         { new: true }
       ).session(session);
 
-      const copy = Object.assign({}, dhcpRequest);
-
-      copy.method = 'dhcp';
-      copy._id = dhcp.id;
-      copy.action = 'add';
-      copy.org = orgList[0];
-      const { ids } = await dispatcher.apply(deviceObject, copy.method, user, copy);
-      const result = { ...dhcpData, _id: dhcp._id.toString() };
-      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
-
       await session.commitTransaction();
       session = null;
+
+      let jobsIds;
+
+      const majorAgentVersion = getMajorVersion(deviceObject.versions.agent);
+      if (majorAgentVersion < 2) {
+        const copy = Object.assign({}, dhcpRequest);
+
+        copy.method = 'dhcp';
+        copy._id = dhcp.id;
+        copy.action = 'add';
+        copy.org = orgList[0];
+        const { ids } = await dispatcher.apply(deviceObject, copy.method, user, copy);
+        jobsIds = ids;
+      }
+
+      if (majorAgentVersion >= 2) {
+        let modifyDevResult = [];
+        if (deviceObject) {
+          modifyDevResult = await dispatcher.apply([deviceObject], 'modify', user, {
+            org: orgList[0],
+            newDevice: updDevice
+          });
+        }
+        jobsIds = [modifyDevResult.ids[0]];
+      }
+
+      const result = { ...dhcpData, _id: dhcp._id.toString() };
+      response.setHeader('Location', DevicesService.jobsListUrl(jobsIds, orgList[0]));
 
       return Service.successResponse(result, 202);
     } catch (e) {
