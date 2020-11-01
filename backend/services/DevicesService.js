@@ -1390,44 +1390,72 @@ class DevicesService {
         return (s.id === dhcpId);
       });
       if (dhcpFiltered.length !== 1) throw new Error('DHCP ID not found');
-      const origDhcp = dhcpFiltered[0].toObject();
-      const origCmpDhcp = {
-        _id: origDhcp._id.toString(),
-        dns: origDhcp.dns,
-        interface: origDhcp.interface,
-        macAssign: origDhcp.macAssign.map(m => ({ host: m.host, mac: m.mac, ipv4: m.ipv4 })),
-        rangeStart: origDhcp.rangeStart,
-        rangeEnd: origDhcp.rangeEnd
-      };
 
-      const dhcpData = {
-        _id: dhcpId,
-        interface: dhcpRequest.interface,
-        rangeStart: dhcpRequest.rangeStart,
-        rangeEnd: dhcpRequest.rangeEnd,
-        dns: dhcpRequest.dns,
-        macAssign: dhcpRequest.macAssign,
-        status: 'add-wait'
-      };
+      const majorAgentVersion = getMajorVersion(deviceObject.versions.agent);
 
-      // Check if any difference exists between request to current dhcp,
-      // in that case no need to resend data
-      if (!isEqual(dhcpRequest, origCmpDhcp)) {
-        const copy = Object.assign({}, dhcpRequest);
-        copy.org = orgList[0];
-        copy.method = 'dhcp';
-        copy.action = 'modify';
-        copy.origDhcp = origCmpDhcp;
-        const { ids } = await dispatcher.apply(deviceObject, copy.method, user, copy);
-        response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+      if (majorAgentVersion < 2) {
+        const origDhcp = dhcpFiltered[0].toObject();
+        const origCmpDhcp = {
+          _id: origDhcp._id.toString(),
+          dns: origDhcp.dns,
+          interface: origDhcp.interface,
+          macAssign: origDhcp.macAssign.map(m => ({ host: m.host, mac: m.mac, ipv4: m.ipv4 })),
+          rangeStart: origDhcp.rangeStart,
+          rangeEnd: origDhcp.rangeEnd
+        };
 
-        await devices.findOneAndUpdate(
-          { _id: deviceObject._id },
-          { $set: { 'dhcp.$[elem]': dhcpData } },
-          { arrayFilters: [{ 'elem._id': mongoose.Types.ObjectId(dhcpId) }] });
+        // Check if any difference exists between request to current dhcp,
+        // in that case no need to resend data
+        if (!isEqual(dhcpRequest, origCmpDhcp)) {
+          const copy = Object.assign({}, dhcpRequest);
+          copy.org = orgList[0];
+          copy.method = 'dhcp';
+          copy.action = 'modify';
+          copy.origDhcp = origCmpDhcp;
+          const { ids } = await dispatcher.apply(deviceObject, copy.method, user, copy);
+          response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+
+          const dhcpData = {
+            _id: dhcpId,
+            interface: dhcpRequest.interface,
+            rangeStart: dhcpRequest.rangeStart,
+            rangeEnd: dhcpRequest.rangeEnd,
+            dns: dhcpRequest.dns,
+            macAssign: dhcpRequest.macAssign,
+            status: 'add-wait'
+          };
+
+          await devices.findOneAndUpdate(
+            { _id: deviceObject._id },
+            { $set: { 'dhcp.$[elem]': dhcpData } },
+            { arrayFilters: [{ 'elem._id': mongoose.Types.ObjectId(dhcpId) }] });
+          return Service.successResponse(dhcpData, 202);
+        }
       }
 
-      return Service.successResponse(dhcpData, 202);
+      if (majorAgentVersion >= 2) {
+        const dhcpData = {
+          _id: dhcpId,
+          interface: dhcpRequest.interface,
+          rangeStart: dhcpRequest.rangeStart,
+          rangeEnd: dhcpRequest.rangeEnd,
+          dns: dhcpRequest.dns,
+          macAssign: dhcpRequest.macAssign
+        };
+
+        const updDevice = await devices.findOneAndUpdate(
+          { _id: deviceObject._id },
+          { $set: { 'dhcp.$[elem]': dhcpData } },
+          { arrayFilters: [{ 'elem._id': mongoose.Types.ObjectId(dhcpId) }], new: true }
+        );
+
+        const { ids } = await dispatcher.apply([deviceObject], 'modify', user, {
+          org: orgList[0],
+          newDevice: updDevice
+        });
+        response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+        return Service.successResponse(dhcpData, 202);
+      }
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
@@ -1607,14 +1635,19 @@ class DevicesService {
       });
       if (dhcpObject.length > 0) throw new Error('DHCP already configured for that interface');
 
+      const majorAgentVersion = getMajorVersion(deviceObject.versions.agent);
+
       const dhcpData = {
         interface: dhcpRequest.interface,
         rangeStart: dhcpRequest.rangeStart,
         rangeEnd: dhcpRequest.rangeEnd,
         dns: dhcpRequest.dns,
-        macAssign: dhcpRequest.macAssign,
-        status: 'add-wait'
+        macAssign: dhcpRequest.macAssign
       };
+
+      if (majorAgentVersion < 2) {
+        dhcpData.status = 'add-wait';
+      }
 
       // eslint-disable-next-line new-cap
       const dhcp = new dhcpModel(dhcpData);
@@ -1635,7 +1668,6 @@ class DevicesService {
 
       let jobsIds;
 
-      const majorAgentVersion = getMajorVersion(deviceObject.versions.agent);
       if (majorAgentVersion < 2) {
         const copy = Object.assign({}, dhcpRequest);
 
