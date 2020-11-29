@@ -31,7 +31,7 @@ const randomKey = require('../utils/random-key');
 const mailer = require('../utils/mailer')(
   configs.get('mailerHost'),
   configs.get('mailerPort'),
-  configs.get('mailerBypassCert')
+  configs.get('mailerBypassCert', 'boolean')
 );
 const webHooks = require('../utils/webhooks')();
 const createError = require('http-errors');

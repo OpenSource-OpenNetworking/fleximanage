@@ -26,7 +26,7 @@ const {
   queueTunnel,
   oneTunnelDel
 } = require('../deviceLogic/tunnels');
-const { validateModifyDeviceMsg } = require('./validators');
+const { validateModifyDeviceMsg, validateDhcpConfig } = require('./validators');
 const { getDefaultGateway } = require('../utils/deviceUtils');
 const tunnelsModel = require('../models/tunnels');
 const { devices } = require('../models/devices');
@@ -56,8 +56,15 @@ const prepareIfcParams = (interfaces) => {
     });
     newIfc.multilink = { labels };
 
-    // Don't send interface default GW for LAN interfaces
-    if (ifc.type !== 'WAN' && ifc.isAssigned) delete newIfc.gateway;
+    // Don't send default GW and public info for LAN interfaces
+    if (ifc.type !== 'WAN' && ifc.isAssigned) {
+      delete newIfc.gateway;
+      delete newIfc.metric;
+      delete newIfc.PublicIP;
+      delete newIfc.PublicPort;
+      delete newIfc.useStun;
+      delete newIfc.internetMonitoring;
+    }
     return newIfc;
   });
 };
@@ -69,18 +76,8 @@ const prepareIfcParams = (interfaces) => {
  * @returns array of interfaces
  */
 const transformInterfaces = (interfaces) => {
-  return interfaces.map(ifc =>
-    ifc.type === 'LAN' ? {
-      _id: ifc._id,
-      pci: ifc.pciaddr,
-      dhcp: 'no',
-      addr: ifc.IPv4 && ifc.IPv4Mask ? `${ifc.IPv4}/${ifc.IPv4Mask}` : '',
-      addr6: ifc.IPv6 && ifc.IPv6Mask ? `${ifc.IPv6}/${ifc.IPv6Mask}` : '',
-      routing: ifc.routing,
-      type: ifc.type,
-      isAssigned: ifc.isAssigned,
-      pathlabels: ifc.pathlabels
-    } : {
+  return interfaces.map(ifc => {
+    return {
       _id: ifc._id,
       pci: ifc.pciaddr,
       dhcp: ifc.dhcp ? ifc.dhcp : 'no',
@@ -89,14 +86,15 @@ const transformInterfaces = (interfaces) => {
       PublicIP: ifc.PublicIP,
       PublicPort: ifc.PublicPort,
       useStun: ifc.useStun,
+      'monitor-internet': ifc.internetMonitoring,
       gateway: ifc.gateway,
       metric: ifc.metric,
       routing: ifc.routing,
       type: ifc.type,
       isAssigned: ifc.isAssigned,
       pathlabels: ifc.pathlabels
-    }
-  );
+    };
+  });
 };
 
 /**
@@ -749,27 +747,6 @@ const prepareModifyDHCP = (origDevice, newDevice) => {
   return { dhcpRemove, dhcpAdd };
 };
 
-/**
- * Validate if any dhcp is assigned on a modified interface
- * @param {Object} device - original device
- * @param {List} modifiedInterfaces - list of modified interfaces
- */
-const validateDhcpConfig = (device, modifiedInterfaces) => {
-  const assignedDhcps = device.dhcp.map(d => d.interface);
-  const modifiedDhcp = modifiedInterfaces.filter(i => assignedDhcps.includes(i.pci));
-  if (modifiedDhcp.length > 0) {
-    // get first interface from device
-    const firstIf = device.interfaces.filter(i => i.pciaddr === modifiedDhcp[0].pci);
-    const result = {
-      valid: false,
-      err: `DHCP defined on interface ${
-        firstIf[0].name
-      }, please remove it before modifying this interface`
-    };
-    return result;
-  }
-  return { valid: true, err: '' };
-};
 /**
  * Creates and queues the modify-device job. It compares
  * the current view of the device in the database with

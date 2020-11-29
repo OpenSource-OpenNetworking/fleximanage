@@ -43,7 +43,7 @@ const setPermission = (get, post, put, del) => {
         ((del << permissionShifts.del) & permissionMasks.del);
 };
 
-const managerDelPermission = () => configs.get('allowManagerToDel') ? 1 : 0;
+const managerDelPermission = () => configs.get('allowManagerToDel', 'boolean') ? 1 : 0;
 
 // Permissions
 // Each number is a bitmask of permissions for Del (MSB), Put, Post, Get (LSB)

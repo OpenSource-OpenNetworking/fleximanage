@@ -467,32 +467,30 @@ class Connections {
               }
             });
             return i;
-          }
+          };
+
+          const updInterface = {
+            ...i.toJSON(),
+            PublicIP: updatedConfig.public_ip && i.useStun
+              ? updatedConfig.public_ip : i.PublicIP,
+            PublicPort: updatedConfig.public_port && i.useStun
+              ? updatedConfig.public_port : i.PublicPort,
+            NatType: updatedConfig.nat_type || i.NatType,
+            internetAccess: updatedConfig.internetAccess === undefined ? ''
+              : updatedConfig.internetAccess ? 'yes' : 'no'
+          };
+
           if (i.dhcp === 'yes' || !i.isAssigned) {
-            return {
-              ...i.toJSON(),
-              IPv4: updatedConfig.IPv4,
-              IPv4Mask: updatedConfig.IPv4Mask,
-              IPv6: updatedConfig.IPv6,
-              IPv6Mask: updatedConfig.IPv6Mask,
-              gateway: updatedConfig.gateway,
-              PublicIP: updatedConfig.public_ip && i.useStun
-                ? updatedConfig.public_ip : i.PublicIP,
-              PublicPort: updatedConfig.public_port && i.useStun
-                ? updatedConfig.public_port : i.PublicPort,
-              NatType: updatedConfig.nat_type || i.NatType
-            };
-          } else {
-            return {
-              ...i.toJSON(),
-              PublicIP: updatedConfig.public_ip && i.useStun
-                ? updatedConfig.public_ip : i.PublicIP,
-              PublicPort: updatedConfig.public_port && i.useStun
-                ? updatedConfig.public_port : i.PublicPort,
-              NatType: updatedConfig.nat_type || i.NatType
-            };
-          }
+            updInterface.IPv4 = updatedConfig.IPv4;
+            updInterface.IPv4Mask = updatedConfig.IPv4Mask;
+            updInterface.IPv6 = updatedConfig.IPv6;
+            updInterface.IPv6Mask = updatedConfig.IPv6Mask;
+            updInterface.gateway = updatedConfig.gateway;
+          };
+
+          return updInterface;
         });
+
         // Update interfaces in DB
         const updDevice = await devices.findOneAndUpdate(
           { machineId },

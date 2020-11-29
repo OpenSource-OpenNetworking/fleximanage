@@ -27,7 +27,7 @@ const configs = require('../configs')();
 const mailer = require('../utils/mailer')(
   configs.get('mailerHost'),
   configs.get('mailerPort'),
-  configs.get('mailerBypassCert')
+  configs.get('mailerBypassCert', 'boolean')
 );
 
 const dummyVersionObject = {

@@ -74,6 +74,18 @@ const calcChangeHash = (currHash, message) => {
 };
 
 /**
+ * Extracts message contents from device message
+ *
+ * @param {*} message
+ * @returns message contents
+ */
+const toMessageContents = (message) => {
+  return Array.isArray(message.tasks[0])
+    ? message.tasks[0][0].message
+    : message.tasks[0].message;
+};
+
+/**
  * Modifies sync state based on the queued job.
  * Gets called whenever job gets saved in the device queue.
  *
@@ -103,9 +115,7 @@ const setSyncStateOnJobQueue = async (machineId, message) => {
   }
 
   // Reset hash value for full-sync messages
-  const messageContents = Array.isArray(message.tasks[0])
-    ? message.tasks[0][0].message
-    : message.tasks[0].message;
+  const messageContents = toMessageContents(message);
   const newHash =
     messageContents !== 'sync-device' ? calcChangeHash(hash, message) : '';
 
@@ -114,9 +124,23 @@ const setSyncStateOnJobQueue = async (machineId, message) => {
   logger.info('New sync state calculated, updating database', {
     params: { state, newState, hash, newHash }
   });
+
+  // Update hash and reset autoSync state only when the added
+  // job is not sync-device. The hash for sync-device job will be
+  // reset after the job is completed. If sync-device job has
+  // failed, the hash will not be changed.
+  const updateFields = messageContents !== 'sync-device'
+    ? {
+      'sync.state': newState,
+      'sync.hash': newHash,
+      'sync.autoSync': 'on',
+      'sync.trials': 0
+    }
+    : { 'sync.state': newState };
+
   return devices.updateOne(
     { machineId: machineId },
-    { 'sync.state': newState, 'sync.hash': newHash },
+    updateFields,
     { upsert: false }
   );
 };
@@ -165,14 +189,13 @@ const incAutoSyncTrials = (deviceId) => {
   );
 };
 
-const queueFullSyncJob = async (device, hash, org) => {
+const queueFullSyncJob = async (device, org) => {
   // Queue full sync job
   // Add current hash to message so the device can
   // use it to check if it is already synced
   const { machineId, hostname, deviceId } = device;
 
   const params = {
-    'router-cfg-hash': hash,
     requests: []
   };
 
@@ -219,7 +242,8 @@ const queueFullSyncJob = async (device, hash, org) => {
     {
       method: 'sync',
       data: {
-        handlers: completeHandlers
+        handlers: completeHandlers,
+        machineId
       }
     },
     // Metadata
@@ -236,6 +260,14 @@ const queueFullSyncJob = async (device, hash, org) => {
 
 /**
  * Called when full sync device job completed
+ * Resets sync hash value in the database. When non-sync-device job
+ * is applied (e.g. modify-device), the new hash value gets updated
+ * in the database immediately, regardless whether or not the job
+ * succeeds (calculated hash should reflect the desired state). However,
+ * when sync-device job gets applied, the update of the hash gets deferred
+ * and is updated after the sync-device job is completed successfully,
+ * otherwise the hash value stays unchanged.
+ * Calls the different module's sync complete callback
  * @param  {number} jobId Kue job ID number
  * @param  {Object} res   device object ID and organization
  * @return {void}
@@ -245,8 +277,19 @@ const complete = async (jobId, res) => {
     params: { result: res, jobId: jobId }
   });
 
+  const { handlers, machineId } = res;
+
+  // Reset hash value for full-sync messages
+  logger.info('Updating hash after full-sync job succeeded', {
+    params: { }
+  });
+  await devices.updateOne(
+    { machineId: machineId },
+    { 'sync.hash': '' },
+    { upsert: false }
+  );
+
   // Call the different module's sync complete callback
-  const { handlers } = res;
   for (const [module, data] of Object.entries(handlers)) {
     const { completeHandler } = syncHandlers[module];
     if (completeHandler) {
@@ -378,10 +421,10 @@ const updateSyncStatus = async (org, deviceId, machineId, deviceHash) => {
       return;
     }
 
-    logger.info('Queuing full-sync job', {
+    logger.info('Queueing full-sync job', {
       params: { deviceId, state, newState, hash, trials }
     });
-    await queueFullSyncJob({ deviceId, machineId, hostname }, hash, org);
+    await queueFullSyncJob({ deviceId, machineId, hostname }, org);
   } catch (err) {
     logger.error('Device sync state update failed', {
       params: { deviceId, error: err.message }
@@ -396,20 +439,6 @@ const apply = async (device, user, data) => {
     return;
   }
 
-  // Get device current configuration hash
-  const { sync } = await devices.findOne(
-    { org, _id },
-    { sync: 1 }
-  )
-    .lean();
-
-  const { hash } = sync;
-  const job = await queueFullSyncJob(
-    { deviceId: _id, machineId, hostname },
-    hash,
-    org
-  );
-
   // Reset auto sync in database
   await devices.findOneAndUpdate(
     { org, _id },
@@ -419,8 +448,17 @@ const apply = async (device, user, data) => {
       'sync.trials': 0
     },
     { sync: 1 }
-  )
-    .lean();
+  );
+
+  const job = await queueFullSyncJob(
+    { deviceId: _id, machineId, hostname },
+    org
+  );
+
+  if (!job) {
+    logger.error('Sync device job failed', { params: { machineId } });
+    throw (new Error('Sync device job failed'));
+  }
 
   return {
     ids: [job.id],

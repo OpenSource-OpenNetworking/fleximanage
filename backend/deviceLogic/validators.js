@@ -18,7 +18,7 @@
 const net = require('net');
 const cidr = require('cidr-tools');
 const { devices } = require('../models/devices');
-
+const maxMetric = 2 * 10 ** 9;
 /**
  * Checks whether a value is empty
  * @param  {string}  val the value to be checked
@@ -38,6 +38,30 @@ const validateIPv4Mask = mask => {
         !isNaN(Number(mask)) &&
         (mask >= 0 && mask <= 32)
   );
+};
+
+/**
+ * Checks whether dhcp server configuration is valid
+ * Validate if any dhcp is assigned on a modified interface
+ * @param {Object} device - the device to validate
+ * @param {List} modifiedInterfaces - list of modified interfaces
+ * @return {{valid: boolean, err: string}}  test result + error, if device is invalid
+ */
+const validateDhcpConfig = (device, modifiedInterfaces) => {
+  const assignedDhcps = device.dhcp.map(d => d.interface);
+  const modifiedDhcp = modifiedInterfaces.filter(i => assignedDhcps.includes(i.pci));
+  if (modifiedDhcp.length > 0) {
+    // get first interface from device
+    const firstIf = device.interfaces.filter(i => i.pciaddr === modifiedDhcp[0].pci);
+    const result = {
+      valid: false,
+      err: `DHCP defined on interface ${
+        firstIf[0].name
+      }, please remove it before modifying this interface`
+    };
+    return result;
+  }
+  return { valid: true, err: '' };
 };
 
 /**
@@ -68,6 +92,13 @@ const validateDevice = (device, isRunning = false, organizationLanSubnets = []) 
     return {
       valid: false,
       err: 'There should be at least one LAN and one WAN interfaces'
+    };
+  }
+
+  if (assignedIfs.some(ifc => +ifc.metric >= maxMetric)) {
+    return {
+      valid: false,
+      err: `Metric should be lower than ${maxMetric}`
     };
   }
 
@@ -147,8 +178,13 @@ const validateDevice = (device, isRunning = false, organizationLanSubnets = []) 
     }
   }
 
-  // Checks if all WAN assigned interfaces metrics are different
-  const metricsArray = wanIfcs.map(i => Number(i.metric));
+  // Checks if all WAN interfaces metrics are different
+  const uniqueMetricsOfUnassigned = interfaces
+    .filter(ifc => !ifc.isAssigned && ifc.type === 'WAN')
+    .map(ifc => Number(ifc.metric))
+    .filter((value, index, self) => self.indexOf(value) === index);
+
+  const metricsArray = wanIfcs.map(i => Number(i.metric)).concat(uniqueMetricsOfUnassigned);
   const hasDuplicates = metricsArray.length !== new Set(metricsArray).size;
   if (hasDuplicates) {
     return {
@@ -265,7 +301,8 @@ const isIPv4Address = (ip, mask) => {
 
 module.exports = {
   isIPv4Address,
-  validateDevice: validateDevice,
+  validateDevice,
+  validateDhcpConfig,
   validateModifyDeviceMsg: validateModifyDeviceMsg,
   getAllOrganizationLanSubnets: getAllOrganizationLanSubnets
 };

@@ -40,6 +40,8 @@ const configEnv = {
     userIpReqRateLimit: 300,
     // Unread notification email period (in msec), a mail is sent once a period
     unreadNotificationPeriod: 86400000,
+    // Max.number of unread notifications included into periodic email
+    unreadNotificationsMaxSent: 50,
     // The duration of the user JWT token in seconds
     userTokenExpiration: 300,
     // The duration of the user refresh token in seconds
@@ -150,8 +152,9 @@ const configEnv = {
     analyticsStatsKeepTime: 7200,
     // Time interval to keep data in the analytics statistics database
     // This value is for storing in the database, it's not impacting the interval presented in the UI
-    analyticsUpdateTime: 300
-
+    analyticsUpdateTime: 300,
+    // Do not allow organization LAN subnet overlaps for running devices flag. Default = true
+    forbidLanSubnetOverlaps: true
   },
   // Override for development environment, default environment if not specified
   development: {

@@ -67,7 +67,7 @@ const deviceAggregateStatsSchema = new Schema({
 // Remove documents created older than configured in analyticsStatsKeepTime
 deviceStatsSchema.index(
   { createdAt: 1 },
-  { expireAfterSeconds: configs.get('analyticsStatsKeepTime') }
+  { expireAfterSeconds: configs.get('analyticsStatsKeepTime', 'number') }
 );
 
 const deviceStats = mongoConns.getAnalyticsDB().model('deviceStats', deviceStatsSchema);

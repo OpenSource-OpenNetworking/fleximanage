@@ -37,7 +37,8 @@ class NotifyUsers {
       name: 'notify_users',
       func: this.periodicNotifyUsers,
       handle: null,
-      period: configs.get('unreadNotificationPeriod') // Period for sending unread notifications
+      // Period for sending unread notifications
+      period: configs.get('unreadNotificationPeriod', 'number')
     };
   }
 

@@ -17,6 +17,7 @@
 
 const { ObjectId } = require('mongoose').Types;
 const { validateDevice, validateModifyDeviceMsg } = require('../validators');
+const maxMetric = 2 * 10 ** 9;
 
 describe('validateDevice', () => {
   let device;
@@ -246,6 +247,13 @@ describe('validateDevice', () => {
   it('Should be an invalid device if LAN interface has path labels', () => {
     device.interfaces[0].pathlabels = [ObjectId('5e65290fbe66a2335718e081')];
     failureObject.err = 'Path Labels are not allowed on LAN interfaces';
+    const result = validateDevice(device);
+    expect(result).toMatchObject(failureObject);
+  });
+
+  it('Should be an invalid device if metric is higher than maxMetric', () => {
+    device.interfaces[1].metric = maxMetric + 1;
+    failureObject.err = `Metric should be lower than ${maxMetric}`;
     const result = validateDevice(device);
     expect(result).toMatchObject(failureObject);
   });

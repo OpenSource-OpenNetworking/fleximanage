@@ -48,7 +48,7 @@ exports.getToken = async function ({ user }, override = {}, shouldExpire = true)
       ...override
     },
     configs.get('userTokenSecretKey'),
-    shouldExpire ? { expiresIn: configs.get('userTokenExpiration') } : null
+    shouldExpire ? { expiresIn: configs.get('userTokenExpiration', 'number') } : null
   );
 };
 
@@ -61,7 +61,7 @@ exports.getAccessKey = async ({ user }, override = {}, shouldExpire = true) => {
       ...override
     },
     configs.get('userTokenSecretKey'),
-    shouldExpire ? { expiresIn: configs.get('userTokenExpiration') } : null
+    shouldExpire ? { expiresIn: configs.get('userTokenExpiration', 'number') } : null
   );
 };
 
@@ -70,7 +70,9 @@ exports.getRefreshToken = async ({ user }, override = {}) => {
     _id: user._id,
     username: user.username,
     ...override
-  }, configs.get('userTokenSecretKey'), { expiresIn: configs.get('userRefreshTokenExpiration') });
+  }, configs.get('userTokenSecretKey'), {
+    expiresIn: configs.get('userRefreshTokenExpiration', 'number')
+  });
 };
 
 exports.verifyToken = (token) => {

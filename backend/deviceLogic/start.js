@@ -43,7 +43,10 @@ const apply = async (device, user, data) => {
     params: { machineId: device[0].machineId, user: user, data: data }
   });
 
-  const organizationLanSubnets = await getAllOrganizationLanSubnets(device[0].org);
+  let organizationLanSubnets = [];
+  if (configs.get('forbidLanSubnetOverlaps', 'boolean')) {
+    organizationLanSubnets = await getAllOrganizationLanSubnets(device[0].org);
+  }
 
   const deviceValidator = validateDevice(device[0], true, organizationLanSubnets);
 

@@ -39,6 +39,7 @@ const buildInterfaces = (deviceInterfaces) => {
       PublicIP,
       PublicPort,
       useStun,
+      internetMonitoring,
       routing,
       type,
       pathlabels,
@@ -60,16 +61,18 @@ const buildInterfaces = (deviceInterfaces) => {
       dhcp: dhcp || 'no',
       addr: `${(IPv4 && IPv4Mask ? `${IPv4}/${IPv4Mask}` : '')}`,
       addr6: `${(IPv6 && IPv6Mask ? `${IPv6}/${IPv6Mask}` : '')}`,
-      PublicIP,
-      PublicPort,
-      useStun,
       routing,
       type,
-      metric,
       multilink: { labels: labels.map((label) => label._id.toString()) }
     };
-    if (ifc.type === 'WAN') ifcInfo.gateway = gateway;
-
+    if (ifc.type === 'WAN') {
+      ifcInfo.gateway = gateway;
+      ifcInfo.metric = metric;
+      ifcInfo.PublicIP = PublicIP;
+      ifcInfo.PublicPort = PublicPort;
+      ifcInfo.useStun = useStun;
+      ifcInfo['internet-monitoring'] = internetMonitoring;
+    }
     interfaces.push(ifcInfo);
   }
 

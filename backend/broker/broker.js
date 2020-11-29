@@ -25,7 +25,8 @@ const devUtils = require('./utils');
 const async = require('async');
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
 const dispatcher = require('../deviceLogic/dispatcher');
-const { updateSyncStatus, updateSyncStatusBasedOnJobResult } = require('../deviceLogic/sync');
+const { updateSyncStatus, updateSyncStatusBasedOnJobResult } =
+  require('../deviceLogic/sync');
 const connections = require('../websocket/Connections')();
 const omit = require('lodash/omit');
 
@@ -127,9 +128,17 @@ const deviceProcessor = async (job) => {
         reject(error.message);
       } else {
         logger.info('Job completed', {
-          params: { job: logJob, results: results.message },
+          params: {
+            job: logJob,
+            results: results.message,
+            deviceHash: results['router-cfg-hash'] || 'n/a'
+          },
           job: logJob
         });
+        // Dispatch the response for Job completion
+        // In the past this was called from job complete event but there were some missing events
+        // So moved the dispatcher to here
+        dispatcher.complete(job.id, job.data.response);
         // Device configuration hash is included in every job
         // response. Use it to update the device's sync status
         try {
@@ -141,10 +150,6 @@ const deviceProcessor = async (job) => {
           });
           return reject(err.message);
         }
-        // Dispatch the response for Job completion
-        // In the past this was called from job complete event but there were some missing events
-        // So moved the dispatcher to here
-        dispatcher.complete(job.id, job.data.response);
         resolve();
       }
     });

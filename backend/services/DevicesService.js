@@ -31,7 +31,7 @@ const isEqual = require('lodash/isEqual');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 const flexibilling = require('../flexibilling');
 const dispatcher = require('../deviceLogic/dispatcher');
-const { validateDevice } = require('../deviceLogic/validators');
+const { validateDevice, validateDhcpConfig } = require('../deviceLogic/validators');
 const { getAllOrganizationLanSubnets } = require('../utils/deviceUtils');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
 const { getMajorVersion } = require('../versioning');
@@ -131,6 +131,8 @@ class DevicesService {
           'PublicPort',
           'NatType',
           'useStun',
+          'internetAccess',
+          'internetMonitoring',
           'gateway',
           'metric',
           'dhcp',
@@ -632,7 +634,7 @@ class DevicesService {
 
       let orgLanSubnets = [];
 
-      if (isRunning) {
+      if (isRunning && configs.get('forbidLanSubnetOverlaps', 'boolean')) {
         orgLanSubnets = await getAllOrganizationLanSubnets(origDevice.org);
       }
 
@@ -644,6 +646,7 @@ class DevicesService {
             // Public port and NAT type is assigned by system only
             updIntf.PublicPort = updIntf.useStun ? origIntf.PublicPort : configs.get('tunnelPort');
             updIntf.NatType = updIntf.useStun ? origIntf.NatType : 'Static';
+            updIntf.internetAccess = origIntf.internetAccess;
 
             // For unasigned and non static interfaces we use linux network parameters
             if (!updIntf.isAssigned || updIntf.dhcp === 'yes') {
@@ -654,6 +657,15 @@ class DevicesService {
             if (!updIntf.isAssigned) {
               updIntf.metric = origIntf.metric;
             };
+            if (updIntf.isAssigned !== origIntf.isAssigned ||
+              updIntf.type !== origIntf.type ||
+              updIntf.dhcp !== origIntf.dhcp ||
+              updIntf.IPv4 !== origIntf.IPv4 ||
+              updIntf.IPv4Mask !== origIntf.IPv4Mask ||
+              updIntf.gateway !== origIntf.gateway
+            ) {
+              updIntf.modified = true;
+            }
             return updIntf;
           }
           return origIntf;
@@ -668,6 +680,43 @@ class DevicesService {
       // unspecified 'interfaces' are allowed for backward compatibility of some integrations
       if (typeof deviceToValidate.interfaces === 'undefined') {
         deviceToValidate.interfaces = origDevice.interfaces;
+      }
+
+      // validate DHCP info if it exists
+      if (Array.isArray(deviceRequest.dhcp)) {
+        for (const dhcpRequest of deviceRequest.dhcp) {
+          DevicesService.validateDhcpRequest(deviceToValidate, dhcpRequest);
+        }
+      }
+
+      // Don't allow to modify/assign/unassign
+      // interfaces that are assigned with DHCP
+      if (Array.isArray(deviceRequest.interfaces)) {
+        let dhcp = [...origDevice.dhcp];
+        if (Array.isArray(deviceRequest.dhcp)) {
+          // check only for the remaining dhcp configs
+          dhcp = dhcp.filter(orig =>
+            deviceRequest.dhcp.find(upd => orig.interface === upd.interface)
+          );
+        }
+        const modifiedInterfaces = deviceRequest.interfaces
+          .filter(intf => intf.modified)
+          .map(intf => {
+            return {
+              pci: intf.pciaddr
+            };
+          });
+        const { valid, err } = validateDhcpConfig(
+          { ...origDevice.toObject(), dhcp },
+          modifiedInterfaces
+        );
+        if (!valid) {
+          logger.warn('Device update failed',
+            {
+              params: { device: deviceRequest, err }
+            });
+          throw new Error(err);
+        }
       }
 
       const { valid, err } = validateDevice(deviceToValidate, isRunning, orgLanSubnets);
@@ -1372,6 +1421,7 @@ class DevicesService {
         // Check if any difference exists between request to current dhcp,
         // in that case no need to resend data
         if (!isEqual(dhcpRequest, origCmpDhcp)) {
+          DevicesService.validateDhcpRequest(deviceObject, dhcpRequest);
           const copy = Object.assign({}, dhcpRequest);
           copy.org = orgList[0];
           copy.method = 'dhcp';
@@ -1543,13 +1593,24 @@ class DevicesService {
 
   /**
    * Validate that the dhcp request
+   * @param {Object} device - the device object
    * @param {Object} dhcpRequest - request values
    * @throw error, if not valid
    */
-  static validateDhcpRequest (dhcpRequest) {
+  static validateDhcpRequest (device, dhcpRequest) {
     if (!dhcpRequest.interface || dhcpRequest.interface === '') {
-      throw new Error('Interface is required');
+      throw new Error('Interface is required to define DHCP');
     };
+    const interfaceObj = device.interfaces.find(i => {
+      return i.pciaddr === dhcpRequest.interface;
+    });
+    if (!interfaceObj) {
+      throw new Error(`Unknown interface: ${dhcpRequest.interface} in DHCP parameters`);
+    }
+    if (interfaceObj.type !== 'LAN') {
+      throw new Error('DHCP can be defined only for LAN interfaces');
+    }
+
     // Check that no repeated mac, host or IP
     const macLen = dhcpRequest.macAssign.length;
     const uniqMacs = uniqBy(dhcpRequest.macAssign, 'mac');
@@ -1574,7 +1635,6 @@ class DevicesService {
       session = await mongoConns.getMainDB().startSession();
       await session.startTransaction();
       const orgList = await getAccessTokenOrgList(user, org, true);
-      DevicesService.validateDhcpRequest(dhcpRequest);
       const deviceObject = await devices.findOne({
         _id: mongoose.Types.ObjectId(id),
         org: { $in: orgList }
@@ -1585,14 +1645,7 @@ class DevicesService {
       if (!deviceObject.isApproved) {
         throw new Error('Device must be first approved');
       }
-
-      const interfaceIsExists = deviceObject.interfaces.find(i => {
-        return i.pciaddr === dhcpRequest.interface;
-      });
-
-      if (!interfaceIsExists) {
-        throw new Error('Unknown interface');
-      }
+      DevicesService.validateDhcpRequest(deviceObject, dhcpRequest);
 
       // Verify that no dhcp has been defined for the interface
       const dhcpObject = deviceObject.dhcp.filter((s) => {

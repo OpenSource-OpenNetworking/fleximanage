@@ -129,7 +129,7 @@ class ExpressServer {
     // Secure traffic only
     this.app.all('*', (req, res, next) => {
       // Allow Let's encrypt certbot to access its certificate dirctory
-      if (!configs.get('shouldRedirectHttps') ||
+      if (!configs.get('shouldRedirectHttps', 'boolean') ||
           req.secure || req.url.startsWith('/.well-known/acme-challenge')) {
         return next();
       } else {
@@ -144,7 +144,8 @@ class ExpressServer {
     const inMemoryStore = new RateLimitStore(5 * 60 * 1000);
     const rateLimiter = rateLimit({
       store: inMemoryStore,
-      max: +configs.get('userIpReqRateLimit'), // Rate limit for requests in 5 min per IP address
+      // Rate limit for requests in 5 min per IP address
+      max: configs.get('userIpReqRateLimit', 'number'),
       message: 'Request rate limit exceeded',
       onLimitReached: (req, res, options) => {
         logger.error(
@@ -169,7 +170,7 @@ class ExpressServer {
     // Secure traffic only
     this.app.all('*', (req, res, next) => {
       // Allow Let's encrypt certbot to access its certificate dirctory
-      if (!configs.get('shouldRedirectHttps') ||
+      if (!configs.get('shouldRedirectHttps', 'boolean') ||
           req.secure || req.url.startsWith('/.well-known/acme-challenge')) {
         return next();
       } else {
@@ -232,7 +233,7 @@ class ExpressServer {
     const validator = new OpenApiValidator({
       apiSpec: this.openApiPath,
       validateRequests: true,
-      validateResponses: configs.get('validateOpenAPIResponse')
+      validateResponses: configs.get('validateOpenAPIResponse', 'boolean')
     });
 
     validator
@@ -328,7 +329,7 @@ class ExpressServer {
 
       // setup wss here
       this.wss = new WebSocket.Server({
-        server: configs.get('shouldRedirectHttps') ? this.secureServer : this.server,
+        server: configs.get('shouldRedirectHttps', 'boolean') ? this.secureServer : this.server,
         verifyClient: connections.verifyDevice
       });
 

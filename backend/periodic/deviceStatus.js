@@ -219,8 +219,8 @@ class DeviceStatus {
   updateAnalyticsInterfaceStats (deviceID, deviceInfo, statsList) {
     statsList.forEach((statsEntry) => {
       // Update the database once per update time configuration (default: 5min)
-      const msgTime = Math.floor(statsEntry.utc / configs.get('analyticsUpdateTime')) *
-        configs.get('analyticsUpdateTime');
+      const msgTime = Math.floor(statsEntry.utc / configs.get('analyticsUpdateTime', 'number')) *
+        configs.get('analyticsUpdateTime', 'number');
       if (this.getDeviceLastUpdateTime(deviceID) === msgTime) return;
 
       // Build DB updates

@@ -75,12 +75,12 @@ class DeviceQueues {
               // a individual error
               return new Error('The server refused the connection');
             }
-            if (options.total_retry_time > configs.get('redisTotalRetryTime')) {
+            if (options.total_retry_time > configs.get('redisTotalRetryTime', 'number')) {
               // End reconnecting after a specific timeout and flush all commands
               // with a individual error
               return new Error('Retry time exhausted');
             }
-            if (options.attempt > configs.get('redisTotalAttempts')) {
+            if (options.attempt > configs.get('redisTotalAttempts', 'number')) {
               // End reconnecting with built in error
               return undefined;
             }

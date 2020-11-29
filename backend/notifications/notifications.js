@@ -23,7 +23,7 @@ const logger = require('../logging/logging')({ module: module.filename, type: 'n
 const mailer = require('../utils/mailer')(
   configs.get('mailerHost'),
   configs.get('mailerPort'),
-  configs.get('mailerBypassCert')
+  configs.get('mailerBypassCert', 'boolean')
 );
 const mongoose = require('mongoose');
 
@@ -98,7 +98,12 @@ class NotificationsManager {
     try {
       const accountIDs = await notificationsDb.aggregate([
         { $match: { status: 'unread' } },
-        { $group: { _id: '$account' } }
+        { $group: { _id: '$account', messages: { $push: '$$ROOT' } } },
+        {
+          $project: {
+            messages: { $slice: ['$messages', configs.get('unreadNotificationsMaxSent', 'number')] }
+          }
+        }
       ]);
 
       // Notify users only if there are unread notifications
@@ -148,7 +153,16 @@ class NotificationsManager {
             'Pending unread notifications',
             `<h2>${configs.get('companyName')} Notification Reminder</h2>
             <p style="font-size:16px">This email was sent to you since you have pending
-             unread notifications.
+             unread notifications. </p>
+            <ul>
+              ${accountID.messages.map(message => `
+              <li>
+                <i>${message.time.toISOString().replace(/T/, ' ').replace(/\..+/, '')}</i>
+                : ${message.details}
+              </li>
+              `).join('')}
+            </ul>
+            <p> All new notifications status set to read.
             <br>To view the notifications, please check the
             <a href="${configs.get('uiServerUrl')}/notifications">Notifications</a>
              page in your flexiMange account.</br>
@@ -169,6 +183,11 @@ class NotificationsManager {
           });
         }
       }
+      // Set status 'read' to all notifications
+      await notificationsDb.updateMany(
+        { status: 'unread' },
+        { $set: { status: 'read' } }
+      );
     } catch (err) {
       logger.warn('Failed to notify users about pending notifications', {
         params: { err: err.message }

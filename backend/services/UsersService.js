@@ -22,7 +22,7 @@ const auth = require('../authenticate');
 const mailer = require('../utils/mailer')(
   configs.get('mailerHost'),
   configs.get('mailerPort'),
-  configs.get('mailerBypassCert')
+  configs.get('mailerBypassCert', 'boolean')
 );
 const { getToken, getRefreshToken } = require('../tokens');
 const randomKey = require('../utils/random-key');

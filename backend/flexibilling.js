@@ -137,7 +137,7 @@ class FlexiBilling {
 
 // check if flexibilling is required
 let billing;
-const useFlexiBilling = require('./configs')().get('useFlexiBilling') || false;
+const useFlexiBilling = require('./configs')().get('useFlexiBilling', 'boolean');
 
 if (useFlexiBilling) {
   billing = require('./billing');
