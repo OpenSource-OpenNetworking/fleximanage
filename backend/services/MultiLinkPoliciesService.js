@@ -140,6 +140,7 @@ class MultiLinkPoliciesService {
       // installed on at least one device
       const count = await devices.countDocuments({
         'policies.multilink.policy': id,
+        'policies.multilink.status': { $in: ['installing', 'installed'] },
         org: { $in: orgList }
       });
 
@@ -147,6 +148,18 @@ class MultiLinkPoliciesService {
         const message = 'Cannot delete a policy that is being used';
         return Service.rejectResponse(message, 400);
       }
+
+      await devices.updateMany({
+        org: { $in: orgList },
+        'policies.multilink.policy': id,
+        'policies.multilink.status': { $nin: ['installing', 'installed'] }
+      }, {
+        $set: {
+          'policies.multilink.policy': null,
+          'policies.multilink.status': '',
+          'policies.multilink.requestTime': null
+        }
+      });
 
       const { deletedCount } = await MultiLinkPolicies.deleteOne({
         org: { $in: orgList },
