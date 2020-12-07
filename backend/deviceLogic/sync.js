@@ -189,15 +189,21 @@ const incAutoSyncTrials = (deviceId) => {
   );
 };
 
-const queueFullSyncJob = async (device, org) => {
+const queueFullSyncJob = async (device, hash, org) => {
   // Queue full sync job
   // Add current hash to message so the device can
   // use it to check if it is already synced
-  const { machineId, hostname, deviceId } = device;
+  const { machineId, hostname, deviceId, versions } = device;
 
   const params = {
     requests: []
   };
+
+  const majorAgentVersion = getMajorVersion(versions.agent);
+  if (majorAgentVersion < 3) {
+    // include hash for compatibility, not needed for version 3 and above
+    params['router-cfg-hash'] = hash;
+  }
 
   // Create sync message tasks
   const tasks = [{ entity: 'agent', message: 'sync-device', params }];
@@ -424,7 +430,7 @@ const updateSyncStatus = async (org, deviceId, machineId, deviceHash) => {
     logger.info('Queueing full-sync job', {
       params: { deviceId, state, newState, hash, trials }
     });
-    await queueFullSyncJob({ deviceId, machineId, hostname }, org);
+    await queueFullSyncJob({ deviceId, machineId, hostname, versions }, hash, org);
   } catch (err) {
     logger.error('Device sync state update failed', {
       params: { deviceId, error: err.message }
@@ -450,8 +456,17 @@ const apply = async (device, user, data) => {
     { sync: 1 }
   );
 
+  // Get device current configuration hash
+  const { sync } = await devices.findOne(
+    { org, _id },
+    { sync: 1 }
+  )
+    .lean();
+
+  const { hash } = sync;
   const job = await queueFullSyncJob(
-    { deviceId: _id, machineId, hostname },
+    { deviceId: _id, machineId, hostname, versions },
+    hash,
     org
   );
 
