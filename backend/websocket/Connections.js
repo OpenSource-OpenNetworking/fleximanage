@@ -454,19 +454,8 @@ class Connections {
             });
             return i;
           }
-          if (i.dhcp === 'yes' && (!updatedConfig.IPv4 || !updatedConfig.gateway)) {
-            // ignore if IPv4 or gateway is not assigned by DHCP server
-            logger.warn('Missing some DHCP parameters, the config will not be applied', {
-              params: {
-                reconfig: deviceInfo.message.reconfig,
-                machineId: machineId,
-                updatedConfig: JSON.stringify(updatedConfig)
-              }
-            });
-            return i;
-          };
 
-          if (updatedConfig.gateway && updatedConfig.internetAccess !== undefined &&
+          if (updatedConfig.internetAccess !== undefined &&
             i.monitorInternet && updatedConfig.internetAccess !== i.internetAccess) {
             const newInterfaceState = `${updatedConfig.internetAccess ? 'Has' : 'No'} internet`;
             const details = `Interface state changed to "${newInterfaceState}"`;

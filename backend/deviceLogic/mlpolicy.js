@@ -125,6 +125,7 @@ const getOpDevices = async (devicesObj, org, policy) => {
   // of all devices that are currently running the policy
   const devicesList = Object.keys(devicesObj);
   if (devicesList.length > 0) return devicesList;
+  if (!policy) return [];
 
   // Select only devices on which the policy is already
   // installed or in the process of installation, to make
@@ -205,7 +206,7 @@ const apply = async (deviceList, user, data) => {
       }
 
       // Extract the device IDs to operate on
-      deviceIds = data.devices && mLPolicy
+      deviceIds = data.devices
         ? await getOpDevices(data.devices, org, mLPolicy)
         : [deviceList[0]._id];
 

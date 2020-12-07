@@ -333,11 +333,9 @@ const prepareModificationMessageV2 = (messageParams, device) => {
  * @param  {string}  username              name of the user that requested the job
  * @param  {Array}   tasks                 the message to be sent to the device
  * @param  {Object}  device                the device to which the job should be queued
- * @param  {Array}   removedTunnelsList=[] tunnels that have been removed as part of
- *                                         the device modification
  * @return {Promise}                       a promise for queuing a job
  */
-const queueJob = async (org, username, tasks, device, removedTunnelsList = []) => {
+const queueJob = async (org, username, tasks, device) => {
   const job = await deviceQueues.addJob(
     device.machineId, username, org,
     // Data
@@ -349,8 +347,7 @@ const queueJob = async (org, username, tasks, device, removedTunnelsList = []) =
         device: device._id,
         org: org,
         user: username,
-        origDevice: device,
-        tunnels: removedTunnelsList
+        origDevice: device
       }
     },
     // Metadata
@@ -437,19 +434,40 @@ const queueModifyDeviceJob = async (device, messageParams, user, org) => {
       if (!(ifc._id in modifiedIfcsMap) || pathLabelRemoved) {
         await oneTunnelDel(_id, user.username, org);
       } else {
-        // if dhcp was changed from 'no' to 'yes'
-        // then we need to wait for the device new config
         const modifiedIfcA = modifiedIfcsMap[tunnel.interfaceA.toString()];
         const modifiedIfcB = modifiedIfcsMap[tunnel.interfaceB.toString()];
+        const loggerParams = {
+          machineA: deviceA.machineId,
+          machineB: deviceB.machineId,
+          tunnelNum: tunnel.num
+        };
+        // skip interfaces without IP or GW
+        const missingNetParameters = _ifc => isObject(_ifc) && (_ifc.addr === '' ||
+          (_ifc.dhcp === 'yes' && _ifc.gateway === ''));
+
+        if (missingNetParameters(modifiedIfcA) || missingNetParameters(modifiedIfcB)) {
+          logger.info('Missing network parameters, the tunnel will not be rebuilt', {
+            params: loggerParams
+          });
+          continue;
+        }
+        // if dhcp was changed from 'no' to 'yes'
+        // then we need to wait for a new config from the agent
         const waitingDhcpInfo =
           (isObject(modifiedIfcA) && modifiedIfcA.dhcp === 'yes' && ifcA.dhcp !== 'yes') ||
           (isObject(modifiedIfcB) && modifiedIfcB.dhcp === 'yes' && ifcB.dhcp !== 'yes');
         if (waitingDhcpInfo) {
+          logger.info('Waiting a new config from DHCP, the tunnel will not be rebuilt', {
+            params: loggerParams
+          });
           continue;
         }
         // this could happen if both interfaces are modified at the same time
         // we need to skip adding duplicated jobs
         if (tunnel.pendingTunnelModification) {
+          logger.warn('The tunnel is rebuilt from another modification request', {
+            params: loggerParams
+          });
           continue;
         }
 
@@ -499,7 +517,15 @@ const queueModifyDeviceJob = async (device, messageParams, user, org) => {
     return [];
   }
 
-  const job = await queueJob(org, user.username, tasks, device, removedTunnels);
+  const job = await queueJob(org, user.username, tasks, device);
+
+  try {
+    await reconstructTunnels(removedTunnels, org, user.username);
+  } catch (err) {
+    logger.error('Tunnel reconstruction failed', {
+      params: { jobId: job.id, device, err: err.message }
+    });
+  }
   return [job];
 };
 
@@ -955,13 +981,6 @@ const complete = async (jobId, res) => {
     return;
   }
   logger.info('Device modification complete', { params: { result: res, jobId: jobId } });
-  try {
-    await reconstructTunnels(res.tunnels, res.org, res.user);
-  } catch (err) {
-    logger.error('Tunnel reconstruction failed', {
-      params: { jobId: jobId, res: res, err: err.message }
-    });
-  }
 };
 
 /**
