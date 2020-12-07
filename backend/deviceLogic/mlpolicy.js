@@ -176,27 +176,27 @@ const apply = async (deviceList, user, data) => {
   try {
     session = await mongoConns.getMainDB().startSession();
     await session.withTransaction(async () => {
-      // Retrieve policy from database
-      mLPolicy = await MultiLinkPolicies.findOne(
-        {
-          org: org,
-          _id: id
-        },
-        {
-          rules: 1,
-          name: 1,
-          'rules.enabled': 1,
-          'rules.priority': 1,
-          'rules._id': 1,
-          'rules.classification': 1,
-          'rules.action': 1
-        }
-      ).session(session);
-
-      if (!mLPolicy) {
-        throw createError(404, `policy ${id} does not exist`);
-      }
       if (op === 'install') {
+        // Retrieve policy from database
+        mLPolicy = await MultiLinkPolicies.findOne(
+          {
+            org: org,
+            _id: id
+          },
+          {
+            rules: 1,
+            name: 1,
+            'rules.enabled': 1,
+            'rules.priority': 1,
+            'rules._id': 1,
+            'rules.classification': 1,
+            'rules.action': 1
+          }
+        ).session(session);
+
+        if (!mLPolicy) {
+          throw createError(404, `policy ${id} does not exist`);
+        }
         // Disabled rules should not be sent to the device
         mLPolicy.rules = mLPolicy.rules.filter(rule => rule.enabled === true);
         if (mLPolicy.rules.length === 0) {
@@ -205,7 +205,7 @@ const apply = async (deviceList, user, data) => {
       }
 
       // Extract the device IDs to operate on
-      deviceIds = data.devices
+      deviceIds = data.devices && mLPolicy
         ? await getOpDevices(data.devices, org, mLPolicy)
         : [deviceList[0]._id];
 
