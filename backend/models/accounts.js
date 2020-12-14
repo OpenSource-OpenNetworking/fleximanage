@@ -117,6 +117,11 @@ const Accounts = new Schema({
     type: String,
     required: false,
     default: null
+  },
+  // Is subscription valid for account, will set to false when cancled in the billing system
+  isSubscriptionValid: {
+    type: Boolean,
+    default: true
   }
 });
 

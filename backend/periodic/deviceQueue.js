@@ -24,8 +24,10 @@ const deviceQueues = require('../utils/deviceQueue')(
 );
 
 /***
- * This class runs once a day and to checks
- * device jobs and delete more than a week old jobs
+ * This class runs periodic tasks related to jobs
+ * Run once a day for deleting older than 7 days jobs
+ * and remove old waiting jobs > 5min
+ *
  ***/
 class DeviceQueues {
   /**
@@ -34,6 +36,13 @@ class DeviceQueues {
   constructor () {
     this.start = this.start.bind(this);
     this.periodicCheckJobs = this.periodicCheckJobs.bind(this);
+
+    // Task info
+    this.taskInfo = {
+      checkJobsPeriod: 86400000,
+      // timeout + 10sec
+      oldWaitingJobsTimeout: configs.get('jobTimeout', 'number') + 10000
+    };
   }
 
   /**
@@ -41,21 +50,29 @@ class DeviceQueues {
      * @return {void}
      */
   start () {
-    periodic.registerTask('check_deviceJobs', this.periodicCheckJobs, 86400000); // run once a day
+    const { checkJobsPeriod } = this.taskInfo;
+    // Run on start and once a day
+    periodic.registerTask('check_deviceJobs', this.periodicCheckJobs, checkJobsPeriod);
     periodic.startTask('check_deviceJobs');
+    // Call check on start
+    this.periodicCheckJobs(true);
   }
 
   /**
      * Removes completed/failed/inactive jobs that
      * are more than a week old
+     * @param  {Boolean} isStart - signal if called on start (true) or periodic (false)
      * @return {void}
      */
-  periodicCheckJobs () {
+  periodicCheckJobs (isStart = false) {
     ha.runIfActive(() => {
-      // Delete 7 days old jobs
-      deviceQueues.removeJobs('complete', 604800000);
-      deviceQueues.removeJobs('failed', 604800000);
-      deviceQueues.removeJobs('inactive', 604800000);
+      // Delete days old jobs
+      const { checkJobsPeriod, oldWaitingJobsTimeout } = this.taskInfo;
+      // On start remove any active job, since it lost all data, it will never be resolved
+      deviceQueues.failedJobs('active', (isStart) ? 0 : oldWaitingJobsTimeout);
+      deviceQueues.removeJobs('complete', checkJobsPeriod);
+      deviceQueues.removeJobs('failed', checkJobsPeriod);
+      deviceQueues.removeJobs('inactive', checkJobsPeriod);
     });
   }
 }

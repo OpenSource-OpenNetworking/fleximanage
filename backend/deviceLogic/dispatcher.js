@@ -113,12 +113,16 @@ const methods = {
   }
 };
 
-// Register remove callbacks for relevant methods.
+// Register remove/error callbacks for relevant methods.
 Object.entries(methods).forEach(([method, functions]) => {
   if (functions.hasOwnProperty('remove')) {
     deviceQueues.registerJobRemoveCallback(method, functions.remove);
   }
+  if (functions.hasOwnProperty('error')) {
+    deviceQueues.registerJobErrorCallback(method, functions.error);
+  }
 });
+
 /**
  * Calls the apply method for to the method
  *

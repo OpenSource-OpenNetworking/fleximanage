@@ -15,39 +15,17 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+const configs = require('../configs')();
 const Joi = require('@hapi/joi');
 const Devices = require('./Devices');
 const modifyDeviceDispatcher = require('../deviceLogic/modifyDevice');
 const createError = require('http-errors');
 const { devices } = require('../models/devices');
+const Accounts = require('../models/accounts');
 const tunnelsModel = require('../models/tunnels');
 const logger = require('../logging/logging')({ module: module.filename, type: 'websocket' });
 const notificationsMgr = require('../notifications/notifications')();
 const { verifyAgentVersion, isSemVer, isVppVersion } = require('../versioning');
-const flexibilling = require('../flexibilling');
-/**
- * Verifies a device subscription.
- * @param  {string} device device machine id
- * @return
- * {{
- *   subscriptionValid: boolean,
- *   subscriptionError: Object
- * }}
- */
-const verifySubscription = async (device) => {
-  const result = await flexibilling.validateSubscription(device);
-
-  if (result) {
-    return { subscriptionValid: result, subscriptionError: null };
-  } else {
-    logger.warn('Can not validate subscription', { params: { result } });
-    return {
-      subscriptionValid: false,
-      subscriptionError: new Error('Subscription validation failed')
-    };
-  }
-};
-
 class Connections {
   constructor () {
     this.createConnection = this.createConnection.bind(this);
@@ -85,7 +63,7 @@ class Connections {
     this.getAllDevices().forEach(deviceID => {
       const { socket } = this.devices.getDeviceInfo(deviceID);
       // Don't try to ping a closing, or already closed socket
-      if ([socket.CLOSING, socket.CLOSED].includes(socket.readyState)) return;
+      if (!socket || [socket.CLOSING, socket.CLOSED].includes(socket.readyState)) return;
       if (socket.isAlive <= 0) {
         logger.warn('Terminating device due to ping failure', {
           params: { deviceId: deviceID }
@@ -225,23 +203,13 @@ class Connections {
 
     const device = connectionURL.pathname.substr(1);
 
-    const { subscriptionValid, subscriptionError } = await verifySubscription(
-      device
-    );
-    if (!subscriptionValid) {
-      logger.warn('Subscription verification failed', {
-        params: { deviceId: connectionURL.pathname, err: subscriptionError }
-      });
-      return done(false, 402);
-    }
-
     devices
       .find({
         machineId: device,
         deviceToken: connectionURL.searchParams.get('token')
       })
       .then(
-        resp => {
+        async resp => {
           if (resp.length === 1) {
             // exactly one token found
             // Check if device approved
@@ -260,6 +228,15 @@ class Connections {
                 devInfo.socket.removeAllListeners('close');
                 devInfo.socket.terminate();
               }
+
+              // Validate account subscription
+              const checkCancledSubscription = await Accounts.countDocuments(
+                { _id: resp[0].account, isSubscriptionValid: false }
+              );
+              if (checkCancledSubscription > 0) {
+                throw createError(402, 'Your subscription is canceled');
+              }
+
               this.devices.setDeviceInfo(device, {
                 org: resp[0].org.toString(),
                 deviceObj: resp[0]._id,
@@ -457,8 +434,8 @@ class Connections {
 
           if (updatedConfig.internetAccess !== undefined &&
             i.monitorInternet && updatedConfig.internetAccess !== i.internetAccess) {
-            const newInterfaceState = `${updatedConfig.internetAccess ? 'Has' : 'No'} internet`;
-            const details = `Interface state changed to "${newInterfaceState}"`;
+            const newInterfaceState = updatedConfig.internetAccess ? 'online' : 'offline';
+            const details = `Interface ${i.name} state changed to "${newInterfaceState}"`;
             logger.info(details, {
               params: {
                 machineId,
@@ -486,6 +463,10 @@ class Connections {
             NatType: updatedConfig.nat_type || i.NatType,
             internetAccess: updatedConfig.internetAccess === undefined ? ''
               : updatedConfig.internetAccess ? 'yes' : 'no'
+          };
+
+          if (!i.isAssigned) {
+            updInterface.metric = updatedConfig.metric;
           };
 
           if (i.dhcp === 'yes' || !i.isAssigned) {
@@ -722,6 +703,7 @@ class Connections {
    * @param  {string}   org               organization that owns the device
    * @param  {string}   device            device machine id
    * @param  {Object}   msg               message to be sent to the device
+   * @param  {String}   jobid             sends the job ID to the agent, if job is created
    * @param  {Callback} responseValidator a validator for validating the device response
    * @return {Promise}                    A promise the message has been sent
    */
@@ -740,12 +722,12 @@ class Connections {
     var p = new Promise(function (resolve, reject) {
       if (info.socket && (org == null || info.org === org)) {
         // Increment seq and update queue with resolve function for this promise,
-        // set timeout to 60s to clear when no response received
+        // set timeout to clear when no response received
         var tohandle = setTimeout(() => {
           reject(new Error('Error: Send Timeout'));
           // delete queue for this seq
           delete msgQ[seq];
-        }, 180000);
+        }, configs.get('jobTimeout', 'number'));
         msgQ[seq] = {
           resolver: resolve,
           rejecter: reject,
