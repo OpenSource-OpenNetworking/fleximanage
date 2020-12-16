@@ -485,7 +485,7 @@ class Connections {
           { machineId },
           { $set: { interfaces } },
           { new: true, runValidators: true }
-        );
+        ).populate('interfaces.pathlabels', '_id type');
 
         // Update the reconfig hash before applying to prevent infinite loop
         this.devices.updateDeviceInfo(machineId, 'reconfig', deviceInfo.message.reconfig);
@@ -609,7 +609,7 @@ class Connections {
         { _id: deviceId },
         { $set: { versions: versions } },
         { new: true, runValidators: true }
-      );
+      ).populate('interfaces.pathlabels', '_id type');
 
       const { tunnels } = deviceInfo.message;
       if (tunnels) {
