@@ -147,7 +147,8 @@ adminRouter
       }
       result.connectedOrgs[deviceInfo.org].push({
         machineID: device,
-        status: (deviceStatus.getDeviceStatus(device).state || 0)
+        status: ((deviceStatus.getDeviceStatus(device))
+          ? deviceStatus.getDeviceStatus(device).state : 'unknown')
         // ip:(deviceInfo.socket._sender._socket._peername.address || 'unknown'),
         // port:(deviceInfo.socket._sender._socket._peername.port || 'unknown')
       });
