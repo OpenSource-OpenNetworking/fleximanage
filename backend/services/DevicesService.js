@@ -640,13 +640,50 @@ class DevicesService {
 
       // Make sure interfaces are not deleted, only modified
       if (Array.isArray(deviceRequest.interfaces)) {
-        deviceRequest.interfaces = origDevice.interfaces.map(origIntf => {
+        deviceRequest.interfaces = await Promise.all(origDevice.interfaces.map(async origIntf => {
           const updIntf = deviceRequest.interfaces.find(rif => origIntf._id.toString() === rif._id);
           if (updIntf) {
             // Public port and NAT type is assigned by system only
             updIntf.PublicPort = updIntf.useStun ? origIntf.PublicPort : configs.get('tunnelPort');
             updIntf.NatType = updIntf.useStun ? origIntf.NatType : 'Static';
             updIntf.internetAccess = origIntf.internetAccess;
+
+            // Check tunnels connectivity
+            if (origIntf.isAssigned) {
+              // if interface unassigned make sure it's not used by any tunnel
+              if (!updIntf.isAssigned) {
+                const numTunnels = await tunnelsModel
+                  .countDocuments({
+                    isActive: true,
+                    $or: [{ interfaceA: origIntf._id }, { interfaceB: origIntf._id }]
+                  });
+                if (numTunnels > 0) {
+                  // eslint-disable-next-line max-len
+                  throw new Error('Unassigned interface used by existing tunnels, please delete related tunnels before');
+                }
+              } else {
+                // interface still assigned, check if removed path labels not used by any tunnel
+                const pathlabels = (Array.isArray(updIntf.pathlabels))
+                  ? updIntf.pathlabels.map(p => p._id.toString()) : [];
+                const remLabels = (Array.isArray(origIntf.pathlabels))
+                  ? origIntf.pathlabels.filter(
+                    p => !pathlabels.includes(p._id.toString())
+                  ) : [];
+                if (remLabels.length > 0) {
+                  const remLabelsArray = remLabels.map(p => p._id);
+                  const numTunnels = await tunnelsModel
+                    .countDocuments({
+                      isActive: true,
+                      $or: [{ interfaceA: origIntf._id }, { interfaceB: origIntf._id }],
+                      pathlabel: { $in: remLabelsArray }
+                    });
+                  if (numTunnels > 0) {
+                  // eslint-disable-next-line max-len
+                    throw new Error('Removed label used by existing tunnels, please delete related tunnels before');
+                  }
+                }
+              }
+            }
 
             // For unasigned and non static interfaces we use linux network parameters
             if (!updIntf.isAssigned || updIntf.dhcp === 'yes') {
@@ -669,7 +706,7 @@ class DevicesService {
             return updIntf;
           }
           return origIntf;
-        });
+        }));
       };
 
       // add device id to device request

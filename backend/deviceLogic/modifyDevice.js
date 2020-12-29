@@ -394,6 +394,16 @@ const queueModifyDeviceJob = async (device, messageParams, user, org) => {
     });
   }
 
+  // Prepare device modification job, if nothing requires modification, return
+  const majorAgentVersion = getMajorVersion(device.versions.agent);
+  const tasks = majorAgentVersion < 2
+    ? prepareModificationMessageV1(messageParams, device)
+    : prepareModificationMessageV2(messageParams, device);
+
+  if (tasks.length === 0 || tasks[0].length === 0) {
+    return [];
+  }
+
   for (const ifc of interfacesIdsSet) {
     // First, remove all active tunnels connected
     // via this interface, on all relevant devices.
@@ -507,18 +517,10 @@ const queueModifyDeviceJob = async (device, messageParams, user, org) => {
     }
   }
 
-  // Prepare and queue device modification job
-  const majorAgentVersion = getMajorVersion(device.versions.agent);
-  const tasks = majorAgentVersion < 2
-    ? prepareModificationMessageV1(messageParams, device)
-    : prepareModificationMessageV2(messageParams, device);
-
-  if (tasks.length === 0 || tasks[0].length === 0) {
-    return [];
-  }
-
+  // Queue device modification job
   const job = await queueJob(org, user.username, tasks, device);
 
+  // Queue tunnel reconstruction jobs
   try {
     await reconstructTunnels(removedTunnels, org, user.username);
   } catch (err) {
