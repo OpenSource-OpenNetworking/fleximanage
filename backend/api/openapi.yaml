@@ -6499,6 +6499,7 @@ components:
           NatType: NatType
           useStun: true
           monitorInternet: true
+          internetAccess: 'yes'
           IPv4: IPv4
           type: WAN
           gateway: gateway
@@ -6520,6 +6521,7 @@ components:
           NatType: NatType
           useStun: true
           monitorInternet: true
+          internetAccess: 'no'
           IPv4: IPv4
           type: WAN
           gateway: gateway
@@ -6651,6 +6653,7 @@ components:
         NatType: NatType
         useStun: useStun
         monitorInternet: true
+        internetAccess: 'yes'
         IPv4: IPv4
         type: WAN
         MAC: MAC
@@ -6694,6 +6697,12 @@ components:
           type: boolean
         monitorInternet:
           type: boolean
+        internetAccess:
+          enum:
+          - ''
+          - yes
+          - no
+          type: string
         gateway:
           type: string
         metric:

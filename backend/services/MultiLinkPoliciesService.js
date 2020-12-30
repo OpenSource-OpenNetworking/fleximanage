@@ -68,6 +68,15 @@ class MultiLinkPoliciesService {
           message: 'Empty application is not allowed'
         };
       };
+
+      // Any enabled rule must contain Path Labels
+      if (rule.enabled &&
+        (rule.action.links.length === 0 || rule.action.links[0].pathlabels.length === 0)) {
+        return {
+          valid: false,
+          message: 'Enabled rule must contain Path Labels'
+        };
+      }
     };
 
     // Duplicate names are not allowed in the same organization
