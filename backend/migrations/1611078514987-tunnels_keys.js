@@ -56,20 +56,21 @@ async function up () {
         devicesToSync.push(tunnel.deviceB);
       }
     }
-    await tunnelsModel.bulkWrite(tunnelsOps);
-
-    // need to sync all devices in order to update tunnelKeys on devices
-    await devicesModel.updateMany(
-      { _id: { $in: devicesToSync } },
-      {
-        $set: {
-          'sync.state': 'syncing',
-          'sync.autoSync': 'on',
-          'sync.trials': 0
-        }
-      },
-      { upsert: false }
-    );
+    if (tunnelsOps.length > 0) {
+      await tunnelsModel.bulkWrite(tunnelsOps);
+      // need to sync all devices in order to update tunnelKeys on devices
+      await devicesModel.updateMany(
+        { _id: { $in: devicesToSync } },
+        {
+          $set: {
+            'sync.state': 'syncing',
+            'sync.autoSync': 'on',
+            'sync.trials': 0
+          }
+        },
+        { upsert: false }
+      );
+    }
   } catch (err) {
     logger.error('Database migration failed', {
       params: { collections: ['tunnels', 'devices'], operation: 'up', err: err.message }
