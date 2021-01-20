@@ -432,8 +432,10 @@ class Connections {
             return i;
           }
 
+          // from device internetAccess type is boolean, in management it is enum yes/no
+          const prevInternetAccess = i.internetAccess === 'yes';
           if (updatedConfig.internetAccess !== undefined &&
-            i.monitorInternet && updatedConfig.internetAccess !== i.internetAccess) {
+            i.monitorInternet && updatedConfig.internetAccess !== prevInternetAccess) {
             const newInterfaceState = updatedConfig.internetAccess ? 'online' : 'offline';
             const details = `Interface ${i.name} state changed to "${newInterfaceState}"`;
             logger.info(details, {
