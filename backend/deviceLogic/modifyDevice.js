@@ -1043,7 +1043,7 @@ const sync = async (deviceId, org) => {
   });
 
   // Prepare add-route message
-  staticroutes.forEach(route => {
+  Array.isArray(staticroutes) && staticroutes.forEach(route => {
     const { ifname, gateway, destination, metric } = route;
     deviceConfRequests.push({
       entity: 'agent',
@@ -1073,7 +1073,7 @@ const sync = async (deviceId, org) => {
   }
 
   // Prepare add-dhcp-config message
-  dhcp.forEach(entry => {
+  Array.isArray(dhcp) && dhcp.forEach(entry => {
     const { rangeStart, rangeEnd, dns, macAssign } = entry;
 
     deviceConfRequests.push({
