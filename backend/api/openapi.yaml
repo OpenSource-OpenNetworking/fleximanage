@@ -2759,7 +2759,7 @@ paths:
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
   /devices/{id}/interfaces/{interfaceId}/status:
-    get: 
+    get:
       operationId: devicesIdInterfacesIdStatusGET
       parameters:
       - description: Numeric ID of the Device to fetch information about
@@ -7282,14 +7282,111 @@ components:
       type: object
     InterfaceStatus:
       example:
-        status: 
-          key: value
-        deviceStatus: connected
+        phone_number: 972555555555
+        connection_state: activated
+        sim_status: present
+        registration_network:
+          register_state: home
+          network_error: unknown
+        pin_state:
+          pin1_status: enabled-verified
+          pin1_retries: 3
+          puk1_retries: 10
+        connectivity: true
+        hardware_info:
+          imei: 359073067866666
+          model: EM7455
+          vendor: Sierra Wireless, Incorporated
+        system_info:
+          cell_id: 3837475
+          mcc: 425
+          mnc: 02
+          operator_name: we
+        packet_service_state:
+          downlink_speed: 300000000bps
+          uplink_speed: 50000000bps
+        signals:
+          RSRQ: -9 dB
+          RSRP: -92 dBm
+          SINR: 9.0 dB
+          SNR: 9.0 dB
+          RSSI: -63 dBm
+          text: Very Good
       properties:
-        status:
-          type: object
-        deviceStatus:
+        phone_number:
           type: string
+        connection_state:
+          type: string
+        sim_status:
+          type: string
+        registration_network:
+          type: object
+          properties:
+            register_state:
+              type: string
+            network_error:
+              type: string
+        pin_state:
+          type: object
+          properties:
+            pin1_status:
+              type: string
+            pin1_retries:
+              type: string
+            puk1_retries:
+              type: string
+        connectivity:
+          type: boolean
+        hardware_info:
+          type: object
+          properties:
+            imei:
+              type: string
+            model:
+              type: string
+            vendor:
+              type: string
+        system_info:
+          type: object
+          properties:
+            cell_id:
+              type: string
+            mcc:
+              type: string
+            mnc:
+              type: string
+            operator_name:
+              type: string
+        packet_service_state:
+          type: object
+          properties:
+            downlink_speed:
+              type: string
+            uplink_speed:
+              type: string
+        signals:
+          type: object
+          properties:
+            RSRQ:
+              type: string
+            RSRP:
+              type: string
+            SINR:
+              type: string
+            SNR:
+              type: string
+            RSSI:
+              type: string
+            text:
+              type: string
+              description: |
+                Based on RSSI value. \
+                -95 >= RSSI: 'Marginal' \
+                -85 >= RSSI: 'Very low' \
+                -80 >= RSSI: 'Low' \
+                -70 >= RSSI: 'Good' \
+                -60 >= RSSI: 'Very Good' \
+                -50 >= RSSI: 'Excellent'
       type: object
     DeviceLog:
       example:

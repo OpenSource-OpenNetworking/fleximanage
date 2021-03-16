@@ -474,8 +474,8 @@ class DevicesService {
       } else if (interfaceType === 'lte' && Object.keys(interfaceInfo).length > 0) {
         let defaultApn = interfaceInfo.default_settings
           ? interfaceInfo.default_settings.APN : null;
-        const mcc = interfaceInfo.system_info.MCC;
-        const mnc = interfaceInfo.system_info.MNC;
+        const mcc = interfaceInfo.system_info.mcc;
+        const mnc = interfaceInfo.system_info.mnc;
 
         if (!defaultApn && mcc && mnc) {
           const key = mcc + '-' + mnc;
