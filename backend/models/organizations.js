@@ -37,6 +37,11 @@ const OrgSchema = new Schema({
     unique: false,
     maxlength: [50, 'Group length must be at most 50']
   },
+  // MTU
+  mtu: {
+    type: Number,
+    default: 1350
+  },
   // account Id
   account: {
     type: mongoose.Schema.Types.ObjectId,

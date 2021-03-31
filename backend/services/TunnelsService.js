@@ -39,6 +39,7 @@ class TunnelsService {
       'deviceAconf',
       'deviceB',
       'deviceBconf',
+      'mtu',
       '_id',
       'pathlabel']);
 

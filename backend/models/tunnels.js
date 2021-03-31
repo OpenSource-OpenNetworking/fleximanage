@@ -95,6 +95,11 @@ const tunnelSchema = new Schema({
     type: tunnelKeysSchema,
     default: null
   },
+  // MTU
+  mtu: {
+    type: Number,
+    default: 1350
+  },
 
   // The path label assigned to the tunnel
   pathlabel: {

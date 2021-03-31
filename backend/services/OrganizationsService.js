@@ -48,6 +48,7 @@ class OrganizationsService {
       'name',
       '_id',
       'account',
+      'mtu',
       'group'
     ]);
     retOrg._id = retOrg._id.toString();
@@ -75,6 +76,7 @@ class OrganizationsService {
           _id: element._id.toString(),
           name: element.name,
           account: element.account ? element.account.toString() : '',
+          mtu: element.mtu,
           group: element.group
         };
       });
@@ -122,6 +124,7 @@ class OrganizationsService {
           _id: updUser.defaultOrg._id.toString(),
           name: updUser.defaultOrg.name,
           account: updUser.defaultOrg.account ? updUser.defaultOrg.account.toString() : '',
+          mtu: updUser.defaultOrg.mtu,
           group: updUser.defaultOrg.group
         };
         return Service.successResponse(result, 201);
@@ -252,10 +255,10 @@ class OrganizationsService {
       // are set properly for updating this organization
       const orgList = await getAccessTokenOrgList(user, undefined, false);
       if (orgList.includes(id)) {
-        const { name, group } = organizationRequest;
+        const { name, group, mtu } = organizationRequest;
         const resultOrg = await Organizations.findOneAndUpdate(
           { _id: id },
-          { $set: { name, group } },
+          { $set: { name, group, mtu } },
           { upsert: false, multi: false, new: true, runValidators: true }
         );
         // Update token

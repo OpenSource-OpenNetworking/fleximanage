@@ -6442,14 +6442,18 @@ components:
       example:
         name: name
         group: group
+        mtu: 1350
       required:
         - name
         - group
+        - mtu
       properties:
         name:
           type: string
         group:
           type: string
+        mtu:
+          type: integer
       type: object
     Organization:
       example:
@@ -6457,6 +6461,7 @@ components:
         _id: _id
         account: account
         group: group
+        mtu: 1350
       properties:
         _id:
           maxLength: 24
@@ -6466,6 +6471,9 @@ components:
           type: string
         group:
           type: string
+        mtu:
+          minimum: 1
+          type: integer
         account:
           type: string
       type: object

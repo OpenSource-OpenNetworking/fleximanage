@@ -17,6 +17,7 @@
 
 // Logic to apply tunnels between devices
 const configs = require('../configs')();
+const orgModel = require('../models/organizations');
 const tunnelsModel = require('../models/tunnels');
 const tunnelIDsModel = require('../models/tunnelids');
 const devicesModel = require('../models/devices').devices;
@@ -653,7 +654,7 @@ const prepareTunnelAddJob = async (
   paramsDeviceA['loopback-iface'] = {
     addr: tunnelParams.ip1 + '/31',
     mac: tunnelParams.mac1,
-    mtu: 1350,
+    mtu: tunnel.mtu || 1350,
     routing: 'ospf',
     multilink: {
       labels: pathLabel ? [pathLabel] : []
@@ -677,7 +678,7 @@ const prepareTunnelAddJob = async (
   paramsDeviceB['loopback-iface'] = {
     addr: tunnelParams.ip2 + '/31',
     mac: tunnelParams.mac2,
-    mtu: 1350,
+    mtu: tunnel.mtu || 1350,
     routing: 'ospf',
     multilink: {
       labels: pathLabel ? [pathLabel] : []
@@ -733,6 +734,7 @@ const addTunnel = async (
   logger.info('Adding Tunnel between devices', {
     params: { devices: devicesInfo }
   });
+  const { mtu } = await orgModel.findOne({ _id: org });
 
   // Generate IPsec Keys and store them in the database
   const { key1, key2, key3, key4 } = generateRandomKeys();
@@ -753,6 +755,7 @@ const addTunnel = async (
       deviceB: deviceB._id,
       interfaceB: deviceBIntf._id,
       pathlabel: pathLabel,
+      mtu: mtu,
       tunnelKeys: {
         key1,
         key2,
