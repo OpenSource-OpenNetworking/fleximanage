@@ -64,15 +64,20 @@ const prepareIfcParams = (interfaces, device) => {
     });
     newIfc.multilink = { labels };
 
-    // Don't send default GW and public info for LAN interfaces
-    if (ifc.type !== 'WAN' && ifc.isAssigned) {
-      delete newIfc.gateway;
-      delete newIfc.metric;
-      delete newIfc.PublicIP;
-      delete newIfc.PublicPort;
-      delete newIfc.useStun;
-      delete newIfc.useFixedPublicPort;
-      delete newIfc.monitorInternet;
+    if (ifc.isAssigned) {
+      if (ifc.type !== 'WAN') {
+        // Don't send default GW and public info for LAN interfaces
+        delete newIfc.gateway;
+        delete newIfc.metric;
+        delete newIfc.PublicIP;
+        delete newIfc.PublicPort;
+        delete newIfc.useStun;
+        delete newIfc.useFixedPublicPort;
+        delete newIfc.monitorInternet;
+      } else if (ifc.type === 'WAN') {
+        // Don't send unnecessary info for WAN interfaces
+        delete newIfc.useFixedPublicPort;
+      }
     }
     return newIfc;
   });
