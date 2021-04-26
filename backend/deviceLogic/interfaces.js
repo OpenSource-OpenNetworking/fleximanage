@@ -50,7 +50,8 @@ const buildInterfaces = (deviceInterfaces) => {
       mtu,
       dhcp,
       deviceType,
-      configuration
+      configuration,
+      useFixedPublicPort
     } = ifc;
     // Non-DIA interfaces should not be
     // sent to the device
@@ -78,6 +79,7 @@ const buildInterfaces = (deviceInterfaces) => {
       ifcInfo.metric = metric;
       ifcInfo.PublicIP = PublicIP;
       ifcInfo.PublicPort = PublicPort;
+      ifcInfo.useFixedPublicPort = useFixedPublicPort;
       ifcInfo.useStun = useStun;
       ifcInfo.monitorInternet = monitorInternet;
     }
