@@ -67,6 +67,8 @@ const prepareIfcParams = (interfaces, device) => {
         delete newIfc.useStun;
         delete newIfc.useFixedPublicPort;
         delete newIfc.monitorInternet;
+        delete newIfc.dnsServers;
+        delete newIfc.dnsDomains;
       }
     }
     return newIfc;
