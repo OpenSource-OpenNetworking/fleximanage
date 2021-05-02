@@ -1,6 +1,6 @@
 // flexiWAN SD-WAN software - flexiEdge, flexiManage.
 // For more information go to https://flexiwan.com
-// Copyright (C) 2019  flexiWAN Ltd.
+// Copyright (C) 2019-2021  flexiWAN Ltd.
 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as
@@ -14,10 +14,13 @@
 
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+const redis = require('redis');
+const { promisifyAll } = require('bluebird');
+const logger = require('../logging/logging')({ module: module.filename, type: 'websocket' });
 
 // TBD: use memory based devices now, add to Redis in future
 class Devices {
-  constructor () {
+  constructor (prefix, redisUrl) {
     this.devices = {};
     this.setDeviceInfo = this.setDeviceInfo.bind(this);
     this.getDeviceInfo = this.getDeviceInfo.bind(this);
@@ -25,10 +28,22 @@ class Devices {
     this.removeDeviceInfo = this.removeDeviceInfo.bind(this);
     this.getAllDevices = this.getAllDevices.bind(this);
     this.updateDeviceInfo = this.updateDeviceInfo.bind(this);
+    this.setRedisDeviceInfoField = this.setRedisDeviceInfoField.bind(this);
+    this.getRedisDeviceInfo = this.getRedisDeviceInfo.bind(this);
+    this.getRedisAllDevices = this.getRedisAllDevices.bind(this);
+    this.removeRedisDeviceInfo = this.removeRedisDeviceInfo.bind(this);
+    this.redisShutdown = this.redisShutdown.bind(this);
+
+    promisifyAll(redis);
+    this.prefix = prefix;
+    this.redis = redis.createClient({ url: redisUrl });
+    this.redis.on('error', (err) => {
+      logger.error('Devices error', { params: { redisUrl: redisUrl, err: err.message } });
+    });
   }
 
   /**
-     * Sets the device information for a
+     * Sets the device information in memory for a
      * device with deviceID machine id.
      * @param  {string} deviceID device machine id
      * @param  {Object} info     device info
@@ -39,7 +54,37 @@ class Devices {
   }
 
   /**
-     * Sets a field by its name in the device info object.
+     * Get key used for Redis storage of info
+     * @param  {string} deviceID device machine id
+     * @param  {String} type     i.e. info or stats
+     * @return {String} key
+     */
+  getRedisKey (deviceId, type) {
+    return this.prefix + type + ':' + deviceId;
+  }
+
+  /**
+     * Sets the device information in redis for a
+     * device with deviceID machine id.
+     * @param  {string} deviceID device machine id
+     * @param  {String} field    field name
+     * @param  {String} type     i.e. info or stats
+     * @param  {String} value    string to store in field
+     * @return {void}
+     */
+  async setRedisDeviceInfoField (deviceID, type = 'info', field, value) {
+    try {
+      await this.redis.hsetAsync(this.getRedisKey(deviceID, type), field, value);
+    } catch (err) {
+      logger.error('Failed to set info in redis', {
+        params: { device: deviceID, type: type, field: field, value: value, err: err.message }
+      });
+    }
+  }
+
+  /**
+     * Sets a field by its name in the device info memory object.
+     * Use setRedisDeviceInfoField for device info redis object.
      * @param  {string} deviceID device machine id
      * @param  {string} key      name of the filed to be set
      * @param  {*}      value    value to be set
@@ -61,12 +106,58 @@ class Devices {
   }
 
   /**
+     * Gets a field by its name from the device info.
+     * @param  {string} deviceID device machine id
+     * @param  {String} type     i.e. info or stats
+     * @param  {Array|String|null}  list of fields to return, a given filed or null for all fields
+     * @return {Object}          device info object
+     */
+  async getRedisDeviceInfo (deviceID, type = 'info', fields = null) {
+    try {
+      if (typeof fields === 'string') {
+        const value = await this.redis.hgetAsync(this.getRedisKey(deviceID, type), fields);
+        const ret = {};
+        ret[fields] = value;
+        return ret;
+      } else {
+        const values = await this.redis.hgetallAsync(this.getRedisKey(deviceID, type));
+        const returnFields = (fields === null) ? Object.keys(values) : fields;
+        const ret = returnFields.reduce((acc, curr) => {
+          acc[curr] = values[curr];
+          return acc;
+        }, {});
+        return ret;
+      }
+    } catch (err) {
+      logger.error('Failed to get info from redis', {
+        params: { device: deviceID, type: type, fields: fields, err: err.message }
+      });
+    }
+  }
+
+  /**
      * Deletes device information object for a specific device.
      * @param  {string} deviceID the device machine id
      * @return {void}
      */
   removeDeviceInfo (deviceID) {
     delete this.devices[deviceID];
+  }
+
+  /**
+     * Deletes device information object for a specific device from redis
+     * @param  {string} deviceID the device machine id
+     * @param  {String} type     i.e. info or stats
+     * @return {void}
+     */
+  async removeRedisDeviceInfo (deviceID, type = 'info') {
+    try {
+      await this.redis.delAsync(this.getRedisKey(deviceID, type));
+    } catch (err) {
+      logger.error('Failed to del info from redis', {
+        params: { device: deviceID, type: type, err: err.message }
+      });
+    }
   }
 
   /**
@@ -78,7 +169,27 @@ class Devices {
   }
 
   /**
+     * Gets all connected devices.
+     * @param  {String} type     i.e. info or stats
+     * @return {Array} an array of all connected devices
+     */
+  async getRedisAllDevices (type = 'info') {
+    let mappedKeys = [];
+    try {
+      const keys = await this.redis.keysAsync(this.getRedisKey('*', type));
+      mappedKeys = keys.map((key) => key.split(':')[1]);
+    } catch (err) {
+      logger.error('Failed to get all devices from redis', {
+        params: { type: type, err: err.message }
+      });
+    }
+    return mappedKeys;
+  }
+
+  /**
      * Closes a device socket.
+     * TBD: Need to mark the device as closed and,
+     *      next time stats will be checked, it will close the socket
      * @param  {string} deviceID device machine id
      * @return {void}
      */
@@ -87,6 +198,21 @@ class Devices {
       this.devices[deviceID].socket.close();
     }
   }
+
+  /**
+   * Closde Redis connection
+   * @return {void}
+   */
+  redisShutdown () {
+    this.redis.quit(() => {});
+  }
 }
 
-module.exports = Devices;
+var devicesHandle = null;
+module.exports = function (prefix, redisUrl) {
+  if (devicesHandle) return devicesHandle;
+  else {
+    devicesHandle = new Devices(prefix, redisUrl);
+    return devicesHandle;
+  }
+};
