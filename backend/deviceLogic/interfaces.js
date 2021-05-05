@@ -38,8 +38,6 @@ const buildInterfaces = (deviceInterfaces) => {
       IPv6,
       IPv4Mask,
       IPv6Mask,
-      PublicIP,
-      PublicPort,
       useStun,
       monitorInternet,
       routing,
@@ -78,12 +76,14 @@ const buildInterfaces = (deviceInterfaces) => {
     if (ifc.type === 'WAN') {
       ifcInfo.gateway = gateway;
       ifcInfo.metric = metric;
-      ifcInfo.PublicIP = PublicIP;
-      ifcInfo.PublicPort = PublicPort;
       ifcInfo.useStun = useStun;
       ifcInfo.monitorInternet = monitorInternet;
-      ifcInfo.dnsServers = dnsServers;
-      ifcInfo.dnsDomains = dnsDomains;
+
+      // send dns servers only for WAN interfaces with static IP
+      if (ifcInfo.dhcp === 'no') {
+        ifcInfo.dnsServers = dnsServers;
+        ifcInfo.dnsDomains = dnsDomains;
+      }
     }
     interfaces.push(ifcInfo);
   }

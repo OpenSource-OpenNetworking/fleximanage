@@ -578,6 +578,12 @@ class DevicesService {
           case 'ospf':
             errorMessage = 'Failed to get OSPF logs';
             break;
+          case 'hostapd':
+            errorMessage = 'Failed to get Hostapd logs';
+            break;
+          case 'agentui':
+            errorMessage = 'Failed to get flexiEdge UI logs';
+            break;
           default:
             errorMessage = 'Failed to get device logs';
         }

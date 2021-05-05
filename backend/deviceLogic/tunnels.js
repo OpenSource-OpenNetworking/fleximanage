@@ -241,7 +241,7 @@ const applyTunnelAdd = async (devices, user, data) => {
                     logger.debug('Found tunnel', {
                       params: { tunnel: tunnelFound }
                     });
-                    reasons.foundTunnels = true;
+                    addReason('Some tunnels exist already.');
                     continue;
                   }
                   // Use a copy of devices objects as promise runs later

@@ -68,6 +68,12 @@ const prepareIfcParams = (interfaces, device) => {
         delete newIfc.dnsDomains;
       }
 
+      // Don't send dns servers which use for wan interfaces with static IP
+      if (ifc.type === 'WAN' && newIfc.dhcp === 'yes') {
+        delete newIfc.dnsServers;
+        delete newIfc.dnsDomains;
+      }
+
       // Don't send unnecessary info for both types of interfaces
       delete newIfc.useFixedPublicPort; // used by flexiManage only for tunnels creation
       delete newIfc.PublicIP; // used by flexiManage only for tunnels creation
