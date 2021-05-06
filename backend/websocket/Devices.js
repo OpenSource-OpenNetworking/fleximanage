@@ -28,7 +28,7 @@ class Devices {
     this.removeDeviceInfo = this.removeDeviceInfo.bind(this);
     this.getAllDevices = this.getAllDevices.bind(this);
     this.updateDeviceInfo = this.updateDeviceInfo.bind(this);
-    this.setRedisDeviceInfoField = this.setRedisDeviceInfoField.bind(this);
+    this.setRedisDeviceInfo = this.setRedisDeviceInfo.bind(this);
     this.getRedisDeviceInfo = this.getRedisDeviceInfo.bind(this);
     this.getRedisAllDevices = this.getRedisAllDevices.bind(this);
     this.removeRedisDeviceInfo = this.removeRedisDeviceInfo.bind(this);
@@ -72,19 +72,27 @@ class Devices {
      * @param  {String} value    string to store in field
      * @return {void}
      */
-  async setRedisDeviceInfoField (deviceID, type = 'info', field, value) {
+  async setRedisDeviceInfo (deviceID, type = 'info', fields) {
     try {
-      await this.redis.hsetAsync(this.getRedisKey(deviceID, type), field, value);
+      if (typeof fields !== 'object') throw new Error('fields is not an object');
+      // Generate fields to update
+      const params = Object.keys(fields).reduce((acc, curr) => {
+        acc.push(curr, fields[curr]);
+        return acc;
+      }, []);
+      const ret = await this.redis.hsetAsync(this.getRedisKey(deviceID, type), ...params);
+      return ret;
     } catch (err) {
       logger.error('Failed to set info in redis', {
-        params: { device: deviceID, type: type, field: field, value: value, err: err.message }
+        params: { device: deviceID, type: type, fields: fields, err: err.message }
       });
+      return -1;
     }
   }
 
   /**
      * Sets a field by its name in the device info memory object.
-     * Use setRedisDeviceInfoField for device info redis object.
+     * Use setRedisDeviceInfo for device info redis object.
      * @param  {string} deviceID device machine id
      * @param  {string} key      name of the filed to be set
      * @param  {*}      value    value to be set
@@ -114,24 +122,19 @@ class Devices {
      */
   async getRedisDeviceInfo (deviceID, type = 'info', fields = null) {
     try {
-      if (typeof fields === 'string') {
-        const value = await this.redis.hgetAsync(this.getRedisKey(deviceID, type), fields);
-        const ret = {};
-        ret[fields] = value;
-        return ret;
-      } else {
-        const values = await this.redis.hgetallAsync(this.getRedisKey(deviceID, type));
-        const returnFields = (fields === null) ? Object.keys(values) : fields;
-        const ret = returnFields.reduce((acc, curr) => {
-          acc[curr] = values[curr];
-          return acc;
-        }, {});
-        return ret;
-      }
+      if (typeof fields !== 'object') throw new Error('fields is not an object');
+      const values = await this.redis.hgetallAsync(this.getRedisKey(deviceID, type));
+      const returnFields = (fields === null) ? Object.keys(values) : Object.keys(fields);
+      const ret = returnFields.reduce((acc, curr) => {
+        acc[curr] = values[curr];
+        return acc;
+      }, {});
+      return ret;
     } catch (err) {
       logger.error('Failed to get info from redis', {
         params: { device: deviceID, type: type, fields: fields, err: err.message }
       });
+      return -1;
     }
   }
 
@@ -152,7 +155,8 @@ class Devices {
      */
   async removeRedisDeviceInfo (deviceID, type = 'info') {
     try {
-      await this.redis.delAsync(this.getRedisKey(deviceID, type));
+      const ret = await this.redis.delAsync(this.getRedisKey(deviceID, type));
+      return ret;
     } catch (err) {
       logger.error('Failed to del info from redis', {
         params: { device: deviceID, type: type, err: err.message }
@@ -204,7 +208,14 @@ class Devices {
    * @return {void}
    */
   redisShutdown () {
-    this.redis.quit(() => {});
+    try {
+      this.redis.quit(() => {});
+    } catch (err) {
+      logger.error('Failed to shutdown redis', {
+        params: { err: err.message }
+      });
+      return -1;
+    }
   }
 }
 
