@@ -128,12 +128,12 @@ const validateDevice = (device, isRunning = false, organizationLanSubnets = []) 
       };
     }
 
-    if ((!net.isIPv4(ifc.IPv4) || ifc.IPv4Mask === '') &&
-      ifc.dhcp !== 'yes'
-    ) {
+    if (!isIPv4Address(ifc.IPv4, ifc.IPv4Mask) && ifc.dhcp !== 'yes') {
       return {
         valid: false,
-        err: `Interface ${ifc.name} does not have an ${ifc.IPv4Mask === ''
+        err: ifc.IPv4 && ifc.IPv4Mask
+          ? `Invalid IP address for ${ifc.name}: ${ifc.IPv4}/${ifc.IPv4Mask}`
+          : `Interface ${ifc.name} does not have an ${ifc.IPv4Mask === ''
                       ? 'IPv4 mask' : 'IP address'}`
       };
     }
@@ -183,7 +183,7 @@ const validateDevice = (device, isRunning = false, organizationLanSubnets = []) 
   }
 
   // Assigned interfaces must not be on the same subnet
-  const assignedNotEmptyIfs = assignedIfs.filter(i => net.isIPv4(i.IPv4) && i.IPv4Mask !== '');
+  const assignedNotEmptyIfs = assignedIfs.filter(i => isIPv4Address(i.IPv4, i.IPv4Mask));
   for (const ifc1 of assignedNotEmptyIfs) {
     for (const ifc2 of assignedNotEmptyIfs.filter(i => i.devId !== ifc1.devId)) {
       const ifc1Subnet = `${ifc1.IPv4}/${ifc1.IPv4Mask}`;
@@ -301,7 +301,7 @@ const validateModifyDeviceMsg = (modifyDeviceMsg) => {
     }
 
     const [ip, mask] = (ifc.addr || '/').split('/');
-    if (!net.isIPv4(ip) || !validateIPv4Mask(mask)) {
+    if (!isIPv4Address(ip, mask)) {
       return {
         valid: false,
         err: `Bad request: Invalid IP address ${ifc.addr}`
@@ -312,7 +312,17 @@ const validateModifyDeviceMsg = (modifyDeviceMsg) => {
 };
 
 const isIPv4Address = (ip, mask) => {
-  return net.isIPv4(ip) && !isEmpty(mask);
+  if (!validateIPv4Mask(mask)) {
+    return false;
+  };
+  if (!net.isIPv4(ip)) {
+    return false;
+  };
+  const octets = ip.split('.');
+  if (['0', '255'].includes(octets[3])) {
+    return false;
+  }
+  return true;
 };
 
 /**

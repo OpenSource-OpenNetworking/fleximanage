@@ -146,6 +146,24 @@ describe('validateDevice', () => {
     expect(result).toMatchObject(failureObject);
   });
 
+  it('Should be an invalid device if LAN IPv4 address ends with .0', () => {
+    device.interfaces[0].IPv4 = '192.168.111.0';
+    device.interfaces[0].IPv4Mask = '24';
+    failureObject.err = `Invalid IP address for ${device.interfaces[0].name}: ` +
+      `${device.interfaces[0].IPv4}/${device.interfaces[0].IPv4Mask}`;
+    const result = validateDevice(device);
+    expect(result).toMatchObject(failureObject);
+  });
+
+  it('Should be an invalid device if LAN IPv4 address ends with .255', () => {
+    device.interfaces[0].IPv4 = '192.168.111.255';
+    device.interfaces[0].IPv4Mask = '24';
+    failureObject.err = `Invalid IP address for ${device.interfaces[0].name}: ` +
+      `${device.interfaces[0].IPv4}/${device.interfaces[0].IPv4Mask}`;
+    const result = validateDevice(device);
+    expect(result).toMatchObject(failureObject);
+  });
+
   it('Should be an invalid device if WAN IPv4 address is null', () => {
     device.interfaces[0].IPv4 = null;
     failureObject.err = `Interface ${device.interfaces[0].name} does not have an IP address`;

@@ -820,8 +820,11 @@ class DevicesService {
             }
 
             // Unassigned interfaces are not controlled from manage
-            // we only get these parameters from the device itself
-            if (!updIntf.isAssigned) {
+            // we only get these parameters from the device itself.
+            // It might be that the IP of the LTE interface is changed when a user
+            // changes the unassigned LTE configuration.
+            // In this case, we don't want to throw the below error
+            if (!updIntf.isAssigned && updIntf.deviceType !== 'lte') {
               if ((updIntf.IPv4 && updIntf.IPv4 !== origIntf.IPv4) ||
                 (updIntf.IPv4Mask && updIntf.IPv4Mask !== origIntf.IPv4Mask) ||
                 (updIntf.gateway && updIntf.gateway !== origIntf.gateway)) {
@@ -1135,7 +1138,7 @@ class DevicesService {
    * route String Numeric ID of the Route to delete
    * no response value expected for this operation
    **/
-  static async devicesIdStaticroutesRouteDELETE ({ id, org, route }, { user }) {
+  static async devicesIdStaticroutesRouteDELETE ({ id, org, route }, { user }, response) {
     try {
       const orgList = await getAccessTokenOrgList(user, org, true);
       const device = await devices.findOne(
@@ -1156,7 +1159,8 @@ class DevicesService {
       copy.method = 'staticroutes';
       copy._id = route;
       copy.action = 'del';
-      await dispatcher.apply(device, copy.method, user, copy);
+      const { ids } = await dispatcher.apply(device, copy.method, user, copy);
+      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
       return Service.successResponse(null, 204);
     } catch (e) {
       return Service.rejectResponse(
@@ -1173,7 +1177,8 @@ class DevicesService {
    * staticRouteRequest StaticRouteRequest  (optional)
    * returns DeviceStaticRouteInformation
    **/
-  static async devicesIdStaticroutesPOST ({ id, org, staticRouteRequest }, { user }) {
+  static async devicesIdStaticroutesPOST (request, { user }, response) {
+    const { id, org, staticRouteRequest } = request;
     try {
       const orgList = await getAccessTokenOrgList(user, org, true);
       const deviceObject = await devices.find({
@@ -1223,7 +1228,8 @@ class DevicesService {
       copy.org = orgList[0];
       copy.method = 'staticroutes';
       copy._id = route.id;
-      await dispatcher.apply(device, copy.method, user, copy);
+      const { ids } = await dispatcher.apply(device, copy.method, user, copy);
+      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
 
       const result = {
         _id: route._id.toString(),
@@ -1250,7 +1256,8 @@ class DevicesService {
    * staticRouteRequest StaticRouteRequest  (optional)
    * returns StaticRoute
    **/
-  static async devicesIdStaticroutesRoutePATCH ({ id, org, staticRouteRequest }, { user }) {
+  static async devicesIdStaticroutesRoutePATCH (request, { user }, response) {
+    const { id, org, staticRouteRequest } = request;
     try {
       const orgList = await getAccessTokenOrgList(user, org, true);
       const deviceObject = await devices.find({
@@ -1269,7 +1276,8 @@ class DevicesService {
       copy.org = orgList[0];
       copy.method = 'staticroutes';
       copy.action = staticRouteRequest.status === 'add-failed' ? 'add' : 'del';
-      await dispatcher.apply(device, copy.method, user, copy);
+      const { ids } = await dispatcher.apply(device, copy.method, user, copy);
+      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
       return Service.successResponse({ deviceId: device.id });
     } catch (e) {
       return Service.rejectResponse(
@@ -1961,7 +1969,33 @@ class DevicesService {
           },
           pin: {
             job: false,
-            message: 'modify-lte-pin'
+            message: 'modify-lte-pin',
+            onError: async (jobId, err) => {
+              try {
+                err = JSON.parse(err.replace(/'/g, '"'));
+                await devices.updateOne(
+                  { _id: id, org: { $in: orgList }, 'interfaces._id': interfaceId },
+                  {
+                    $set: {
+                      'interfaces.$.deviceParams.initial_pin1_state': err.data
+                    }
+                  }
+                );
+              } catch (err) { }
+            },
+            onComplete: async (jobId, response) => {
+              if (response.message && response.message.data) {
+                // update pin state
+                await devices.updateOne(
+                  { _id: id, org: { $in: orgList }, 'interfaces._id': interfaceId },
+                  {
+                    $set: {
+                      'interfaces.$.deviceParams.initial_pin1_state': response.message.data
+                    }
+                  }
+                );
+              }
+            }
           }
         }
       };
@@ -1988,6 +2022,7 @@ class DevicesService {
 
         if (agentAction.job) {
           const tasks = [{ entity: 'agent', message: agentAction.message, params: params }];
+          const callback = agentAction.onComplete ? agentAction.onComplete : null;
           try {
             const job = await deviceQueues
               .addJob(
@@ -2011,7 +2046,7 @@ class DevicesService {
                 // Metadata
                 { priority: 'medium', attempts: 1, removeOnComplete: false },
                 // Complete callback
-                null
+                callback
               );
             logger.info('Interface action job queued', { params: { job } });
           } catch (err) {
@@ -2044,8 +2079,19 @@ class DevicesService {
 
             const regex = new RegExp(/(?<=failed: ).+?(?=\()/g);
             const err = response.message.match(regex).join(',');
+
+            if (agentAction.onError) {
+              await agentAction.onError(null, err);
+            }
+
             return Service.rejectResponse(err, 500);
           }
+
+          if (agentAction.onComplete) {
+            await agentAction.onComplete(null, response);
+          }
+
+          return Service.successResponse(response, 200);
         }
       }
 
