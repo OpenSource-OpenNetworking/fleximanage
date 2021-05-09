@@ -146,7 +146,7 @@ class NotificationsManager {
             'time device details machineId'
           ).sort({ time: -1 })
             .limit(configs.get('unreadNotificationsMaxSent', 'number'))
-            .populate('device', 'name -_id', devicesModel);
+            .populate('device', 'name -_id', devicesModel).lean();
 
           await mailer.sendMailHTML(
             configs.get('mailerFromAddress'),
