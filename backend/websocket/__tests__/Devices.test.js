@@ -44,12 +44,11 @@ describe('Initialization', () => {
 
   test('Set device AAA info object value', async (done) => {
     const ret = await Devices.setRedisDeviceInfo('AAA', 'info', {
-      object: JSON.stringify(obj)
+      object: obj
     });
     expect(ret).toEqual(1);
     const value = await Devices.getRedisDeviceInfo('AAA', 'info', { object: 1 });
-    const parsedValue = JSON.parse(value.object);
-    expect(parsedValue).toEqual(obj);
+    expect(value.object).toEqual(obj);
     done();
   });
 
@@ -60,8 +59,7 @@ describe('Initialization', () => {
   });
 
   test('Getting all values from redis', async (done) => {
-    const values = await Devices.getRedisDeviceInfo('AAA', 'info', null);
-    values.object = JSON.parse(values.object);
+    const values = await Devices.getRedisDeviceInfo('AAA', 'info', {});
     expect(values).toEqual({ status: 'running', account: 'a1b2', object: obj });
     done();
   });

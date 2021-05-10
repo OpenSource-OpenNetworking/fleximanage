@@ -74,10 +74,10 @@ class Devices {
      */
   async setRedisDeviceInfo (deviceID, type = 'info', fields) {
     try {
-      if (typeof fields !== 'object') throw new Error('fields is not an object');
+      if (fields.constructor !== Object) throw new Error('fields is not an object');
       // Generate fields to update
       const params = Object.keys(fields).reduce((acc, curr) => {
-        acc.push(curr, fields[curr]);
+        acc.push(curr, JSON.stringify(fields[curr]));
         return acc;
       }, []);
       const ret = await this.redis.hsetAsync(this.getRedisKey(deviceID, type), ...params);
@@ -117,19 +117,27 @@ class Devices {
      * Gets a field by its name from the device info.
      * @param  {string} deviceID device machine id
      * @param  {String} type     i.e. info or stats
-     * @param  {Array|String|null}  list of fields to return, a given filed or null for all fields
-     * @return {Object}          device info object
+     * @param  {Object} fields to return, {} for all fields
+     * @return {Object} device info object
      */
-  async getRedisDeviceInfo (deviceID, type = 'info', fields = null) {
+  async getRedisDeviceInfo (deviceID, type = 'info', fields = {}) {
     try {
-      if (typeof fields !== 'object') throw new Error('fields is not an object');
-      const values = await this.redis.hgetallAsync(this.getRedisKey(deviceID, type));
-      const returnFields = (fields === null) ? Object.keys(values) : Object.keys(fields);
-      const ret = returnFields.reduce((acc, curr) => {
-        acc[curr] = values[curr];
-        return acc;
-      }, {});
-      return ret;
+      if (fields.constructor !== Object) throw new Error('fields is not an object');
+      let returnFields = Object.keys(fields);
+      if (returnFields.length === 1) { // Exactly one field, get only this field
+        const value = await this.redis.hgetAsync(this.getRedisKey(deviceID, type), returnFields[0]);
+        const ret = {};
+        ret[returnFields[0]] = JSON.parse(value);
+        return ret;
+      } else { // Multiple values are needed
+        const values = await this.redis.hgetallAsync(this.getRedisKey(deviceID, type));
+        if (returnFields.length === 0) returnFields = Object.keys(values);
+        const ret = returnFields.reduce((acc, curr) => {
+          acc[curr] = JSON.parse(values[curr]);
+          return acc;
+        }, {});
+        return ret;
+      }
     } catch (err) {
       logger.error('Failed to get info from redis', {
         params: { device: deviceID, type: type, fields: fields, err: err.message }

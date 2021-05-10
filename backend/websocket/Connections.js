@@ -239,7 +239,7 @@ class Connections {
                 throw createError(402, 'Your subscription is canceled');
               }
 
-              this.devices.setDeviceInfo(device, {
+              this.devices.setRedisDeviceInfo(device, 'info', {
                 org: resp[0].org.toString(),
                 deviceObj: resp[0]._id,
                 machineId: resp[0].machineId,
@@ -498,8 +498,12 @@ class Connections {
           ).populate('interfaces.pathlabels', '_id type');
 
           // Update the reconfig hash before applying to prevent infinite loop
-          this.devices.updateDeviceInfo(machineId, 'reconfig', deviceInfo.message.reconfig);
-          this.devices.updateDeviceInfo(machineId, 'version', deviceInfo.message.device);
+          this.devices.setRedisDeviceInfo(machineId, 'info', {
+            reconfig: deviceInfo.message.reconfig
+          });
+          this.devices.setRedisDeviceInfo(machineId, 'info', {
+            version: deviceInfo.message.device
+          });
 
           // Apply the new config and rebuild tunnels if need
           logger.info('Applying new configuration from the device', {
@@ -654,7 +658,9 @@ class Connections {
           if (devExpireTime !== dbExpireTime || dbExpireTime < getRenewBeforeExpireTime()) {
             needNewIKEv2Certificate = true;
           } else {
-            this.devices.updateDeviceInfo(machineId, 'certificateExpiration', dbExpireTime);
+            this.devices.setRedisDeviceInfo(machineId, 'info', {
+              certificateExpiration: dbExpireTime
+            });
           }
         }
       }
@@ -692,7 +698,7 @@ class Connections {
         params: { deviceId: deviceId, message: deviceInfo }
       });
 
-      this.devices.updateDeviceInfo(machineId, 'ready', true);
+      this.devices.setRedisDeviceInfo(machineId, 'info', { ready: true });
       this.callRegisteredCallbacks(this.connectCallbacks, machineId);
     } catch (err) {
       logger.error('Failed to receive info from device', {
