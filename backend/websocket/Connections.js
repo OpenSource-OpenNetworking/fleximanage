@@ -223,7 +223,8 @@ class Connections {
               // MGMT had the chance to close the current one (for example, when a
               // device changes the IP address of the interface connected to the MGMT).
               const devInfo = this.devices.getDeviceInfo(device);
-              if (devInfo && devInfo.ready === true && devInfo.socket) {
+              const { ready } = Devices.getRedisDeviceInfo(device, 'info', { ready: 1 });
+              if (devInfo && ready && devInfo.socket) {
                 logger.info('Closing device old connection', {
                   params: { device: device }
                 });
@@ -408,10 +409,10 @@ class Connections {
    */
   async reconfigCheck (origDevice, deviceInfo) {
     const machineId = origDevice.machineId;
-    const prevDeviceInfo = this.devices.getDeviceInfo(machineId);
+    const { reconfig } = await Devices.getRedisDeviceInfo(machineId, 'info', { reconfig: 1 });
     // Check if reconfig was changed
-    if ((prevDeviceInfo === undefined) || (deviceInfo.message.reconfig &&
-      prevDeviceInfo.reconfig !== deviceInfo.message.reconfig)) {
+    if ((reconfig === undefined) || (deviceInfo.message.reconfig &&
+      reconfig !== deviceInfo.message.reconfig)) {
       const needReconfig = origDevice.interfaces && deviceInfo.message.network.interfaces &&
         deviceInfo.message.network.interfaces.length > 0;
 
@@ -714,8 +715,8 @@ class Connections {
    * @return {boolean}       true if the device is connected, false otherwise
    */
   isConnected (device) {
-    const deviceInfo = this.devices.getDeviceInfo(device);
-    if (deviceInfo && deviceInfo.ready) return true;
+    const { ready } = Devices.getRedisDeviceInfo(device, 'info', { ready: 1 });
+    if (ready) return true;
     return false;
   }
 
@@ -726,9 +727,8 @@ class Connections {
    */
   closeConnection (device) {
     // Device has no information, probably not connected, just return
-    const deviceInfo = this.devices.getDeviceInfo(device);
-    if (!deviceInfo) return;
-    const { org, deviceObj, machineId } = deviceInfo;
+    const { org, deviceObj, machineId } = Devices.getRedisDeviceInfo(device, 'info', { org: 1, deviceObj: 1, machineId: 1 });
+    if (!org || !deviceObj || !machineId) return;
     notificationsMgr.sendNotifications([
       {
         org: org,

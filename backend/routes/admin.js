@@ -20,6 +20,7 @@ const bodyParser = require('body-parser');
 const cors = require('./cors');
 const auth = require('../authenticate');
 const connections = require('../websocket/Connections')();
+const Devices = require('../websocket/Devices')();
 const deviceStatus = require('../periodic/deviceStatus')();
 const usersModel = require('../models/users');
 const tunnelsModel = require('../models/tunnels');
@@ -141,11 +142,11 @@ adminRouter
     const devices = connections.getAllDevices();
     result.numConnectedDevices = devices.length;
     devices.forEach((device) => {
-      const deviceInfo = connections.getDeviceInfo(device);
-      if (result.connectedOrgs[deviceInfo.org] === undefined) {
-        result.connectedOrgs[deviceInfo.org] = [];
+      const { org } = Devices.getRedisDeviceInfo(device, 'info', { org: 1 });
+      if (result.connectedOrgs[org] === undefined) {
+        result.connectedOrgs[org] = [];
       }
-      result.connectedOrgs[deviceInfo.org].push({
+      result.connectedOrgs[org].push({
         machineID: device,
         status: ((deviceStatus.getDeviceStatus(device))
           ? deviceStatus.getDeviceStatus(device).state : 'unknown')

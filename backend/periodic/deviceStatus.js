@@ -17,6 +17,7 @@
 
 const periodic = require('./periodic')();
 const connections = require('../websocket/Connections')();
+const Devices = require('../websocket/Devices')();
 const { deviceStats, deviceAggregateStats } = require('../models/analytics/deviceStats');
 const Joi = require('@hapi/joi');
 const logger = require('../logging/logging')({ module: module.filename, type: 'periodic' });
@@ -164,7 +165,7 @@ class DeviceStatus {
             if (msg.message.length === 0) return;
             // Update device status according to the last update entry in the list
             const lastUpdateEntry = msg.message[msg.message.length - 1];
-            const deviceInfo = connections.getDeviceInfo(deviceID);
+            const deviceInfo = Devices.getRedisDeviceInfo(deviceID, 'info', {});
             this.setDeviceStatus(deviceID, deviceInfo, lastUpdateEntry);
             this.updateAnalyticsInterfaceStats(deviceID, deviceInfo, msg.message);
             this.updateUserDeviceStats(deviceInfo.org, deviceID, msg.message);

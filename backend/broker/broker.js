@@ -28,6 +28,7 @@ const dispatcher = require('../deviceLogic/dispatcher');
 const { updateSyncStatus, updateSyncStatusBasedOnJobResult } =
   require('../deviceLogic/sync');
 const connections = require('../websocket/Connections')();
+const Devices = require('../websocket/Devices')();
 const omit = require('lodash/omit');
 
 /**
@@ -112,7 +113,7 @@ const deviceProcessor = async (job) => {
         }
         try {
           if (connections.isConnected(mId)) {
-            const { deviceObj } = connections.getDeviceInfo(mId);
+            const { deviceObj } = Devices.getRedisDeviceInfo(mId, 'info', { deviceObj: 1 });
             // This call takes care of setting the legacy device sync status to not-synced.
             await updateSyncStatusBasedOnJobResult(org, deviceObj, mId, false);
           } else {
@@ -146,7 +147,7 @@ const deviceProcessor = async (job) => {
         // Device configuration hash is included in every job
         // response. Use it to update the device's sync status
         try {
-          const { deviceObj } = connections.getDeviceInfo(mId);
+          const { deviceObj } = Devices.getRedisDeviceInfo(mId, 'info', { deviceObj: 1 });
           await updateSyncStatus(org, deviceObj, mId, results['router-cfg-hash']);
         } catch (err) {
           logger.error('Device sync status update failed', {
