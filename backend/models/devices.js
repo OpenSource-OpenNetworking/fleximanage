@@ -83,6 +83,10 @@ const interfacesSchema = new Schema({
   dnsDomains: {
     type: [String]
   },
+  useDhcpDnsServers: {
+    type: Boolean,
+    default: true
+  },
   // ipv4 address
   IPv4: {
     type: String,

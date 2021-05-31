@@ -16,7 +16,8 @@ build:
   stage: build
   script:
     - cd backend
-    - npm ci
+    ## temp fix: change to npm ci when mongo-express is fixed
+    - npm install mongo-express --ignore-scripts && npm install
   artifacts:
     untracked: true
     paths:
@@ -45,10 +46,11 @@ test_backend:
 backend_npm_audit:
   stage: test
   variables:
-    BACKEND_PACKAGE_WHITE_LIST: "extend mongodb dot-prop pug mquery"
+    BACKEND_PACKAGE_WHITE_LIST: "dot-prop pug mquery extend"
   script:
    - cd backend
-   - npm ci audit-ci
+    ## temp fix: change to 'npm ci audit-ci' when mongo-express is fixed
+   - npm install audit-ci
    - npx audit-ci --moderate --package-manager npm --whitelist $BACKEND_PACKAGE_WHITE_LIST >> backend_npm_audit.log
   timeout: 5m
   artifacts:

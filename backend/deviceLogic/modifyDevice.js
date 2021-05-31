@@ -68,16 +68,17 @@ const prepareIfcParams = (interfaces, device) => {
         delete newIfc.dnsDomains;
       }
 
-      // Don't send dns servers which use for wan interfaces with static IP
-      if (ifc.type === 'WAN' && newIfc.dhcp === 'yes') {
-        delete newIfc.dnsServers;
-        delete newIfc.dnsDomains;
+      // If a user wants to use the DNS from DHCP server, we send empty array to the device
+      if (ifc.type === 'WAN' && newIfc.dhcp === 'yes' && ifc.useDhcpDnsServers) {
+        newIfc.dnsServers = [];
       }
 
       // Don't send unnecessary info for both types of interfaces
       delete newIfc.useFixedPublicPort; // used by flexiManage only for tunnels creation
       delete newIfc.PublicIP; // used by flexiManage only for tunnels creation
       delete newIfc.PublicPort; // used by flexiManage only for tunnels creation
+
+      delete newIfc.useDhcpDnsServers; // used by flexiManage only for dns servers depiction
     }
     return newIfc;
   });
@@ -112,7 +113,8 @@ const transformInterfaces = (interfaces) => {
       configuration: ifc.configuration,
       deviceType: ifc.deviceType,
       dnsServers: ifc.dnsServers,
-      dnsDomains: ifc.dnsDomains
+      dnsDomains: ifc.dnsDomains,
+      useDhcpDnsServers: ifc.useDhcpDnsServers
     };
   });
 };

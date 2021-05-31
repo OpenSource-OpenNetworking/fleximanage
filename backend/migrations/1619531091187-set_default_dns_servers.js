@@ -23,7 +23,12 @@ async function up () {
   try {
     await devices.updateMany(
       { },
-      { $set: { 'interfaces.$[].dnsServers': ['8.8.8.8', '8.8.4.4'] } },
+      {
+        $set: {
+          'interfaces.$[].dnsServers': ['8.8.8.8', '8.8.4.4'],
+          'interfaces.$[].useDhcpDnsServers': true
+        }
+      },
       { upsert: false }
     );
   } catch (err) {
@@ -41,7 +46,11 @@ async function down () {
   try {
     await devices.updateMany(
       { },
-      { $set: { 'interfaces.$[].dnsServers': [] } },
+      {
+        $set: {
+          'interfaces.$[].dnsServers': []
+        }
+      },
       { upsert: false }
     );
   } catch (err) {

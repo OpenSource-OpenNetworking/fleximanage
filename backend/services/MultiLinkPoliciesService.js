@@ -40,6 +40,13 @@ const emptyApp = {
 class MultiLinkPoliciesService {
   static async verifyRequestSchema (mLPolicyRequest, org) {
     const { _id, name, rules } = mLPolicyRequest;
+    // Check if any enabled rule exists
+    if (!rules.some(rule => rule.enabled)) {
+      return {
+        valid: false,
+        message: 'Policy must have at least one enabled rule'
+      };
+    }
     for (const rule of rules) {
       // At least application or prefix
       // should exist in the request

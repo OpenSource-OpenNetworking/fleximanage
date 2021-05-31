@@ -66,7 +66,7 @@ class DevicesService {
       // Apply the device command
       const { ids, status, message } = await dispatcher.apply(opDevices, deviceCommand.method,
         user, { org: orgList[0], ...deviceCommand });
-      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+      DevicesService.setLocationHeader(response, ids, orgList[0]);
       return Service.successResponse({ ids, status, message }, 202);
     } catch (e) {
       return Service.rejectResponse(
@@ -96,7 +96,7 @@ class DevicesService {
 
       const { ids, status, message } = await dispatcher.apply(opDevice, deviceCommand.method,
         user, { org: orgList[0], ...deviceCommand });
-      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+      DevicesService.setLocationHeader(response, ids, orgList[0]);
       return Service.successResponse({ ids, status, message }, 202);
     } catch (e) {
       return Service.rejectResponse(
@@ -132,7 +132,8 @@ class DevicesService {
       'labels',
       'upgradeSchedule',
       'sync']);
-    retDevice.deviceStatus = (retDevice.deviceStatus === '1');
+
+    retDevice.isConnected = connections.isConnected(retDevice.machineId);
 
     // pick interfaces
     let retInterfaces;
@@ -167,9 +168,12 @@ class DevicesService {
           'configuration',
           'deviceParams',
           'dnsServers',
-          'dnsDomains'
+          'dnsDomains',
+          'useDhcpDnsServers'
         ]);
         retIf._id = retIf._id.toString();
+        // if device is not connected then internet access status is unknown
+        retIf.internetAccess = retDevice.isConnected ? retIf.internetAccess : '';
         return retIf;
       });
     } else retInterfaces = [];
@@ -228,7 +232,6 @@ class DevicesService {
     retDevice.interfaces = retInterfaces;
     retDevice.staticroutes = retStaticRoutes;
     retDevice.dhcp = retDhcpList;
-    retDevice.isConnected = connections.isConnected(retDevice.machineId);
     // Add interface stats to mongoose response
     retDevice.deviceStatus = retDevice.isConnected
       ? deviceStatus.getDeviceStatus(retDevice.machineId) || {} : {};
@@ -466,6 +469,7 @@ class DevicesService {
                 deviceId: id, response: response.message
               }
             });
+            return Service.rejectResponse('Failed to get interface status', 500);
           } else {
             interfaceInfo = response.message;
           }
@@ -857,31 +861,31 @@ class DevicesService {
               );
             }
 
-            if (updIntf.isAssigned && updIntf.dhcp === 'no' && updIntf.type === 'WAN') {
-              if (updIntf.dnsServers.length === 0) {
-                throw new Error(
-                  `DNS ip address is required for ${origIntf.name}`
-                );
+            if (updIntf.isAssigned && updIntf.type === 'WAN') {
+              const dhcp = updIntf.dhcp;
+              const servers = updIntf.dnsServers;
+              const domains = updIntf.dnsDomains;
+
+              // Prevent static IP without dns servers
+              if (dhcp === 'no' && servers.length === 0) {
+                throw new Error(`DNS ip address is required for ${origIntf.name}`);
               }
 
-              const isValidIpList = updIntf.dnsServers.every((ip) => {
-                return net.isIPv4(ip);
-              });
+              // Prevent override dhcp DNS info without dns servers
+              if (dhcp === 'yes' && !updIntf.useDhcpDnsServers && servers.length === 0) {
+                throw new Error(`DNS ip address is required for ${origIntf.name}`);
+              }
 
+              const isValidIpList = servers.every(ip => net.isIPv4(ip));
               if (!isValidIpList) {
-                throw new Error(
-                  `DNS ip addresses are not valid for (${origIntf.name})`
-                );
+                throw new Error(`DNS ip addresses are not valid for (${origIntf.name})`);
               }
 
-              const isValidDomainList = updIntf.dnsDomains.every((domain) => {
-                return validator.isFQDN(domain);
+              const isValidDomainList = domains.every(domain => {
+                return validator.isFQDN(domain, { require_tld: false });
               });
-
               if (!isValidDomainList) {
-                throw new Error(
-                  `DNS domain list is not valid for (${origIntf.name})`
-                );
+                throw new Error(`DNS domain list is not valid for (${origIntf.name})`);
               }
             }
 
@@ -1015,8 +1019,7 @@ class DevicesService {
       }
 
       const status = modifyDevResult.ids.length > 0 ? 202 : 200;
-      const ids = [modifyDevResult.ids[0]];
-      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+      DevicesService.setLocationHeader(response, modifyDevResult.ids, orgList[0]);
       const deviceObj = DevicesService.selectDeviceParams(updDevice);
       return Service.successResponse(deviceObj, status);
     } catch (e) {
@@ -1160,7 +1163,7 @@ class DevicesService {
       copy._id = route;
       copy.action = 'del';
       const { ids } = await dispatcher.apply(device, copy.method, user, copy);
-      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+      DevicesService.setLocationHeader(response, ids, orgList[0]);
       return Service.successResponse(null, 204);
     } catch (e) {
       return Service.rejectResponse(
@@ -1229,8 +1232,7 @@ class DevicesService {
       copy.method = 'staticroutes';
       copy._id = route.id;
       const { ids } = await dispatcher.apply(device, copy.method, user, copy);
-      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
-
+      DevicesService.setLocationHeader(response, ids, orgList[0]);
       const result = {
         _id: route._id.toString(),
         gateway: route.gateway,
@@ -1277,7 +1279,7 @@ class DevicesService {
       copy.method = 'staticroutes';
       copy.action = staticRouteRequest.status === 'add-failed' ? 'add' : 'del';
       const { ids } = await dispatcher.apply(device, copy.method, user, copy);
-      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+      DevicesService.setLocationHeader(response, ids, orgList[0]);
       return Service.successResponse({ deviceId: device.id });
     } catch (e) {
       return Service.rejectResponse(
@@ -1572,7 +1574,7 @@ class DevicesService {
         copy._id = dhcpId;
         copy.action = 'del';
         const { ids } = await dispatcher.apply(device, copy.method, user, copy);
-        response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+        DevicesService.setLocationHeader(response, ids, orgList[0]);
       }
 
       // If force delete specified, delete the entry regardless of the job status
@@ -1691,7 +1693,7 @@ class DevicesService {
         org: orgList[0],
         newDevice: updDevice
       });
-      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
+      DevicesService.setLocationHeader(response, ids, orgList[0]);
       return Service.successResponse(dhcpData, 202);
     } catch (e) {
       return Service.rejectResponse(
@@ -1743,8 +1745,7 @@ class DevicesService {
       copy.method = 'dhcp';
       copy.action = dhcpObject.status === 'add-failed' ? 'add' : 'del';
       const { ids } = await dispatcher.apply(deviceObject, copy.method, user, copy);
-      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
-
+      DevicesService.setLocationHeader(response, ids, orgList[0]);
       const dhcpData = {
         _id: dhcpObject.id,
         interface: dhcpObject.interface,
@@ -1828,6 +1829,9 @@ class DevicesService {
     });
     if (!interfaceObj) {
       throw new Error(`Unknown interface: ${dhcpRequest.interface} in DHCP parameters`);
+    }
+    if (!interfaceObj.isAssigned) {
+      throw new Error('DHCP can be defined only for assigned interfaces');
     }
     if (interfaceObj.type !== 'LAN') {
       throw new Error('DHCP can be defined only for LAN interfaces');
@@ -1920,8 +1924,7 @@ class DevicesService {
       copy.org = orgList[0];
       const { ids } = await dispatcher.apply(deviceObject, copy.method, user, copy);
       const result = { ...dhcpData, _id: dhcp._id.toString() };
-      response.setHeader('Location', DevicesService.jobsListUrl(ids, orgList[0]));
-
+      DevicesService.setLocationHeader(response, ids, orgList[0]);
       return Service.successResponse(result, 202);
     } catch (e) {
       if (session) session.abortTransaction();
@@ -2185,13 +2188,17 @@ class DevicesService {
   }
 
   /**
-   * Returns an URL of jobs list request
+   * Sets Location header of the response, used in some integrations
+   * @param {Object} response - response to http request
    * @param {Array} jobsIds - array of jobs ids
    * @param {string} orgId - ID of the organzation
    */
-  static jobsListUrl (jobsIds, orgId) {
-    return `${configs.get('restServerUrl')}/api/jobs?status=all&ids=${
-      jobsIds.join('%2C')}&org=${orgId}`;
+  static setLocationHeader (response, jobsIds, orgId) {
+    if (jobsIds.length) {
+      const locationHeader = `${configs.get('restServerUrl')}/api/jobs?status=all&ids=${
+        jobsIds.join('%2C')}&org=${orgId}`;
+      response.setHeader('Location', locationHeader);
+    }
   }
 }
 

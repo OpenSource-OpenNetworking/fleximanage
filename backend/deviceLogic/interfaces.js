@@ -50,7 +50,8 @@ const buildInterfaces = (deviceInterfaces) => {
       deviceType,
       configuration,
       dnsServers,
-      dnsDomains
+      dnsDomains,
+      useDhcpDnsServers
     } = ifc;
     // Non-DIA interfaces should not be
     // sent to the device
@@ -78,11 +79,12 @@ const buildInterfaces = (deviceInterfaces) => {
       ifcInfo.metric = metric;
       ifcInfo.useStun = useStun;
       ifcInfo.monitorInternet = monitorInternet;
+      ifcInfo.dnsServers = dnsServers;
+      ifcInfo.dnsDomains = dnsDomains;
 
-      // send dns servers only for WAN interfaces with static IP
-      if (ifcInfo.dhcp === 'no') {
-        ifcInfo.dnsServers = dnsServers;
-        ifcInfo.dnsDomains = dnsDomains;
+      // if useDhcpDnsServers is true, we set empty array to the agent
+      if (ifcInfo.dhcp === 'yes' && useDhcpDnsServers === true) {
+        ifcInfo.dnsServers = [];
       }
     }
     interfaces.push(ifcInfo);
