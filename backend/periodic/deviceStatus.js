@@ -15,14 +15,14 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+const configs = require('../configs')();
 const periodic = require('./periodic')();
 const connections = require('../websocket/Connections')();
-const Devices = require('../websocket/Devices')();
+const Devices = require('../websocket/Devices')('dev', configs.get('redisUrl'));
 const { deviceStats, deviceAggregateStats } = require('../models/analytics/deviceStats');
 const Joi = require('@hapi/joi');
 const logger = require('../logging/logging')({ module: module.filename, type: 'periodic' });
 const notificationsMgr = require('../notifications/notifications')();
-const configs = require('../configs')();
 const { getRenewBeforeExpireTime } = require('../deviceLogic/IKEv2');
 const orgModel = require('../models/organizations');
 

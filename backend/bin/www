@@ -27,7 +27,8 @@ const launchServer = async () => {
     const openapiYaml = path.join(__dirname, '../api', 'openapi.yaml');
     const httpPort = configs.get('httpPort');
     const httpsPort = configs.get('httpsPort');
-    this.expressServer = new ExpressServer(httpPort, httpsPort, openapiYaml);
+    const messagePort = configs.get('messagePort');
+    this.expressServer = new ExpressServer(httpPort, httpsPort, messagePort, openapiYaml);
   } catch (error) {
     logger.error(error);
     await this.close();

@@ -35,7 +35,7 @@ class Devices {
     this.redisShutdown = this.redisShutdown.bind(this);
 
     promisifyAll(redis);
-    this.prefix = prefix;
+    this.prefix = prefix || 'dev';
     this.redis = redis.createClient({ url: redisUrl });
     this.redis.on('error', (err) => {
       logger.error('Devices error', { params: { redisUrl: redisUrl, err: err.message } });

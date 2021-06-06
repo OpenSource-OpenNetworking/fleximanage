@@ -59,10 +59,12 @@ const connections = require('./websocket/Connections')();
 const broker = require('./broker/broker.js');
 
 class ExpressServer {
-  constructor (port, securePort, openApiYaml) {
+  constructor (port, securePort, messagePort, openApiYaml) {
     this.port = port;
     this.securePort = securePort;
+    this.messagePort = messagePort;
     this.app = express();
+    this.messageApp = express();
     this.openApiPath = openApiYaml;
     this.schema = yamljs.load(openApiYaml);
     const restServerUrl = configs.get('restServerUrl');
@@ -80,16 +82,21 @@ class ExpressServer {
     this.onListening = this.onListening.bind(this);
     this.launch = this.launch.bind(this);
     this.close = this.close.bind(this);
+    this.setupMessageApp = this.setupMessageApp.bind(this);
 
     this.setupMiddleware();
+    this.setupMessageApp();
   }
 
   async setupMiddleware () {
     // this.setupAllowedMedia();
-    this.app.use((req, res, next) => {
-      console.log(`${req.method}: ${req.url}`);
-      return next();
-    });
+    // Enable console log only on development
+    if (configs.get('environment') === 'development') {
+      this.app.use((req, res, next) => {
+        console.log(`${req.method}: ${req.url}`);
+        return next();
+      });
+    }
 
     // A middleware that adds a unique request ID for each request
     // or uses the existing request ID, if there is one.
@@ -246,32 +253,58 @@ class ExpressServer {
       });
   }
 
-  addErrorHandler () {
+  async setupMessageApp () {
+    // Enable console logging on dev mode only
+    if (configs.get('environment') === 'development') {
+      this.messageApp.use((req, res, next) => {
+        console.log(`MESSAGE: ${req.method}: ${req.url}`);
+        return next();
+      });
+    }
+
+    // Request logging middleware - must be defined before routers.
+    this.messageApp.use(reqLogger);
+    // this.app.set('trust proxy', true); // Needed to get the public IP if behind a proxy
+
+    // Don't expose system internals in response headers
+    this.messageApp.disable('x-powered-by');
+
+    // Use morgan request logger in development mode
+    if (configs.get('environment') === 'development') this.messageApp.use(morgan('dev'));
+
+    this.messageApp.use(bodyParser.json());
+    this.messageApp.use(express.json());
+    this.messageApp.use(express.urlencoded({ extended: false }));
+
+    this.messageApp.use('/message', require('./routes/message'));
+  }
+
+  addErrorHandler (app) {
     // "catchall" handler, for any request that doesn't match one above, send back index.html file.
-    this.app.get('*', (req, res, next) => {
+    app.get('*', (req, res, next) => {
       logger.info('Route not found', { req: req });
       res.sendFile(path.join(__dirname, configs.get('clientStaticDir'), 'index.html'));
     });
 
     // catch 404 and forward to error handler
-    this.app.use(function (req, res, next) {
+    app.use(function (req, res, next) {
       next(createError(404));
     });
 
     // Request error logger - must be defined after all routers
     // Set log severity on the request to log errors only for 5xx status codes.
-    this.app.use((err, req, res, next) => {
+    app.use((err, req, res, next) => {
       req.logSeverity = err.status || 500;
       next(err);
     });
-    this.app.use(errLogger);
+    app.use(errLogger);
 
     /**
      * suppressed eslint rule: The next variable is required here, even though it's not used.
      *
      ** */
     // eslint-disable-next-line no-unused-vars
-    this.app.use((error, req, res, next) => {
+    app.use((error, req, res, next) => {
       const errorResponse = error.error || error.message || error.errors || 'Unknown error';
       res.status(error.status || 500);
       res.type('json');
@@ -317,7 +350,8 @@ class ExpressServer {
   }
 
   async launch () {
-    this.addErrorHandler();
+    this.addErrorHandler(this.app);
+    this.addErrorHandler(this.messageApp);
 
     try {
       this.server = http.createServer(this.app);
@@ -352,6 +386,14 @@ class ExpressServer {
       });
       this.secureServer.on('error', this.onError(this.securePort));
       this.secureServer.on('listening', this.onListening(this.secureServer));
+
+      // Setup messaging server
+      this.messageServer = http.createServer(this.messageApp);
+      this.messageServer.listen(this.messagePort, () => {
+        console.log('Message server listening on port', { params: { port: this.messagePort } });
+      });
+      this.messageServer.on('error', this.onError(this.messagePort));
+      this.messageServer.on('listening', this.onListening(this.messageServer));
     } catch (error) {
       console.log('Express server lunch error', { params: { message: error.message } });
     }

@@ -28,7 +28,7 @@ const dispatcher = require('../deviceLogic/dispatcher');
 const { updateSyncStatus, updateSyncStatusBasedOnJobResult } =
   require('../deviceLogic/sync');
 const connections = require('../websocket/Connections')();
-const Devices = require('../websocket/Devices')();
+const Devices = require('../websocket/Devices')('dev', configs.get('redisUrl'));
 const omit = require('lodash/omit');
 
 /**

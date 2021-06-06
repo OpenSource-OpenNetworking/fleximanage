@@ -17,7 +17,7 @@
 
 const configs = require('../configs')();
 const Joi = require('@hapi/joi');
-const Devices = require('./Devices');
+const Devices = require('./Devices')('dev', configs.get('redisUrl'));
 const modifyDeviceDispatcher = require('../deviceLogic/modifyDevice');
 const createError = require('http-errors');
 const orgModel = require('../models/organizations');
@@ -45,7 +45,6 @@ class Connections {
     this.sendDeviceInfoMsg = this.sendDeviceInfoMsg.bind(this);
     this.pingCheck = this.pingCheck.bind(this);
 
-    this.devices = new Devices();
     this.msgSeq = 0;
     this.msgQueue = {};
     this.connectCallbacks = {}; // Callback functions to be called on connect
@@ -63,7 +62,7 @@ class Connections {
    */
   pingCheck () {
     this.getAllDevices().forEach(deviceID => {
-      const { socket } = this.devices.getDeviceInfo(deviceID);
+      const { socket } = Devices.getDeviceInfo(deviceID);
       // Don't try to ping a closing, or already closed socket
       if (!socket || [socket.CLOSING, socket.CLOSED].includes(socket.readyState)) return;
       if (socket.isAlive <= 0) {
@@ -222,7 +221,7 @@ class Connections {
               // This might happen if the device opens a new connection before the
               // MGMT had the chance to close the current one (for example, when a
               // device changes the IP address of the interface connected to the MGMT).
-              const devInfo = this.devices.getDeviceInfo(device);
+              const devInfo = Devices.getDeviceInfo(device);
               const { ready } = Devices.getRedisDeviceInfo(device, 'info', { ready: 1 });
               if (devInfo && ready && devInfo.socket) {
                 logger.info('Closing device old connection', {
@@ -240,7 +239,8 @@ class Connections {
                 throw createError(402, 'Your subscription is canceled');
               }
 
-              this.devices.setRedisDeviceInfo(device, 'info', {
+              Devices.setDeviceInfo(device, {});
+              Devices.setRedisDeviceInfo(device, 'info', {
                 org: resp[0].org.toString(),
                 deviceObj: resp[0]._id,
                 machineId: resp[0].machineId,
@@ -283,7 +283,7 @@ class Connections {
   createConnection (socket, req) {
     const connectionURL = new URL(`${req.headers.origin}${req.url}`);
     const device = connectionURL.pathname.substr(1);
-    const info = this.devices.getDeviceInfo(device);
+    const info = Devices.getDeviceInfo(device);
 
     // Set the received socket into the device info
     info.socket = socket;
@@ -345,7 +345,8 @@ class Connections {
     // device version, network information, tunnel keys, etc.)
     // Only after getting the device's response and updating
     // the information, the device can be considered ready.
-    this.sendDeviceInfoMsg(device, info.deviceObj);
+    const { deviceObj } = await Devices.getRedisDeviceInfo(device, 'info', { deviceObj: 1 });
+    this.sendDeviceInfoMsg(device, deviceObj);
   }
 
   /**
@@ -499,10 +500,10 @@ class Connections {
           ).populate('interfaces.pathlabels', '_id type');
 
           // Update the reconfig hash before applying to prevent infinite loop
-          this.devices.setRedisDeviceInfo(machineId, 'info', {
+          Devices.setRedisDeviceInfo(machineId, 'info', {
             reconfig: deviceInfo.message.reconfig
           });
-          this.devices.setRedisDeviceInfo(machineId, 'info', {
+          Devices.setRedisDeviceInfo(machineId, 'info', {
             version: deviceInfo.message.device
           });
 
@@ -659,7 +660,7 @@ class Connections {
           if (devExpireTime !== dbExpireTime || dbExpireTime < getRenewBeforeExpireTime()) {
             needNewIKEv2Certificate = true;
           } else {
-            this.devices.setRedisDeviceInfo(machineId, 'info', {
+            Devices.setRedisDeviceInfo(machineId, 'info', {
               certificateExpiration: dbExpireTime
             });
           }
@@ -699,7 +700,7 @@ class Connections {
         params: { deviceId: deviceId, message: deviceInfo }
       });
 
-      this.devices.setRedisDeviceInfo(machineId, 'info', { ready: true });
+      Devices.setRedisDeviceInfo(machineId, 'info', { ready: true });
       this.callRegisteredCallbacks(this.connectCallbacks, machineId);
     } catch (err) {
       logger.error('Failed to receive info from device', {
@@ -727,7 +728,9 @@ class Connections {
    */
   closeConnection (device) {
     // Device has no information, probably not connected, just return
-    const { org, deviceObj, machineId } = Devices.getRedisDeviceInfo(device, 'info', { org: 1, deviceObj: 1, machineId: 1 });
+    const { org, deviceObj, machineId } = Devices.getRedisDeviceInfo(device, 'info', {
+      org: 1, deviceObj: 1, machineId: 1
+    });
     if (!org || !deviceObj || !machineId) return;
     notificationsMgr.sendNotifications([
       {
@@ -739,7 +742,7 @@ class Connections {
         details: 'Device disconnected from management'
       }
     ]);
-    this.devices.removeDeviceInfo(device);
+    Devices.removeDeviceInfo(device);
     this.callRegisteredCallbacks(this.closeCallbacks, device);
     logger.info('Device connection closed', { params: { deviceId: device } });
   }
@@ -750,7 +753,7 @@ class Connections {
    * @return {void}
    */
   deviceDisconnect (device) {
-    this.devices.disconnectDevice(device);
+    Devices.disconnectDevice(device);
   }
 
   /**
@@ -758,7 +761,7 @@ class Connections {
    * @return {Array} an array of all device IDs across all organizations.
    */
   getAllDevices () {
-    return this.devices.getAllDevices();
+    return Devices.getAllDevices();
   }
 
   /**
@@ -767,7 +770,7 @@ class Connections {
    * @return {Object}          contains socket, org, deviceObj
    */
   getDeviceInfo (deviceID) {
-    return this.devices.getDeviceInfo(deviceID);
+    return Devices.getDeviceInfo(deviceID);
   }
 
   /**
@@ -791,7 +794,7 @@ class Connections {
       return { valid: true, err: '' };
     }
   ) {
-    var info = this.devices.getDeviceInfo(device);
+    var info = Devices.getDeviceInfo(device);
     var seq = this.msgSeq++;
     var msgQ = this.msgQueue;
     var p = new Promise(function (resolve, reject) {

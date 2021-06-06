@@ -15,12 +15,13 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+const configs = require('../configs')();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('./cors');
 const auth = require('../authenticate');
 const connections = require('../websocket/Connections')();
-const Devices = require('../websocket/Devices')();
+const Devices = require('../websocket/Devices')('dev', configs.get('redisUrl'));
 const deviceStatus = require('../periodic/deviceStatus')();
 const usersModel = require('../models/users');
 const tunnelsModel = require('../models/tunnels');

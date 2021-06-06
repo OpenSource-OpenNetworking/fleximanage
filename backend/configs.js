@@ -90,6 +90,8 @@ const configEnv = {
     // HTTPS port of the node server. On production weWe usually forward port 443 to this port using:
     // sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 443 -j REDIRECT --to-port 3443
     httpsPort: 3443,
+    // Port used to send messages from other servers to this server
+    messagePort: 3444,
     // This port is used when redirecting the client
     // In production it can be set
     redirectHttpsPort: 3443,
