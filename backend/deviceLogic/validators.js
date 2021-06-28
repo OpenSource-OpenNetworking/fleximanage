@@ -356,7 +356,7 @@ const validateStaticRoute = (device, tunnels, route) => {
       };
     }
   } else {
-    let valid = device.interfaces.some(ifc =>
+    let valid = device.interfaces.filter(ifc => ifc.IPv4 && ifc.IPv4Mask).some(ifc =>
       cidr.overlap(`${ifc.IPv4}/${ifc.IPv4Mask}`, gatewaySubnet)
     );
     if (!valid) {

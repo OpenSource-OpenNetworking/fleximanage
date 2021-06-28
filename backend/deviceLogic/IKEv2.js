@@ -47,7 +47,7 @@ const validateIKEv2 = (device) => {
   if (majorAgentVersion < 4) {
     return {
       valid: false,
-      reason: 'IKEv2 encryption method not supported'
+      reason: 'IKEv2 key exchange method not supported'
     };
   };
   if (!device.IKEv2 || !device.IKEv2.certificate || !device.IKEv2.expireTime) {

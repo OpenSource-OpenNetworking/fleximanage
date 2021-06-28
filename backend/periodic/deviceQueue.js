@@ -39,7 +39,10 @@ class DeviceQueues {
 
     // Task info
     this.taskInfo = {
+      // Check jobs daily
       checkJobsPeriod: 86400000,
+      // job retain timeout
+      jobRetainTimeout: configs.get('jobRetainTimeout', 'number'),
       // timeout + 10sec
       oldWaitingJobsTimeout: configs.get('jobTimeout', 'number') + 10000
     };
@@ -67,12 +70,12 @@ class DeviceQueues {
   periodicCheckJobs (isStart = false) {
     ha.runIfActive(() => {
       // Delete days old jobs
-      const { checkJobsPeriod, oldWaitingJobsTimeout } = this.taskInfo;
+      const { jobRetainTimeout, oldWaitingJobsTimeout } = this.taskInfo;
       // On start remove any active job, since it lost all data, it will never be resolved
       deviceQueues.failedJobs('active', (isStart) ? 0 : oldWaitingJobsTimeout);
-      deviceQueues.removeJobs('complete', checkJobsPeriod);
-      deviceQueues.removeJobs('failed', checkJobsPeriod);
-      deviceQueues.removeJobs('inactive', checkJobsPeriod);
+      deviceQueues.removeJobs('complete', jobRetainTimeout);
+      deviceQueues.removeJobs('failed', jobRetainTimeout);
+      deviceQueues.removeJobs('inactive', jobRetainTimeout);
     });
   }
 }

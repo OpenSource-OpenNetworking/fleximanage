@@ -75,12 +75,12 @@ const applyTunnelAdd = async (devices, user, data) => {
     const org = data.org;
     const { encryptionMethod } = await orgModel.findOne({ _id: org });
 
-    // for now only 'none', 'ikev2' and 'psk' encryption methods are supported
+    // for now only 'none', 'ikev2' and 'psk' key exchange methods are supported
     if (!['none', 'ikev2', 'psk'].includes(encryptionMethod)) {
       logger.error('Tunnel creation failed',
-        { params: { reason: 'Not supported encryption method', encryptionMethod } }
+        { params: { reason: 'Not supported key exchange method', encryptionMethod } }
       );
-      throw new Error('Not supported encryption method');
+      throw new Error('Not supported key exchange method');
     }
 
     // array of common reasons of not created tunnels for some devices
@@ -128,7 +128,7 @@ const applyTunnelAdd = async (devices, user, data) => {
         }
 
         // only devices with version of agent >= 4 and valid certificates
-        // are supported for creating tunnels with IKEv2 encryption method
+        // are supported for creating tunnels with IKEv2 key exchange method
         if (encryptionMethod === 'ikev2') {
           let ikev2Validated = true;
           for (const device of [deviceA, deviceB]) {
@@ -385,7 +385,7 @@ const getTunnel = (org, pathLabel, wanIfcA, wanIfcB) => {
  * @param  {Object}   deviceB      device B details
  * @param  {Object}   deviceAIntf device A tunnel interface
  * @param  {Object}   deviceBIntf device B tunnel interface
- * @param  {string}   encryptionMethod encryption method [none|ikev2|psk]
+ * @param  {string}   encryptionMethod key exchange method [none|ikev2|psk]
  */
 const generateTunnelPromise = (user, org, pathLabel, deviceA, deviceB,
   deviceAIntf, deviceBIntf, encryptionMethod) => {
@@ -775,7 +775,7 @@ const prepareTunnelAddJob = async (
  * @param  {string}   user         user id of requesting user
  * @param  {string}   org          id of the organization of the user
  * @param  {number}   tunnelnum    id of the tunnel to be added
- * @param  {string}   encryptionMethod encryption method [none|ikev2|psk]
+ * @param  {string}   encryptionMethod key exchange method [none|ikev2|psk]
  * @param  {Object}   deviceA      details of device A
  * @param  {Object}   deviceB      details of device B
  * @param  {Object}   deviceAIntf device A tunnel interface
