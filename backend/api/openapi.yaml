@@ -41,6 +41,37 @@ paths:
       tags:
       - Version
       x-swagger-router-controller: Version
+  /configuration/restServers:
+    get:
+      operationId: configurationRestServersGET
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestServers'
+          description: Successful operation
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get all flexiManage servers list
+      tags:
+      - Configuration
+      x-swagger-router-controller: Configuration
+      x-openapi-router-controller: ConfigurationController
+      x-openapi-router-service: ConfigurationService
   /tokens:
     get:
       operationId: tokensGET
@@ -6166,6 +6197,12 @@ components:
             $ref: '#/components/schemas/Error'
       description: Unauthorized
   schemas:
+    RestServers:
+      example: [https://manage.flexiwan.com,https://org.flexiwan.com]
+      # properties:
+      items:
+        type: string
+      type: array
     Version:
       properties:
         version:
@@ -6264,6 +6301,8 @@ components:
         name:
           type: string
         description:
+          type: string
+        server:
           type: string
       type: object
     AppIdentificationRules:

@@ -104,6 +104,10 @@ class Controller {
   static async handleRequest (request, response, serviceOperation) {
     try {
       const requestParams = this.collectRequestParams(request);
+
+      // extract the "host" header into the top-level of the object to allow destructs it easily
+      request.server = `${request.protocol}://${request.get('host')}`;
+
       const serviceResponse = await serviceOperation(requestParams,
         /** need to pass the additional argument here */ request,
         response);

@@ -139,10 +139,25 @@ class TokensService {
   static async tokensPOST ({ org, tokenRequest }, { user }) {
     try {
       const orgList = await getAccessTokenOrgList(user, org, true);
+
+      const servers = configs.get('restServerUrl', 'list');
+      let server = tokenRequest.server;
+
+      // If no server specified by user, use the first one in the list
+      // If specified by user, check if it exists in the configs list
+      if (!server || server === '') {
+        server = servers[0];
+      } else {
+        const known = servers.find(ser => ser === server);
+        if (!known) {
+          throw new Error('Token error: Server is not allowed');
+        }
+      }
+
       const tokenData = {
         org: orgList[0].toString(),
         account: user.defaultAccount._id,
-        server: configs.get('restServerUrl')
+        server: server
       };
       // Update token with repo if needed
       const repoUrl = configs.get('SwRepositoryUrl');
