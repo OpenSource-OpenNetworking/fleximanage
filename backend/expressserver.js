@@ -65,14 +65,16 @@ class ExpressServer {
     this.app = express();
     this.openApiPath = openApiYaml;
     this.schema = yamljs.load(openApiYaml);
-    const restServerUrl = configs.get('restServerUrl');
+    const restServerUrl = configs.get('restServerUrl', 'list');
     const servers = this.schema.servers.filter(server => server.url.includes(restServerUrl));
     if (servers.length === 0) {
-      this.schema.servers.unshift({
-        description: 'Local Server',
-        url: restServerUrl + '/api'
-      });
-    }
+      this.schema.servers.unshift(...restServerUrl.map((restServer, idx) => {
+        return {
+          description: `Local Server #${idx + 1}`,
+          url: restServer + '/api'
+        };
+      }));
+    };
 
     this.setupMiddleware = this.setupMiddleware.bind(this);
     this.addErrorHandler = this.addErrorHandler.bind(this);
@@ -203,6 +205,7 @@ class ExpressServer {
     this.app.get('/hello', (req, res) => res.send('Hello World'));
 
     this.app.get('/api/version', (req, res) => res.json({ version }));
+    this.app.get('/api/restServers', (req, res) => res.json({ version }));
 
     this.app.use(cors.corsWithOptions);
     this.app.use(auth.verifyUserJWT);

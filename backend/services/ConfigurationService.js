@@ -15,16 +15,27 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-const Controller = require('./Controller');
+const Service = require('./Service');
 
-class ConfigurationController {
-  constructor (Service) {
-    this.service = Service;
-  }
+const configs = require('../configs.js')();
 
-  async configurationRestServersGET (request, response) {
-    await Controller.handleRequest(request, response, this.service.configurationRestServersGET);
+class ConfigurationService {
+  /**
+   * Get rest servers list
+   *
+   * returns List
+   **/
+  static async configurationRestServersGET ({ org }, { user }) {
+    try {
+      const servers = configs.get('restServerUrl', 'list');
+      return Service.successResponse(servers);
+    } catch (e) {
+      return Service.rejectResponse(
+        e.message || 'Internal Server Error',
+        e.status || 500
+      );
+    }
   }
 }
 
-module.exports = ConfigurationController;
+module.exports = ConfigurationService;
