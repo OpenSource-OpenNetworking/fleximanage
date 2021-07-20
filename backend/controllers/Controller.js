@@ -17,6 +17,7 @@
 
 const Logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 const configs = require('../configs')();
+const { getUiServerUrl } = require('../utils/httpUtils');
 
 class Controller {
   static sendResponse (response, payload) {
@@ -107,6 +108,10 @@ class Controller {
 
       // extract the "host" header into the top-level of the object to allow destructs it easily
       request.server = `${request.protocol}://${request.get('host')}`;
+
+      // extract the client hostname from Referer header and check if exists in configs.
+      // If yes, use it. If not - use the first one in configs.
+      request.restUiUrl = getUiServerUrl(request);
 
       const serviceResponse = await serviceOperation(requestParams,
         /** need to pass the additional argument here */ request,

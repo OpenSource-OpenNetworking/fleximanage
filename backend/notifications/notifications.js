@@ -148,6 +148,7 @@ class NotificationsManager {
             .limit(configs.get('unreadNotificationsMaxSent', 'number'))
             .populate('device', 'name -_id', devicesModel).lean();
 
+          const uiServerUrl = configs.get('uiServerUrl', 'list');
           await mailer.sendMailHTML(
             configs.get('mailerFromAddress'),
             emailAddresses,
@@ -171,13 +172,19 @@ class NotificationsManager {
             <p style="font-size:16px"> Further to this email,
             all Notifications in your Account have been set to status Read.
             <br>To view the notifications, please check the
-            <a href="${configs.get('uiServerUrl')}/notifications">Notifications</a>
+            ${uiServerUrl.length > 1
+              ? ' Notifications '
+              : `<a href="${uiServerUrl[0]}/notifications">Notifications</a>`
+            }
              page in your flexiMange account.</br>
             </p>
             <p style="font-size:16px;color:gray">Note: Unread notification email alerts
              are sent to Account owners (not Users in Organization level).
               You can disable these emails in the
-               <a href="${configs.get('uiServerUrl')}/accounts/update">Account profile</a>
+              ${uiServerUrl.length > 1
+                ? ' Account profile '
+                : `<a href="${uiServerUrl[0]}/accounts/update">Account profile</a>`
+              }
                page in your flexiManage account. Alerts on new flexiEdge software versions
                or billing information are always sent, regardless of the notifications settings.
                More about notifications
