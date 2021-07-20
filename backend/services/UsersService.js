@@ -86,8 +86,8 @@ class UsersService {
                    click below to reset your password. If you do not know who this is,
                    ignore this message.</b>
                 <p><a href="${configs.get(
-                  'uiServerUrl'
-                )}/reset-password?email=${
+                  'uiServerUrl', 'list'
+                )[0]}/reset-password?email=${
                   resetPasswordRequest.email
           }&t=${validateKey}"><button style="color:#fff;
           background-color:#F99E5B;border-color:#F99E5B;

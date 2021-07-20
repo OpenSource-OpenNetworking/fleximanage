@@ -28,7 +28,7 @@ const { verifyAgentVersion } = require('../versioning');
 const DevSwUpdater = require('../deviceLogic/DevSwVersionUpdateManager');
 const webHooks = require('../utils/webhooks')();
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
-
+const url = require('url');
 // billing support
 const flexibilling = require('../flexibilling');
 
@@ -241,7 +241,14 @@ connectRouter.route('/register')
                         });
                       res.statusCode = 200;
                       res.setHeader('Content-Type', 'application/json');
-                      res.json({ deviceToken: deviceToken, server: configs.get('agentBroker') });
+
+                      let server = configs.get('agentBroker');
+                      if (decoded.server) {
+                        const urlSchema = new url.URL(decoded.server);
+                        server = `${urlSchema.hostname}:${urlSchema.port}`;
+                      }
+
+                      res.json({ deviceToken: deviceToken, server: server });
                     }, async (err) => {
                       // abort transaction on error
                       if (session) {

@@ -291,7 +291,7 @@ membersRouter.route('/')
           <b>You have been invited to a ${configs.get('companyName')}
           ${req.body.userPermissionTo}. </b>`) + ((registerUser)
             ? `<b>Click below to set your password</b>
-          <p><a href="${configs.get('uiServerUrl')}/reset-password?email=${
+          <p><a href="${configs.get('uiServerUrl', 'list')[0]}/reset-password?email=${
             req.body.email
           }&t=${resetPWKey}">
             <button style="color:#fff;background-color:#F99E5B;

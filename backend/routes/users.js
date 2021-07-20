@@ -36,7 +36,7 @@ const mailer = require('../utils/mailer')(
 const reCaptcha = require('../utils/recaptcha')(configs.get('captchaKey'));
 const webHooks = require('../utils/webhooks')();
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
-
+const { getUiServerUrl } = require('../utils/httpUtils');
 const flexibilling = require('../flexibilling');
 
 router.use(bodyParser.json());
@@ -163,13 +163,14 @@ router.route('/register')
         return membership.create([mem], { session: session });
       })
       .then(() => {
+        const uiServerUrl = getUiServerUrl(req);
         const p = mailer.sendMailHTML(
           configs.get('mailerFromAddress'),
           req.body.email,
           `Verify Your ${configs.get('companyName')} Account`,
           `<h2>Thank you for joining ${configs.get('companyName')}</h2>
             <b>Click below to verify your account:</b>
-            <p><a href="${configs.get('uiServerUrl')}/verify-account?id=${
+            <p><a href="${uiServerUrl}/verify-account?id=${
               registerUser._id
           }&t=${
             registerUser.emailTokens.verify
@@ -254,6 +255,7 @@ router.route('/reverify-account')
       { upsert: false, new: false }
     )
       .then((resp) => {
+        const uiServerUrl = getUiServerUrl(req);
         // Send email if user found
         if (resp) {
           const p = mailer.sendMailHTML(
@@ -264,9 +266,7 @@ router.route('/reverify-account')
                 <b>It has been requested to re-verify your account. If it is asked by yourself,
                    click below to re-verify your account. If you do not know who this is,
                    ignore this message.</b>
-                <p><a href="${configs.get(
-                  'uiServerUrl'
-                )}/verify-account?id=${
+                <p><a href="${uiServerUrl}/verify-account?id=${
               resp._id
             }&t=${validateKey}"><button style="color:#fff;background-color:#F99E5B;
                  border-color:#F99E5B;font-weight:400;text-align:center;
@@ -342,6 +342,7 @@ const resetPassword = (req, res, next) => {
     .then((resp) => {
       // Send email if user found
       if (resp) {
+        const uiServerUrl = getUiServerUrl(req);
         const p = mailer.sendMailHTML(
           configs.get('mailerFromAddress'),
           req.body.email,
@@ -350,9 +351,7 @@ const resetPassword = (req, res, next) => {
                 <b>It has been requested to reset your account password. If it is asked by yourself,
                    click below to reset your password. If you do not know who this is,
                    ignore this message.</b>
-                <p><a href="${configs.get(
-                  'uiServerUrl'
-                )}/reset-password?id=${
+                <p><a href="${uiServerUrl}/reset-password?id=${
             resp._id
           }&t=${validateKey}"><button style="color:#fff;
           background-color:#F99E5B;border-color:#F99E5B;

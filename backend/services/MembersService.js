@@ -408,7 +408,7 @@ class MembersService {
    * memberRequest MemberRequest  (optional)
    * returns Member
    **/
-  static async membersPOST ({ memberRequest }, { user }) {
+  static async membersPOST ({ memberRequest }, { user, restUiUrl }) {
     let session;
     try {
       // Check that input parameters are OK
@@ -500,7 +500,7 @@ class MembersService {
         <b>You have been invited to a ${configs.get('companyName')}
         ${memberRequest.userPermissionTo}. </b>`) + ((registerUser)
           ? `<b>Click below to set your password</b>
-        <p><a href="${configs.get('uiServerUrl')}/reset-password?id=${
+        <p><a href="${restUiUrl}/reset-password?id=${
           registerUser._id
         }&t=${resetPWKey}">
           <button style="color:#fff;background-color:#F99E5B;

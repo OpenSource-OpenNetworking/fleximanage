@@ -30,7 +30,7 @@ const configEnv = {
     // URL of the rest server
     restServerUrl: ['https://local.flexiwan.com:3443'],
     // URL of the UI server
-    uiServerUrl: 'https://local.flexiwan.com:3000',
+    uiServerUrl: ['https://local.flexiwan.com:3000'],
     // Key used for users tokens, override default with environment variable USER_SECRET_KEY
     userTokenSecretKey: 'abcdefg1234567',
     // Whether to validate open API response. True for testing and dev, False for production,
@@ -187,7 +187,7 @@ const configEnv = {
   // Override for production environment
   production: {
     restServerUrl: ['https://app.flexiwan.com:443'],
-    uiServerUrl: 'https://app.flexiwan.com:443',
+    uiServerUrl: ['https://app.flexiwan.com:443'],
     shouldRedirectHttps: false,
     redirectHttpsPort: 443,
     agentBroker: 'app.flexiwan.com:443',
@@ -206,7 +206,7 @@ const configEnv = {
   hosted: {
     // modify next params for hosted server
     restServerUrl: ['https://hosted.server.com:443'],
-    uiServerUrl: 'https://hosted.server.com:443',
+    uiServerUrl: ['https://hosted.server.com:443'],
     agentBroker: 'hosted.server.com:443',
     corsWhiteList: 'https://hosted.server.com:443, http://hosted.server.com:80',
     billingRedirectOkUrl: 'https://hosted.server.com/ok.html',
@@ -226,7 +226,7 @@ const configEnv = {
   // Override for manage environment for production
   manage: {
     restServerUrl: ['https://manage.flexiwan.com:443'],
-    uiServerUrl: 'https://manage.flexiwan.com:443',
+    uiServerUrl: ['https://manage.flexiwan.com:443'],
     shouldRedirectHttps: false,
     redirectHttpsPort: 443,
     kuePrefix: 'mngdeviceq',
@@ -247,7 +247,7 @@ const configEnv = {
   // Override for appqa01 environment
   appqa01: {
     restServerUrl: ['https://appqa01.flexiwan.com:443'],
-    uiServerUrl: 'https://appqa01.flexiwan.com:443',
+    uiServerUrl: ['https://appqa01.flexiwan.com:443'],
     shouldRedirectHttps: false,
     redirectHttpsPort: 443,
     userTokenExpiration: 300,
@@ -270,7 +270,7 @@ const configEnv = {
   // Override for appqa02 environment
   appqa02: {
     restServerUrl: ['https://appqa02.flexiwan.com:443'],
-    uiServerUrl: 'https://appqa02.flexiwan.com:443',
+    uiServerUrl: ['https://appqa02.flexiwan.com:443'],
     shouldRedirectHttps: false,
     redirectHttpsPort: 443,
     userTokenExpiration: 300,
