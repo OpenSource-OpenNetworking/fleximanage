@@ -653,15 +653,19 @@ const prepareTunnelAddJob = async (
     pathLabel
   );
 
-  [paramsDeviceA, paramsDeviceB].forEach(({ src, dst, dstPort }) => {
+  [paramsDeviceA, paramsDeviceB].forEach(({ src, dst, dstPort }, idx) => {
+    const ifName = idx === 0 ? deviceAIntf.name : deviceBIntf.name;
     if (!src) {
-      throw new Error('Source IP address is empty');
+      throw new Error(
+        `Can't create tunnel number ${tunnel.num}. Interface ${ifName} has no IP address`);
     }
     if (!dst) {
-      throw new Error('Destination IP address is empty');
+      throw new Error(
+        `Can't create tunnel number ${tunnel.num}. Destination IP address is empty`);
     }
     if (!dstPort) {
-      throw new Error('Destination port is empty');
+      throw new Error(
+        `Can't create tunnel number ${tunnel.num}. Destination port is empty`);
     }
   });
 
@@ -1196,14 +1200,28 @@ const sync = async (deviceId, org) => {
         devicesToSync.push(remoteDeviceId);
       }
     }
-    const [tasksA, tasksB] = await prepareTunnelAddJob(
-      tunnel,
-      ifcA,
-      ifcB,
-      pathlabel,
-      deviceA,
-      deviceB
-    );
+    let tasksA = [];
+    let tasksB = [];
+    try {
+      [tasksA, tasksB] = await prepareTunnelAddJob(
+        tunnel,
+        ifcA,
+        ifcB,
+        pathlabel,
+        deviceA,
+        deviceB
+      );
+    } catch (e) {
+      // If it's an LTE interface with no IP address,
+      // For example, in the case of "fwkill" and "fwagent reset -s",
+      // We want to enable this sync job without this tunnel.
+      // What will happen is that the `sync` will succeed, connect the LTE,
+      // then flexiManage will update with the new address and re-create the tunnel
+      const ifc = deviceId.toString() === deviceA._id.toString() ? ifcA : ifcB;
+      if (ifc.deviceType === 'lte' && ifc.IPv4 === '') {
+        continue;
+      }
+    }
     // Add the tunnel only for the device that is being synced
     const deviceTasks =
       deviceId.toString() === deviceA._id.toString() ? tasksA : tasksB;
