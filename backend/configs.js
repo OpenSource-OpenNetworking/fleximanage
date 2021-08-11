@@ -148,6 +148,10 @@ const configEnv = {
     webHookRegisterDeviceSecret: 'ABC',
     // Global app identification rules file location
     appRulesUrl: 'https://sandbox.flexiwan.com/Protocols/app-rules.json',
+    // Global applications file locations
+    applicationsUrl: './applications.json',
+    // Endpoint in our flexivpn server that create a dh key
+    createDiffieHellmanApi: 'http://localhost:5001/diffieHellman/create',
     // Default port for tunnels
     tunnelPort: '4789',
     // If to allow manager role to delete organizations, devices, tokens, tunnels, appIdentifications,

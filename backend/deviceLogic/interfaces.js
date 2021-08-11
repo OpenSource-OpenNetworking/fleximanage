@@ -17,7 +17,7 @@
 
 const { isIPv4Address } = require('./validators');
 const wifiChannels = require('../utils/wifi-channels');
-const Joi = require('@hapi/joi');
+const Joi = require('joi');
 const omitBy = require('lodash/omitBy');
 const omit = require('lodash/omit');
 
@@ -127,14 +127,14 @@ const lteConfigurationSchema = Joi.object().keys({
 
 const shared = {
   enable: Joi.boolean().required(),
-  ssid: Joi.alternatives().when('enable', {
+  ssid: Joi.alternatives().conditional('enable', {
     is: true,
     then: Joi.string().required(),
     otherwise: Joi.string().allow(null, '')
   }).required(),
-  password: Joi.alternatives().when('enable', {
+  password: Joi.alternatives().conditional('enable', {
     is: true,
-    then: Joi.alternatives().when('securityMode', {
+    then: Joi.alternatives().conditional('securityMode', {
       is: 'wep',
       then: Joi.string()
         .regex(/^([a-z0-9]{5}|[a-z0-9]{13}|[a-z0-9]{16})$/)
@@ -143,14 +143,14 @@ const shared = {
     }).required(),
     otherwise: Joi.string().allow(null, '')
   }).required(),
-  operationMode: Joi.alternatives().when('enable', {
+  operationMode: Joi.alternatives().conditional('enable', {
     is: true,
     then: Joi.string().required().valid('b', 'g', 'n', 'a', 'ac'),
     otherwise: Joi.string().allow(null, '')
   }).required(),
   channel: Joi.string().regex(/^\d+$/).required(),
   bandwidth: Joi.string().valid('20').required(),
-  securityMode: Joi.alternatives().when('enable', {
+  securityMode: Joi.alternatives().conditional('enable', {
     is: true,
     then: Joi.string().valid(
       'open', 'wpa-psk', 'wpa2-psk'
@@ -160,7 +160,7 @@ const shared = {
   }).required(),
   hideSsid: Joi.boolean().required(),
   encryption: Joi.string().valid('aes-ccmp').required(),
-  region: Joi.alternatives().when('enable', {
+  region: Joi.alternatives().conditional('enable', {
     is: true,
     then: Joi.string().required()
       .regex(/^([A-Z]{2}|other)$/).error(() => 'Region  must be 2 uppercase letters or "other"'),

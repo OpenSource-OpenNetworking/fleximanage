@@ -31,7 +31,7 @@ const dispatcher = require('../deviceLogic/dispatcher');
 const { validateDevice } = require('../deviceLogic/validators');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 const DevSwUpdater = require('../deviceLogic/DevSwVersionUpdateManager');
-const Joi = require('@hapi/joi');
+const Joi = require('joi');
 
 const flexibilling = require('../flexibilling');
 
@@ -432,7 +432,8 @@ const verifyLogsRequest = (req, res, next) => {
     lines: Joi.number().integer().max(10000),
     filter: Joi.string().valid('all', 'fwagent')
   });
-  const result = Joi.validate(req.query, schema);
+  // const result = Joi.validate(req.query, schema);
+  const result = schema.validate(req.query);
   if (result.error) {
     return next(createError(400, result.error.details[0].message));
   }

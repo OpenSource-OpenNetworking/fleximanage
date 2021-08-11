@@ -30,6 +30,7 @@ const UsersController = require('./UsersController');
 const BillingController = require('./BillingController');
 const PathLabelsController = require('./PathLabelsController');
 const MLPoliciesController = require('./MultiLinkPoliciesController');
+const ApplicationsController = require('./ApplicationsController');
 const FirewallPoliciesController = require('./FirewallPoliciesController');
 const PeersController = require('./PeersController');
 
@@ -50,5 +51,6 @@ module.exports = {
   PathLabelsController,
   MLPoliciesController,
   FirewallPoliciesController,
-  PeersController
+  PeersController,
+  ApplicationsController
 };

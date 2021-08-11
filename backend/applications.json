@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "time": 15875544035
+  },
+  "applications": [
+    {
+      "name": "Remote VPN",
+      "description": "Allow remote VPN access",
+      "latestVersion": "5.1.0",
+      "createdDate": 1590392115232,
+      "creator": "Open VPN ltd.",
+      "cpuRequirements": 4,
+      "ramRequirements": 4,
+      "components": ["Manage", "Edge", "Client"]
+    }
+  ]
+}

@@ -18,7 +18,7 @@
 const periodic = require('./periodic')();
 const connections = require('../websocket/Connections')();
 const { deviceStats, deviceAggregateStats } = require('../models/analytics/deviceStats');
-const Joi = require('@hapi/joi');
+const Joi = require('joi');
 const logger = require('../logging/logging')({ module: module.filename, type: 'periodic' });
 const notificationsMgr = require('../notifications/notifications')();
 const configs = require('../configs')();
@@ -117,7 +117,7 @@ class DeviceStatus {
     });
 
     for (const updateEntry of msg) {
-      const result = Joi.validate(updateEntry, devStatsSchema);
+      const result = devStatsSchema.validate(updateEntry);
       if (result.error) {
         return {
           valid: false,

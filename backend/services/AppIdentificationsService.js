@@ -344,10 +344,11 @@ class AppIdentificationsService {
 
       if (firewallPoliciesUsed.length || multiLinkPoliciesUsed.length || devicesUsed.length) {
         let usedBy = !firewallPoliciesUsed.length ? ''
-          : `Firewall policies (${firewallPoliciesUsed.join(',')}) `;
+          : `Firewall policies (${firewallPoliciesUsed.map(_ => _.name).join(',')}) `;
         usedBy += !multiLinkPoliciesUsed.length ? ''
-          : `ML policies (${multiLinkPoliciesUsed.join(',')}) `;
-        usedBy += !devicesUsed.length ? '' : `Devices (${devicesUsed.join(',')}) `;
+          : `ML policies (${multiLinkPoliciesUsed.map(_ => _.name).join(',')}) `;
+        usedBy += !devicesUsed.length ? ''
+          : `Devices (${devicesUsed.map(_ => _.name).join(',')}) `;
 
         return Service.rejectResponse(
           'Failed to delete app identification. It is used by : ' + usedBy, 500

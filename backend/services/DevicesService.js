@@ -135,6 +135,7 @@ class DevicesService {
       'account',
       'ipList',
       'policies',
+      'applications',
       // Internal array, objects
       'labels',
       'upgradeSchedule',
@@ -287,7 +288,13 @@ class DevicesService {
         .limit(limit)
         .populate('interfaces.pathlabels', '_id name description color type')
         .populate('policies.firewall.policy', '_id name description')
-        .populate('policies.multilink.policy', '_id name description');
+        .populate('policies.multilink.policy', '_id name description')
+        .populate({
+          path: 'applications.applicationInfo',
+          populate: {
+            path: 'libraryApp'
+          }
+        });
 
       const devicesMap = result.map(item => {
         return DevicesService.selectDeviceParams(item);
@@ -396,7 +403,13 @@ class DevicesService {
       const result = await devices.findOne({ _id: id, org: { $in: orgList } })
         .populate('interfaces.pathlabels', '_id name description color type')
         .populate('policies.firewall.policy', '_id name description rules')
-        .populate('policies.multilink.policy', '_id name description');
+        .populate('policies.multilink.policy', '_id name description')
+        .populate({
+          path: 'applications.applicationInfo',
+          populate: {
+            path: 'libraryApp'
+          }
+        });
       const device = DevicesService.selectDeviceParams(result);
 
       return Service.successResponse([device]);

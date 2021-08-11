@@ -21,7 +21,7 @@ const notificationsDb = require('../models/notifications');
 const { devices } = require('../models/devices');
 const { verifyPermission } = require('../authenticate');
 const createError = require('http-errors');
-const Joi = require('@hapi/joi');
+const Joi = require('joi');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 
 const notificationsRouter = express.Router();
@@ -37,7 +37,7 @@ const validateGetRequest = (req, res, next) => {
     op: Joi.string().valid('count'),
     status: Joi.string().valid('read', 'unread')
   });
-  const result = Joi.validate(req.query, schema);
+  const result = schema.validate(req.query);
   if (result.error) {
     return next(createError(400, result.error.details[0].message));
   }
@@ -64,7 +64,8 @@ const validatePutRequest = (req, res, next) => {
     ids: Joi.array().items(Joi.string().regex(/^[0-9a-fA-F]{24}$/)).optional()
   });
 
-  const result = Joi.validate(req.body, schema);
+  // const result = Joi.validate(req.body, schema);
+  const result = schema.validate(req.body);
   if (result.error) {
     return next(createError(400, result.error.details[0].message));
   }

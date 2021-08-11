@@ -499,6 +499,39 @@ const deviceVersionsSchema = new Schema({
 });
 
 /**
+ * Device application Schema
+ */
+const deviceApplicationSchema = new Schema({
+  _id: false,
+  applicationInfo: {
+    type: Schema.Types.ObjectId,
+    ref: 'applications',
+    default: null
+  },
+  status: {
+    type: String,
+    enum: [
+      '',
+      'installing',
+      'upgrading',
+      'installed',
+      'uninstalling',
+      'job queue failed',
+      'job deleted',
+      'installation failed',
+      'uninstallation failed',
+      'configuration failed',
+      'job failed'
+    ],
+    default: ''
+  },
+  requestTime: {
+    type: Date,
+    default: null
+  }
+});
+
+/**
  * Device multilink policy schema
  */
 const deviceMultilinkPolicySchema = new Schema({
@@ -522,6 +555,7 @@ const deviceMultilinkPolicySchema = new Schema({
     ],
     default: ''
   },
+  // TODO: check if really needed
   requestTime: {
     type: Date,
     default: null
@@ -818,7 +852,8 @@ const deviceSchema = new Schema({
         message: props => `${props.value} should be a valid integer`
       }
     }
-  }
+  },
+  applications: [deviceApplicationSchema]
 },
 {
   timestamps: true

@@ -16,7 +16,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 const configs = require('../configs')();
-const Joi = require('@hapi/joi');
+const Joi = require('joi');
 const Devices = require('./Devices');
 const modifyDeviceDispatcher = require('../deviceLogic/modifyDevice');
 const createError = require('http-errors');
@@ -535,70 +535,50 @@ class Connections {
    */
   async sendDeviceInfoMsg (machineId, deviceId) {
     const validateDevInfoMessage = msg => {
-      const devInfoMsgObj = Joi.extend(joi => ({
-        base: joi.object().keys({
-          device: joi
-            .string()
-            .regex(/^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/)
+      const devInfoSchema = Joi.object().keys({
+        device: Joi
+          .string()
+          .pattern(/^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/)
+          .required(),
+        components: Joi.object({
+          agent: Joi.object()
+            .keys({ version: Joi.string().required() })
             .required(),
-          components: Joi.object({
-            agent: Joi.object()
-              .keys({ version: Joi.string().required() })
-              .required(),
-            router: Joi.object()
-              .keys({ version: Joi.string().required() })
-              .required(),
-            vpp: Joi.object()
-              .keys({ version: Joi.string().required() })
-              .required(),
-            frr: Joi.object()
-              .keys({ version: Joi.string().required() })
-              .required(),
-            edgeui: Joi.object()
-              .keys({ version: Joi.string().required() })
-              .optional()
-          }),
-          network: joi.object().optional(),
-          tunnels: joi.array().optional(),
-          reconfig: joi.string().allow('').optional(),
-          ikev2: Joi.object({
-            certificateExpiration: Joi.string().allow('').optional(),
-            error: Joi.string().allow('').optional()
-          }).allow({}).optional()
+          router: Joi.object()
+            .keys({ version: Joi.string().required() })
+            .required(),
+          vpp: Joi.object()
+            .keys({ version: Joi.string().required() })
+            .required(),
+          frr: Joi.object()
+            .keys({ version: Joi.string().required() })
+            .required(),
+          edgeui: Joi.object()
+            .keys({ version: Joi.string().required() })
+            .optional()
         }),
-        name: 'versions',
-        language: {
-          err: 'invalid {{component}} version ({{version}})'
-        },
-        rules: [
-          {
-            name: 'format',
-            validate (params, value, state, options) {
-              for (const [component, info] of Object.entries(
-                value.components
-              )) {
-                const ver = info.version;
-                if (!(isSemVer(ver) || isVppVersion(ver))) {
-                  return this.createError(
-                    'versions.err',
-                    { component: component, version: ver },
-                    state,
-                    options
-                  );
-                }
-              }
-              return true;
-            }
+        network: Joi.object().optional(),
+        tunnels: Joi.array().optional(),
+        reconfig: Joi.string().allow('').optional(),
+        ikev2: Joi.object({
+          certificateExpiration: Joi.string().allow('').optional(),
+          error: Joi.string().allow('').optional()
+        }).allow({}).optional()
+      }).custom((obj, helpers) => {
+        for (const [component, info] of Object.entries(
+          obj.components
+        )) {
+          const ver = info.version;
+          if (!(isSemVer(ver) || isVppVersion(ver))) {
+            return helpers.message(`invalid ${component} version ${ver}`);
           }
-        ]
-      }));
-      const devInfoSchema = devInfoMsgObj.versions().format();
-      const result = Joi.validate(msg, devInfoSchema);
+        }
+        return obj;
+      });
+
+      const result = devInfoSchema.validate(msg);
       if (result.error) {
-        return {
-          valid: false,
-          err: `${result.error.name}: ${result.error.details[0].message}`
-        };
+        return { valid: false, err: result.error.details[0].message };
       }
 
       return { valid: true, err: '' };
