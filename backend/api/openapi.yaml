@@ -7670,7 +7670,7 @@ components:
         server:
           type: string
       type: object
-    Application: 
+    Application:
       example:
         _id: library id
         name: Application Name
@@ -7682,7 +7682,7 @@ components:
         - Manage
         - Edge
         - Client
-        operatingSystem: 
+        operatingSystem:
         - Linux
         - Windows
         dependencies: []
@@ -7691,18 +7691,18 @@ components:
         creator: Application creator
         repositoryTime: timestamp
         updatedAt: date
-      properties: 
+      properties:
         _id:
           type: string
-        name: 
+        name:
           type: string
         description:
-          type: string 
-        latestVersion: 
+          type: string
+        latestVersion:
           type: string
         cpuRequirements:
           type: number
-        ramRequirements: 
+        ramRequirements:
           type: number
         components:
           type: array
@@ -7715,7 +7715,7 @@ components:
     PurchasedApplication:
       example:
         _id: _id
-        app: library object 
+        app: library object
         org: organization object
         installedVersion: 1.2.3.5
         purchasedDate: date
@@ -7723,53 +7723,53 @@ components:
         updatedAt: date
         removed: false
       properties:
-        _id: 
-          maxLength: 24
-          minLength: 24
-          type: string
-        app:                
-          type: string          
-        org:
-          type: string
-        installedVersion2: 
-          type: string
-        configuration: 
-          type: object
-        removed: 
-          type: boolean
-    PurchasedApplication:
-      example:
-        _id: _id
-        app: library object
-        org: organization object
-        installedVersion: 1.2.3.5
-        statuses:
-          installed: 1
-          pending: 0
-          failed: 0
-          deleted: 1
-      properties:
         _id:
           maxLength: 24
           minLength: 24
           type: string
         app:
-          type: object
-        org:
-          type: object
-        installedVersion:
           type: string
-        statuses:
+        org:
+          type: string
+        installedVersion2:
+          type: string
+        configuration:
           type: object
-          properties:
-            installed:
-              type: number
-            pending:
-              type: number
-            failed:
-              type: number
-            deleted:
-              type: number
+        removed:
+          type: boolean
+    # PurchasedApplication:
+    #   example:
+    #     _id: _id
+    #     app: library object
+    #     org: organization object
+    #     installedVersion: 1.2.3.5
+    #     statuses:
+    #       installed: 1
+    #       pending: 0
+    #       failed: 0
+    #       deleted: 1
+    #   properties:
+    #     _id:
+    #       maxLength: 24
+    #       minLength: 24
+    #       type: string
+    #     app:
+    #       type: object
+    #     org:
+    #       type: object
+    #     installedVersion:
+    #       type: string
+    #     statuses:
+    #       type: object
+    #       properties:
+    #         installed:
+    #           type: number
+    #         pending:
+    #           type: number
+    #         failed:
+    #           type: number
+    #         deleted:
+    #           type: number
     AppIdentificationRules:
       example:
         ip: 127.0.0.1
