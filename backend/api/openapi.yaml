@@ -3356,6 +3356,22 @@ paths:
         schema:
           type: integer
         style: form
+      - description: The field by which the data will be ordered
+        explode: true
+        in: query
+        name: sortField
+        required: false
+        schema:
+          type: string
+        style: form
+      - description: Sorting order
+        explode: true
+        in: query
+        name: sortOrder
+        required: false
+        schema:
+          type: string
+        style: form
       - description: A filter on specific job ids (comma separated)
         explode: true
         in: query
@@ -7357,7 +7373,7 @@ components:
         - destination: destination
           interface: interface
           gateway: gateway
-        deviceSpecifficRulesEnabled: true
+        deviceSpecificRulesEnabled: true
         firewallRules:
         - name: name
           direction: direction
@@ -7416,7 +7432,7 @@ components:
           items:
             $ref: '#/components/schemas/Interface'
           type: array
-        deviceSpecifficRulesEnabled:
+        deviceSpecificRulesEnabled:
           type: boolean
         firewallRules:
           items:
@@ -7509,7 +7525,7 @@ components:
           destination: 10.10.0.0
           gateway: 10.10.0.1
           interface: eth1
-        deviceSpecifficRulesEnabled: true
+        deviceSpecificRulesEnabled: true
         firewallRules:
         - description: description
           direction: outbound
@@ -7573,7 +7589,7 @@ components:
           items:
             $ref: '#/components/schemas/Interface'
           type: array
-        deviceSpecifficRulesEnabled:
+        deviceSpecificRulesEnabled:
           type: boolean
         firewallRules:
           items:
@@ -7725,7 +7741,10 @@ components:
             key:
               type: string
             area:
-              type: integer
+              oneOf:
+              - type: integer
+              - type: string
+                format: ipv4
             cost:
               type: integer
               nullable: true

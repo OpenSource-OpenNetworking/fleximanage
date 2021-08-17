@@ -534,9 +534,15 @@ class DeviceStatus {
     const device = stats.deviceID;
     const bytes = stats.bytes;
 
+    // save account in order to keep relations between *deleted* orgs and accounts
+    const { account } = await orgModel.findOne({ _id: org });
+
     try {
-      const inc = { $inc: { [`stats.orgs.${org}.devices.${device}.bytes`]: bytes } };
-      await deviceAggregateStats.findOneAndUpdate({ month: month }, inc, {
+      const update = {
+        $inc: { [`stats.orgs.${org}.devices.${device}.bytes`]: bytes },
+        $set: { [`stats.orgs.${org}.account`]: account }
+      };
+      await deviceAggregateStats.findOneAndUpdate({ month: month }, update, {
         upsert: true,
         useFindAndModify: false
       });

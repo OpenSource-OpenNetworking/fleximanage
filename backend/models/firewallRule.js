@@ -66,10 +66,12 @@ const destinationClassificationSchema = new Schema({
         message: 'ports should be a valid ports range'
       }
     },
-    protocols: [{
-      type: String,
+    protocols: {
+      type: [String],
+      default: undefined,
+      required: false,
       enum: ['tcp', 'udp', 'icmp']
-    }],
+    },
     interface: {
       type: String,
       maxlength: [25, 'interface must be at most 25']
@@ -142,8 +144,14 @@ const firewallRuleSchema = new Schema({
     required: true
   },
   classification: {
-    source: sourceClassificationSchema,
-    destination: destinationClassificationSchema
+    source: {
+      type: sourceClassificationSchema,
+      default: sourceClassificationSchema
+    },
+    destination: {
+      type: destinationClassificationSchema,
+      default: destinationClassificationSchema
+    }
   },
   action: {
     type: String,

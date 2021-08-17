@@ -90,10 +90,16 @@ const checkUpdReq = (qtype, req) => new Promise(function (resolve, reject) {
               const deviceCount = await devices.countDocuments({
                 account: mres[0].account
               }).session(session);
+
+              const deviceOrgCount = await devices.countDocuments({
+                account: mres[0].account, org: req.user.defaultOrg._id
+              }).session(session);
               // Unregister a device (by adding -1)
               await flexibilling.registerDevice({
                 account: mres[0].account,
+                org: req.user.defaultOrg._id,
                 count: deviceCount,
+                orgCount: deviceOrgCount,
                 increment: -1
               }, session);
               resolve({ ok: 1, session });

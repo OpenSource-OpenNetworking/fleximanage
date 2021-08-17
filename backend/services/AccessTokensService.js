@@ -61,10 +61,14 @@ class AccessTokensService {
    **/
   static async accesstokensIdDELETE ({ id }, { user }) {
     try {
-      await AccessTokens.deleteOne({
+      const { deletedCount } = await AccessTokens.deleteOne({
         _id: id,
         account: user.defaultAccount._id
       });
+
+      if (deletedCount === 0) {
+        return Service.rejectResponse('Access token not found', 404);
+      }
 
       return Service.successResponse(null, 204);
     } catch (e) {

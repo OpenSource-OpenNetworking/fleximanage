@@ -31,6 +31,7 @@ const logger = require('../logging/logging')({ module: module.filename, type: 'r
 const url = require('url');
 // billing support
 const flexibilling = require('../flexibilling');
+const { mapLteNames } = require('../utils/deviceUtils');
 
 const connectRouter = express.Router();
 connectRouter.use(bodyParser.json());
@@ -138,6 +139,7 @@ connectRouter.route('/register')
                   intf.type = 'WAN';
                   intf.dhcp = intf.dhcp || 'no';
                   if (intf.deviceType === 'lte') {
+                    intf.deviceParams = mapLteNames(intf.deviceParams);
                     // LTE devices are not enabled at registration stage so they can't have a metric
                     intf.metric = '';
                   } else {
@@ -171,12 +173,19 @@ connectRouter.route('/register')
               // Initialize session
               let session;
               let keepCount; // current number of docs per account
+              let keepOrgCount; // current number of docs per account
               mongoConns.getMainDB().startSession()
                 .then((_session) => {
                   session = _session;
                   return session.startTransaction();
                 })
                 .then(() => {
+                  return devices.countDocuments({
+                    account: account, org: decoded.org
+                  }).session(session);
+                })
+                .then((orgCount) => {
+                  keepOrgCount = orgCount;
                   return devices.countDocuments({ account: account }).session(session);
                 })
                 .then(async (count) => {
@@ -207,6 +216,8 @@ connectRouter.route('/register')
                       await flexibilling.registerDevice({
                         account: result[0].account,
                         count: keepCount,
+                        org: decoded.org,
+                        orgCount: keepOrgCount,
                         increment: 1
                       }, session);
 

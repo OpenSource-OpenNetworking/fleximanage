@@ -64,8 +64,8 @@ const methods = {
   modify: {
     apply: modify.apply,
     complete: modify.complete,
-    error: errorNOOP,
-    remove: errorNOOP
+    error: modify.error,
+    remove: modify.remove
   },
   tunnels: {
     apply: tunnels.apply.applyTunnelAdd,

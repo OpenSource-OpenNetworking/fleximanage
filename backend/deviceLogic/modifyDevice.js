@@ -29,6 +29,12 @@ const {
 const { validateModifyDeviceMsg, validateDhcpConfig } = require('./validators');
 const tunnelsModel = require('../models/tunnels');
 const { devices } = require('../models/devices');
+const {
+  complete: firewallPolicyComplete,
+  error: firewallPolicyError,
+  remove: firewallPolicyRemove,
+  getDevicesFirewallJobInfo
+} = require('./firewallPolicy');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 const has = require('lodash/has');
 const omit = require('lodash/omit');
@@ -348,6 +354,10 @@ const prepareModificationMessage = (messageParams, device, newDevice) => {
     }
   }
 
+  if (has(messageParams, 'modify_firewall')) {
+    requests.push(...messageParams.modify_firewall.tasks);
+  }
+
   if (requests.length !== 0) {
     tasks.push(
       {
@@ -367,9 +377,10 @@ const prepareModificationMessage = (messageParams, device, newDevice) => {
  * @param  {string}  username              name of the user that requested the job
  * @param  {Array}   tasks                 the message to be sent to the device
  * @param  {Object}  device                the device to which the job should be queued
+ * @param  {Object}  jobResponse           Additional data to include in the job response
  * @return {Promise}                       a promise for queuing a job
  */
-const queueJob = async (org, username, tasks, device) => {
+const queueJob = async (org, username, tasks, device, jobResponse) => {
   const job = await deviceQueues.addJob(
     device.machineId, username, org,
     // Data
@@ -381,7 +392,8 @@ const queueJob = async (org, username, tasks, device) => {
         device: device._id,
         org: org,
         user: username,
-        origDevice: device
+        origDevice: device,
+        ...jobResponse
       }
     },
     // Metadata
@@ -390,7 +402,7 @@ const queueJob = async (org, username, tasks, device) => {
     null
   );
 
-  logger.info('Modify device job queued', { params: { job: job } });
+  logger.info('Modify device job queued', { params: { jobId: job.id, tasks } });
   return job;
 };
 /**
@@ -571,6 +583,7 @@ const queueModifyDeviceJob = async (device, newDevice, messageParams, user, org)
     !has(messageParams, 'modify_routes') &&
     !has(messageParams, 'modify_dhcp_config') &&
     !has(messageParams, 'modify_ospf') &&
+    !has(messageParams, 'modify_firewall') &&
     Object.values(modifiedIfcsMap).every(modifiedIfc => {
       const origIfc = device.interfaces.find(o => o._id.toString() === modifiedIfc._id.toString());
       const propsModified = Object.keys(modifiedIfc).filter(prop => {
@@ -603,8 +616,15 @@ const queueModifyDeviceJob = async (device, newDevice, messageParams, user, org)
       return differenceWith(propsModified, propsToSkip, isEqual).length === 0;
     });
 
+  // Additional job response data
+  const jobResponse = {};
+  if (messageParams.modify_firewall) {
+    jobResponse.firewallPolicy = messageParams.modify_firewall.data;
+  }
+
   // Queue device modification job
-  const job = !skipModifyJob ? await queueJob(org, user.username, tasks, device) : null;
+  const job = !skipModifyJob
+    ? await queueJob(org, user.username, tasks, device, jobResponse) : null;
 
   // Queue tunnel reconstruction jobs
   try {
@@ -1116,6 +1136,11 @@ const apply = async (device, user, data) => {
     newLteInterfaces,
     oldLteInterfaces,
     (origIfc, newIfc) => {
+      // no need to send job if LTE configuration changed but LTE is disable
+      if (!origIfc.configuration.enable && !newIfc.configuration.enable) {
+        return true;
+      }
+
       return isEqual(origIfc.configuration, newIfc.configuration) &&
         isEqual(origIfc.metric, newIfc.metric);
     }
@@ -1127,11 +1152,37 @@ const apply = async (device, user, data) => {
     modifyParams.modify_interfaces.lte_enable_disable = lteInterfacesDiff;
   }
 
+  const origDevice = device[0];
+  const updDevice = data.newDevice;
+  const updRules = updDevice.firewall.rules.toObject();
+  const origRules = origDevice.firewall.rules.toObject();
+  const rulesModified =
+    origDevice.deviceSpecificRulesEnabled !== updDevice.deviceSpecificRulesEnabled ||
+    !(updRules.length === origRules.length && updRules.every((updatedRule, index) =>
+      isEqual(
+        omit(updatedRule, ['_id', 'name', 'classification']),
+        omit(origRules[index], ['_id', 'name', 'classification'])
+      ) &&
+      isEqual(
+        omit(updatedRule.classification.source, ['_id']),
+        omit(origRules[index].classification.source, ['_id'])
+      ) &&
+      isEqual(
+        omit(updatedRule.classification.destination, ['_id']),
+        omit(origRules[index].classification.destination, ['_id'])
+      )
+    ));
+
+  if (rulesModified) {
+    modifyParams.modify_firewall = await getDevicesFirewallJobInfo(updDevice);
+  }
+
   const modified =
       has(modifyParams, 'modify_routes') ||
       has(modifyParams, 'modify_router') ||
       has(modifyParams, 'modify_interfaces') ||
       has(modifyParams, 'modify_ospf') ||
+      has(modifyParams, 'modify_firewall') ||
       has(modifyParams, 'modify_dhcp_config');
 
   // Queue job only if the device has changed
@@ -1198,6 +1249,10 @@ const complete = async (jobId, res) => {
     logger.warn('Got an invalid job result', { params: { res: res, jobId: jobId } });
     return;
   }
+  // Call firewallPolicy complete callback if needed
+  if (res.firewallPolicy) {
+    firewallPolicyComplete(jobId, res.firewallPolicy);
+  }
   logger.info('Device modification complete', { params: { result: res, jobId: jobId } });
 };
 
@@ -1217,6 +1272,7 @@ const completeSync = async (jobId, jobsData) => {
 /**
  * Creates the interfaces, static routes and
  * DHCP sections in the full sync job.
+ * Firewall rules skipped here, sync from firewallPolicy will handle them
  * @return Array
  */
 const sync = async (deviceId, org) => {
@@ -1329,9 +1385,51 @@ const sync = async (deviceId, org) => {
   };
 };
 
+/**
+ * Called when modify device job fails
+ * @async
+ * @param  {number} jobId Kue job ID number
+ * @param  {Object} res   job result
+ * @return {void}
+ */
+const error = async (jobId, res) => {
+  logger.error('Modify device job failed', {
+    params: { result: res, jobId: jobId }
+  });
+
+  // Call firewallPolicy error callback if needed
+  if (res.firewallPolicy) {
+    firewallPolicyError(jobId, res.firewallPolicy);
+  }
+};
+
+/**
+ * Called when modify device job is removed either
+ * by user or due to expiration. This method should run
+ * only for tasks that were deleted before completion/failure
+ * @async
+ * @param  {Object} job Kue job
+ * @return {void}
+ */
+const remove = async (job) => {
+  if (['inactive', 'delayed'].includes(job._state)) {
+    logger.info('Modify device job removed', {
+      params: { job: job }
+    });
+    // Call firewallPolicy remove callback if needed
+    const { firewallPolicy } = job.data.response.data;
+    if (firewallPolicy) {
+      job.data.response.data = firewallPolicy;
+      firewallPolicyRemove(job);
+    }
+  }
+};
+
 module.exports = {
   apply: apply,
   complete: complete,
   completeSync: completeSync,
+  error: error,
+  remove: remove,
   sync: sync
 };

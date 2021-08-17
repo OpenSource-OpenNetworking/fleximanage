@@ -249,7 +249,7 @@ const interfacesSchema = new Schema({
   },
   ospf: {
     area: {
-      type: Number,
+      type: Schema.Types.Mixed,
       default: 0,
       required: true,
       validate: {
@@ -777,7 +777,7 @@ const deviceSchema = new Schema({
       default: deviceFirewallPolicySchema
     }
   },
-  deviceSpecifficRulesEnabled: {
+  deviceSpecificRulesEnabled: {
     type: Boolean,
     default: true
   },

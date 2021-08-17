@@ -17,7 +17,6 @@
 
 const createError = require('http-errors');
 const firewallPoliciesModel = require('../models/firewallPolicies');
-const mongoConns = require('../mongoConns.js')();
 const configs = require('../configs')();
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 const { devices } = require('../models/devices');
@@ -32,14 +31,82 @@ const appError = require('./appIdentification').error;
 const appRemove = require('./appIdentification').remove;
 const isEmpty = require('lodash/isEmpty');
 
-const prepareParameters = (policy, device) => {
+/**
+ * Gets the device firewall data needed for creating a job
+ * @async
+ * @param   {Object} device - the device to send firewall parameters
+ * @return  {Object} parameters to include in the job response data { requests, response }
+*/
+const getDevicesFirewallJobInfo = async (device) => {
+  let op = 'install';
+  const { policy: id } = device.policies.firewall;
+  const firewallPolicy = await getFirewallPolicy(id);
+  const policyParams = getFirewallParameters(firewallPolicy, device);
+  if (!policyParams) op = 'uninstall';
+  // Extract applications information
+  const apps = await getDevicesAppIdentificationJobInfo(
+    device.org,
+    'firewall',
+    [device._id],
+    op === 'install'
+  );
+
+  const requestTime = Date.now();
+  await updateDevicesBeforeJob([device._id], op, requestTime, firewallPolicy, device.org);
+  return prepareFirewallJobInfo(device, policyParams, op, device.org, apps, requestTime);
+};
+
+const prepareFirewallJobInfo = (device, policyParams, op, org, apps, requestTime) => {
+  const tasks = [
+    {
+      entity: 'agent',
+      message: `${op === 'install' ? 'add' : 'remove'}-firewall-policy`,
+      params: policyParams
+    }
+  ];
+  const data = {
+    policy: {
+      device: { _id: device._id, firewallPolicy: device.policies.firewall },
+      requestTime: requestTime,
+      op: op,
+      org: org
+    }
+  };
+
+  // If the device's appIdentification database is outdated
+  // we add an add-application/remove-application message as well.
+  // add-application comes before add-firewall-policy when installing.
+  // remove-application comes after remove-firewall-policy when uninstalling.
+  if (apps.installIds[device._id] === true) {
+    const task = {
+      entity: 'agent',
+      message: apps.message,
+      params: apps.params
+    };
+    op === 'install' ? tasks.unshift(task) : tasks.push(task);
+
+    data.appIdentification = {
+      deviceId: device._id,
+      ...apps.deviceJobResp
+    };
+  }
+  return { tasks, data };
+};
+
+/**
+ * Gets firewall policy parameters of the device, needed for creating a job
+ * @param   {Object} policy - the global firewall policy with array of rules
+ * @param   {Object} device - the device where to send firewall parameters
+ * @return  {Object} parameters to include in the job or null if nothing to send
+ */
+const getFirewallParameters = (policy, device) => {
   // global rules must be applied after device specific rules
   // assuming there will be not more than 10000 local rules
   const globalShift = 10000;
   const policyRules = policy ? policy.rules.toObject()
     .filter(r => r.enabled)
     .map(r => ({ ...r, priority: r.priority + globalShift })) : [];
-  const deviceRules = device.deviceSpecifficRulesEnabled ? device.firewall.rules.toObject()
+  const deviceRules = device.deviceSpecificRulesEnabled ? device.firewall.rules.toObject()
     .filter(r => r.enabled) : [];
   const firewallRules = [...policyRules, ...deviceRules]
     .sort((r1, r2) => r1.priority - r2.priority);
@@ -134,58 +201,25 @@ const queueFirewallPolicyJob = async (deviceList, op, requestTime, policy, user,
   const jobs = [];
 
   // Extract applications information
-  const { message, params, installIds, deviceJobResp } =
-    await getDevicesAppIdentificationJobInfo(
-      org,
-      'firewall',
-      deviceList.map((d) => d._id),
-      op === 'install'
-    );
+  const apps = await getDevicesAppIdentificationJobInfo(
+    org,
+    'firewall',
+    deviceList.filter(d => op === 'install' || !d.deviceSpecificRulesEnabled).map(d => d._id),
+    op === 'install'
+  );
 
   deviceList.forEach(dev => {
-    const { _id, machineId, policies } = dev;
-    const policyParams = prepareParameters(policy, dev);
-    const jobTitle = policyParams
+    const policyParams = getFirewallParameters(policy, dev);
+    if (!policyParams) op = 'uninstall';
+
+    const jobTitle = op === 'install'
       ? policy ? `Install policy ${policy.name}` : 'Install device specific policy'
       : 'Uninstall policy';
 
-    const tasks = [
-      {
-        entity: 'agent',
-        message: `${policyParams ? 'add' : 'remove'}-firewall-policy`,
-        params: policyParams
-      }
-    ];
-    const data = {
-      policy: {
-        device: { _id: _id, firewallPolicy: policies.firewall },
-        requestTime: requestTime,
-        op: policyParams ? 'install' : op,
-        org: org
-      }
-    };
-
-    // If the device's appIdentification database is outdated
-    // we add an add-application/remove-application message as well.
-    // add-application comes before add-firewall-policy when installing.
-    // remove-application comes after remove-firewall-policy when uninstalling.
-    if (installIds[_id] === true) {
-      const task = {
-        entity: 'agent',
-        message: message,
-        params: params
-      };
-      op === 'install' && policyParams ? tasks.unshift(task) : tasks.push(task);
-
-      data.appIdentification = {
-        deviceId: _id,
-        ...deviceJobResp
-      };
-    }
-
+    const { tasks, data } = prepareFirewallJobInfo(dev, policyParams, op, org, apps, requestTime);
     jobs.push(
       deviceQueues.addJob(
-        machineId,
+        dev.machineId,
         user.username,
         org,
         // Data
@@ -249,6 +283,75 @@ const filterDevices = (devices, deviceIds, op) => {
 };
 
 /**
+ * Get a global firewall policy with rules by Id from the database
+ * @async
+ * @param  {string} id  - the global firewall policy Id
+ * @param  {string} org - the organization Id
+ * @return {Object} mongo firewallPolicy object with rules or undefined
+ */
+const getFirewallPolicy = async (id, org) => {
+  if (!id) return undefined;
+  const firewallPolicy = await firewallPoliciesModel.findOne(
+    { org: org, _id: id },
+    { rules: 1, name: 1 }
+  );
+  return firewallPolicy;
+};
+
+/**
+ * Update devices policy status in DB before sending jobs
+ */
+const updateDevicesBeforeJob = async (deviceIds, op, requestTime, firewallPolicy, org) => {
+  const updateOps = [];
+  if (op === 'install') {
+    updateOps.push({
+      updateMany: {
+        filter: { _id: { $in: deviceIds }, org: org },
+        update: {
+          $set: {
+            'policies.firewall': {
+              policy: firewallPolicy ? firewallPolicy._id : null,
+              status: 'installing',
+              requestTime: requestTime
+            }
+          }
+        },
+        upsert: false
+      }
+    });
+  } else {
+    updateOps.push({
+      updateMany: {
+        filter: { _id: { $in: deviceIds }, org: org, deviceSpecificRulesEnabled: false },
+        update: {
+          $set: {
+            'policies.firewall.status': 'uninstalling',
+            'policies.firewall.requestTime': requestTime
+          }
+        },
+        upsert: false
+      }
+    });
+    updateOps.push({
+      updateMany: {
+        filter: { _id: { $in: deviceIds }, org: org, deviceSpecificRulesEnabled: true },
+        update: {
+          $set: {
+            'policies.firewall': {
+              policy: null,
+              status: 'installing',
+              requestTime: requestTime
+            }
+          }
+        },
+        upsert: false
+      }
+    });
+  }
+  await devices.bulkWrite(updateOps);
+};
+
+/**
  * Creates and queues add/remove policy jobs.
  * @async
  * @param  {Array}    deviceList    an array of the devices to be modified
@@ -260,69 +363,34 @@ const apply = async (deviceList, user, data) => {
   const { org } = data;
   const { op, id } = data.meta;
 
-  let firewallPolicy, session, deviceIds;
+  let firewallPolicy, deviceIds;
   const requestTime = Date.now();
 
   try {
-    session = await mongoConns.getMainDB().startSession();
-    await session.withTransaction(async () => {
-      if (op === 'install') {
-        // Retrieve policy from database
-        firewallPolicy = await firewallPoliciesModel.findOne(
-          {
-            org: org,
-            _id: id
-          },
-          {
-            rules: 1,
-            name: 1
-          }
-        ).session(session);
+    if (op === 'install') {
+      // Retrieve policy from database
+      firewallPolicy = await getFirewallPolicy(id, org);
 
-        if (!firewallPolicy) {
-          throw createError(404, `policy ${id} does not exist`);
-        }
-        // Disabled rules should not be sent to the device
-        firewallPolicy.rules = firewallPolicy.rules.filter(rule => rule.enabled);
-        if (firewallPolicy.rules.length === 0) {
-          throw createError(400, 'Policy must have at least one enabled rule');
-        }
+      if (!firewallPolicy) {
+        throw createError(404, `Firewall policy ${id} does not exist`);
       }
+      // Disabled rules should not be sent to the device
+      firewallPolicy.rules = firewallPolicy.rules.filter(rule => rule.enabled);
+      if (firewallPolicy.rules.length === 0) {
+        throw createError(400, 'Policy must have at least one enabled rule');
+      }
+    }
 
-      // Extract the device IDs to operate on
-      deviceIds = data.devices
-        ? await getOpDevices(data.devices, org, firewallPolicy)
-        : [deviceList[0]._id];
+    // Extract the device IDs to operate on
+    deviceIds = data.devices
+      ? await getOpDevices(data.devices, org, firewallPolicy)
+      : [deviceList[0]._id];
 
-      // Update devices policy in the database
-      const update = op === 'install'
-        ? {
-          $set: {
-            'policies.firewall': {
-              policy: firewallPolicy._id,
-              status: 'installing',
-              requestTime: requestTime
-            }
-          }
-        }
-        : {
-          $set: {
-            'policies.firewall.status': 'uninstalling',
-            'policies.firewall.requestTime': requestTime
-          }
-        };
-
-      await devices.updateMany(
-        { _id: { $in: deviceIds }, org: org },
-        update,
-        { upsert: false }
-      ).session(session);
-    });
+    // Update devices policy in the database
+    await updateDevicesBeforeJob(deviceIds, op, requestTime, firewallPolicy, org);
   } catch (err) {
     throw err.name === 'MongoError'
       ? new Error() : err;
-  } finally {
-    session.endSession();
   }
 
   // Queue policy jobs
@@ -552,8 +620,8 @@ const sync = async (deviceId, org) => {
     );
   }
   // if no firewall policy then device specific rules will be sent
-  const params = prepareParameters(firewallPolicy, device);
-  if (!isEmpty(params)) {
+  const params = getFirewallParameters(firewallPolicy, device);
+  if (params) {
     // Push policy task and relevant data for sync complete handler
     requests.push({ entity: 'agent', message: 'add-firewall-policy', params });
     completeCbData.push({
@@ -578,5 +646,5 @@ module.exports = {
   error: error,
   remove: remove,
   sync: sync,
-  queueFirewallPolicyJob
+  getDevicesFirewallJobInfo
 };

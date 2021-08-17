@@ -24,6 +24,8 @@ const {
   getAppIdentificationUpdateAt
 } = require('../models/appIdentifications');
 const { devices } = require('../models/devices');
+const firewallPoliciesModel = require('../models/firewallPolicies');
+const multiLinkPoliciesModel = require('../models/mlpolicies');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
 var mongoose = require('mongoose');
 const find = require('lodash/find');
@@ -324,6 +326,34 @@ class AppIdentificationsService {
         return Service.rejectResponse('Requested object was not found', 404);
       }
 
+      const firewallPoliciesUsed = await firewallPoliciesModel.find({
+        $or: [
+          { 'rules.classification.source.trafficId': id },
+          { 'rules.classification.destination.trafficId': id }
+        ]
+      }, { name: 1 });
+      const multiLinkPoliciesUsed = await multiLinkPoliciesModel.find({
+        'rules.classification.application.appId': id
+      }, { name: 1 });
+      const devicesUsed = await devices.find({
+        $or: [
+          { 'firewall.rules.classification.source.trafficId': id },
+          { 'firewall.rules.classification.destination.trafficId': id }
+        ]
+      }, { name: 1 });
+
+      if (firewallPoliciesUsed.length || multiLinkPoliciesUsed.length || devicesUsed.length) {
+        let usedBy = !firewallPoliciesUsed.length ? ''
+          : `Firewall policies (${firewallPoliciesUsed.map(_ => _.name).join(',')}) `;
+        usedBy += !multiLinkPoliciesUsed.length ? ''
+          : `ML policies (${multiLinkPoliciesUsed.map(_ => _.name).join(',')}) `;
+        usedBy += !devicesUsed.length ? ''
+          : `Devices (${devicesUsed.map(_ => _.name).join(',')}) `;
+
+        return Service.rejectResponse(
+          'Failed to delete app identification. It is used by : ' + usedBy, 500
+        );
+      }
       appIdentsRes.appIdentifications =
         appIdentsRes.appIdentifications.filter(item => item.id !== id);
       const updateResult =

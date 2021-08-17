@@ -432,8 +432,6 @@ describe('validateRoutingProto', () => {
         protocol                     | result
         ${'OSPF'}                    | ${true}
         ${'ospf'}                    | ${true}
-        ${'BGP'}                     | ${true}
-        ${'bGp'}                     | ${true}
         ${'None'}                    | ${true}
         ${null}                      | ${false}
         ${undefined}                 | ${false}

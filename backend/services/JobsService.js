@@ -22,6 +22,7 @@ const deviceQueues = require('../utils/deviceQueue')(
   configs.get('redisUrl')
 );
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
+const { paginated } = require('../utils/pagination');
 const pick = require('lodash/pick');
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
 
@@ -61,12 +62,16 @@ class JobsService {
   /**
    * Get all Jobs
    *
-   * offset Integer The number of items to skip before starting to collect the result set (optional)
-   * limit Integer The numbers of items to return (optional)
-   * status String A filter on the job status (optional)
+   * @param {Integer} offset The number of items to skip before collecting the result (optional)
+   * @param {Integer} limit The numbers of items to return (optional)
+   * @param {String} sortField The field by which the data will be ordered (optional)
+   * @param {String} sortOrder Sorting order [asc|desc] (optional)
+   * @param {String} status Filter on the job status (optional)
+   * @param {String} ids Filter on job ids (comma separated) (optional)
    * returns List
    **/
-  static async jobsGET ({ offset, limit, org, status, ids }, { user }) {
+  static async jobsGET (requestParams, { user }, response) {
+    const { org, offset, limit, sortField, sortOrder, status, ids } = requestParams;
     try {
       const stateOpts = ['complete', 'failed', 'inactive', 'delayed', 'active'];
       // Check state provided is allowed
@@ -79,7 +84,7 @@ class JobsService {
 
       // Generate and send the result
       const orgList = await getAccessTokenOrgList(user, org, true);
-      let result = [];
+      const result = [];
 
       if (ids !== undefined) {
         // Convert Ids to strings
@@ -90,7 +95,10 @@ class JobsService {
             result.push(parsedJob);
           }
         );
-        return Service.successResponse(result);
+        response.setHeader('records-total', result.length);
+        return Service.successResponse(
+          paginated(result, offset, limit, sortField, sortOrder)
+        );
       }
       if (status === 'all') {
         await Promise.all(
@@ -109,12 +117,11 @@ class JobsService {
           }
         );
       }
-      limit = limit > 0 ? limit : result.length;
-      if (offset) {
-        result = result.slice(offset, offset + limit);
-      }
 
-      return Service.successResponse(result);
+      response.setHeader('records-total', result.length);
+      return Service.successResponse(
+        paginated(result, offset, limit, sortField, sortOrder)
+      );
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',

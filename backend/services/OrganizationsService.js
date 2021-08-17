@@ -217,12 +217,18 @@ class OrganizationsService {
       const deviceCount = await Devices.devices.countDocuments({ account: user.defaultAccount._id })
         .session(session);
 
+      const deviceOrgCount = await Devices.devices.countDocuments(
+        { account: user.defaultAccount._id, org: id }
+      ).session(session);
+
       // Delete all devices
       await Devices.devices.deleteMany({ org: id }, { session: session });
       // Unregister a device (by removing the removed org number)
       await Flexibilling.registerDevice({
         account: user.defaultAccount._id,
+        org: id,
         count: deviceCount,
+        orgCount: deviceOrgCount,
         increment: -orgDevices.length
       }, session);
 

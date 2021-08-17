@@ -136,6 +136,9 @@ class DeviceQueues {
       concurrency: 1
     };
 
+    // Increase event listeners limit - https://github.com/Automattic/kue/issues/1189
+    this.queue.setMaxListeners(this.queue.getMaxListeners() + queueInfo.concurrency);
+
     this.queue.process(deviceId, queueInfo.concurrency, async (job, ctx, done) => {
       queueInfo.context = ctx;
       // Init message is sent only to update the context
