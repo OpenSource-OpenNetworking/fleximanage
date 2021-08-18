@@ -20,6 +20,7 @@ const Service = require('./Service');
 const notificationsDb = require('../models/notifications');
 const { devices } = require('../models/devices');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
+const mongoose = require('mongoose');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 
 class NotificationsService {
@@ -34,7 +35,7 @@ class NotificationsService {
     let orgList;
     try {
       orgList = await getAccessTokenOrgList(user, org, false);
-      const query = { org: { $in: orgList } };
+      const query = { org: { $in: orgList.map(o => mongoose.Types.ObjectId(o)) } };
       if (status) {
         query.status = status;
       }
