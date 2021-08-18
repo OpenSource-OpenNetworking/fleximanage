@@ -41,6 +41,8 @@ class TunnelsService {
       'deviceBconf',
       'encryptionMethod',
       '_id',
+      'configStatus',
+      'configStatusReason',
       'pathlabel']);
 
     retTunnel.interfaceADetails =

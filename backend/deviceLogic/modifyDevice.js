@@ -46,6 +46,7 @@ const isEmpty = require('lodash/isEmpty');
 const pick = require('lodash/pick');
 const isObject = require('lodash/isObject');
 const { buildInterfaces } = require('./interfaces');
+const { shouldSetAsIncompleteTunnel, setIncompleteTunnelStatus } = require('./tunnels');
 /**
  * Remove fields that should not be sent to the device from the interfaces array.
  * @param  {Array} interfaces an array of interfaces that will be sent to the device
@@ -661,13 +662,24 @@ const reconstructTunnels = async (removedTunnels, org, username) => {
       .populate('deviceB');
 
     for (const tunnel of tunnels) {
-      const { deviceA, deviceB, pathlabel } = tunnel;
+      const { deviceA, deviceB, pathlabel, num } = tunnel;
       const ifcA = deviceA.interfaces.find(ifc => {
         return ifc._id.toString() === tunnel.interfaceA.toString();
       });
       const ifcB = deviceB.interfaces.find(ifc => {
         return ifc._id.toString() === tunnel.interfaceB.toString();
       });
+
+      // TODO: test it
+      const [isIncomplete, reason, deviceToNotify] = shouldSetAsIncompleteTunnel(
+        ifcA, ifcB, deviceA, deviceB);
+
+      if (isIncomplete) {
+        await setIncompleteTunnelStatus(num, org, true, reason, deviceToNotify);
+        continue;
+      } else if (tunnel.configStatus === 'incomplete') {
+        await setIncompleteTunnelStatus(num, org, false);
+      }
 
       const [tasksDeviceA, tasksDeviceB] = await prepareTunnelAddJob(
         tunnel,

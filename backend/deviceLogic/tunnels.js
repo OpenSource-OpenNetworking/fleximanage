@@ -31,6 +31,8 @@ const deviceQueues = require('../utils/deviceQueue')(
 );
 const { routerVersionsCompatible, getMajorVersion } = require('../versioning');
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
+const notificationsMgr = require('../notifications/notifications')();
+const notificationsDb = require('../models/notifications');
 
 const intersectIfcLabels = (ifcLabelsA, ifcLabelsB) => {
   const intersection = [];
@@ -148,33 +150,27 @@ const applyTunnelAdd = async (devices, user, data) => {
 
         // Create the list of interfaces for both devices.
         // Add a set of the interface's path labels
-        const deviceAIntfs = [];
-        deviceA.interfaces.forEach(intf => {
-          if (intf.isAssigned === true && intf.type === 'WAN' && intf.gateway) {
-            const labelsSet = new Set(intf.pathlabels.map(label => {
-              // DIA interfaces cannot be used in tunnels
-              return label.type !== 'DIA' ? label._id : null;
-            }));
-            deviceAIntfs.push({
-              labelsSet: labelsSet,
-              ...intf.toObject()
-            });
-          }
-        });
-
-        const deviceBIntfs = [];
-        deviceB.interfaces.forEach(intf => {
-          if (intf.isAssigned === true && intf.type === 'WAN' && intf.gateway) {
-            const labelsSet = new Set(intf.pathlabels.map(label => {
-              // DIA interfaces cannot be used in tunnels
-              return label.type !== 'DIA' ? label._id : null;
-            }));
-            deviceBIntfs.push({
-              labelsSet: labelsSet,
-              ...intf.toObject()
-            });
-          }
-        });
+        const getIntfsList = interfaces => {
+          const arr = [];
+          interfaces.forEach(intf => {
+            const isAssigned = intf.isAssigned === true;
+            const isWAN = intf.type === 'WAN';
+            const hasGW = intf.gateway ? true : (intf.deviceType === 'lte' || intf.dhcp === 'yes');
+            if (isAssigned && isWAN && hasGW) {
+              const labelsSet = new Set(intf.pathlabels.map(label => {
+                // DIA interfaces cannot be used in tunnels
+                return label.type !== 'DIA' ? label._id : null;
+              }));
+              arr.push({
+                labelsSet: labelsSet,
+                ...intf.toObject()
+              });
+            }
+          });
+          return arr;
+        };
+        const deviceAIntfs = getIntfsList(deviceA.interfaces);
+        const deviceBIntfs = getIntfsList(deviceB.interfaces);
 
         const devicesInfo = {
           deviceA: { hostname: deviceA.hostname, interfaces: deviceAIntfs },
@@ -509,6 +505,79 @@ const generateTunnelPromise = (user, org, pathLabel, deviceA, deviceB,
 };
 
 /**
+ * Check if this tunnel cannot be created now on the agent
+ * @param  {Object} interfaceA  device A tunnel interface
+ * @param  {Object} interfaceB  device B tunnel interface
+ * @param  {Object} deviceA     details of device A
+ * @param  {Object} deviceB     details of device B
+ * @return {[incomplete: boolean, reason: string, device: object ]} array with relevant results
+ */
+const shouldSetAsIncompleteTunnel = (interfaceA, interfaceB, deviceA, deviceB) => {
+  let incomplete = false;
+  let reason = null;
+  let device = null;
+
+  [interfaceA, interfaceB].forEach((intf, idx) => {
+    // if interface has no IP address
+    if (!intf.IPv4 || intf.IPv4 === '') {
+      // if the interface is dhcp or lte, we will mark it as incomplete tunnel
+      if (intf.deviceType === 'lte' || intf.dhcp === 'yes') {
+        device = idx === 0 ? deviceA : deviceB;
+        incomplete = true;
+        reason = `Interface ${intf.name} in device ${device.name} has no IP address`;
+      }
+    }
+  });
+
+  return [incomplete, reason, device];
+};
+
+/**
+ * Set incomplete state for tunnel if needed and send notification
+ * @param  {number} num  tunnel number
+ * @param  {string} org  organization id
+ * @param  {boolean} isIncomplete  indicate if need set as incomplete or not
+ * @param  {string} reason  incomplete reason
+ * @param  {object} device  device of incomplete tunnel
+ * @return void
+ */
+const setIncompleteTunnelStatus = async (num, org, isIncomplete, reason = null, device = null) => {
+  await tunnelsModel.findOneAndUpdate(
+    // Query, use the org and tunnel number
+    { org, num },
+    {
+      $set: {
+        configStatus: isIncomplete ? 'incomplete' : '',
+        configStatusReason: isIncomplete ? reason : ''
+      }
+    },
+    // Options
+    { upsert: false }
+  );
+
+  if (isIncomplete) {
+    // check if incomplete tunnel status already sent
+    const notificationExists = await notificationsDb.findOne({
+      org,
+      status: 'unread',
+      device: device._id,
+      details: reason
+    });
+
+    if (!notificationExists) {
+      await notificationsMgr.sendNotifications([{
+        org: org,
+        title: `Tunnel number ${num} was not created`,
+        time: new Date(),
+        device: device._id,
+        machineId: device.machineId,
+        details: reason
+      }]);
+    }
+  }
+};
+
+/**
  * Queues the tunnel creation/deletion jobs to both
  * of the devices that are connected via the tunnel
  * @param  {boolean} isAdd        a flag indicating creation/deletion
@@ -653,11 +722,12 @@ const prepareTunnelAddJob = async (
     pathLabel
   );
 
+  // validate tunnels params
   [paramsDeviceA, paramsDeviceB].forEach(({ src, dst, dstPort }, idx) => {
-    const ifName = idx === 0 ? deviceAIntf.name : deviceBIntf.name;
+    const intfInfo = idx === 0 ? deviceAIntf : deviceBIntf;
     if (!src) {
       throw new Error(
-        `Can't create tunnel number ${tunnel.num}. Interface ${ifName} has no IP address`);
+        `Can't create tunnel number ${tunnel.num}. Interface ${intfInfo.name} has no IP address`);
     }
     if (!dst) {
       throw new Error(
@@ -829,11 +899,23 @@ const addTunnel = async (
       interfaceB: deviceBIntf._id,
       pathlabel: pathLabel,
       encryptionMethod,
-      tunnelKeys
+      tunnelKeys,
+      configStatus: '',
+      configStatusReason: ''
     },
     // Options
     { upsert: true, new: true }
   );
+
+  const [isIncomplete, reason, deviceToNotify] = shouldSetAsIncompleteTunnel(
+    deviceAIntf, deviceBIntf, deviceA, deviceB);
+
+  if (isIncomplete) {
+    await setIncompleteTunnelStatus(tunnelnum, org, true, reason, deviceToNotify);
+    return [];
+  } else if (tunnel.configStatus === 'incomplete') {
+    await setIncompleteTunnelStatus(tunnelnum, org, false);
+  }
 
   const [tasksDeviceA, tasksDeviceB] = await prepareTunnelAddJob(
     tunnel,
@@ -1161,8 +1243,8 @@ const sync = async (deviceId, org) => {
       pathlabel: 1
     }
   )
-    .populate('deviceA', 'machineId interfaces versions IKEv2')
-    .populate('deviceB', 'machineId interfaces versions IKEv2')
+    .populate('deviceA', 'machineId interfaces versions IKEv2 name')
+    .populate('deviceB', 'machineId interfaces versions IKEv2 name')
     .lean();
 
   // Create add-tunnel messages
@@ -1174,13 +1256,15 @@ const sync = async (deviceId, org) => {
     const {
       _id,
       num,
+      org,
       deviceA,
       deviceB,
       interfaceA,
       interfaceB,
       tunnelKeys,
       encryptionMethod,
-      pathlabel
+      pathlabel,
+      configStatus
     } = tunnel;
 
     const ifcA = deviceA.interfaces.find(
@@ -1200,28 +1284,26 @@ const sync = async (deviceId, org) => {
         devicesToSync.push(remoteDeviceId);
       }
     }
-    let tasksA = [];
-    let tasksB = [];
-    try {
-      [tasksA, tasksB] = await prepareTunnelAddJob(
-        tunnel,
-        ifcA,
-        ifcB,
-        pathlabel,
-        deviceA,
-        deviceB
-      );
-    } catch (e) {
-      // If it's an LTE interface with no IP address,
-      // For example, in the case of "fwkill" and "fwagent reset -s",
-      // We want to enable this sync job without this tunnel.
-      // What will happen is that the `sync` will succeed, connect the LTE,
-      // then flexiManage will update with the new address and re-create the tunnel
-      const ifc = deviceId.toString() === deviceA._id.toString() ? ifcA : ifcB;
-      if (ifc.deviceType === 'lte' && ifc.IPv4 === '') {
-        continue;
-      }
+
+    const [isIncomplete, reason, deviceToNotify] = shouldSetAsIncompleteTunnel(
+      ifcA, ifcB, deviceA, deviceB);
+
+    if (isIncomplete) {
+      await setIncompleteTunnelStatus(num, org, true, reason, deviceToNotify);
+      continue;
+    } else if (configStatus === 'incomplete') {
+      await setIncompleteTunnelStatus(num, org, false);
     }
+
+    const [tasksA, tasksB] = await prepareTunnelAddJob(
+      tunnel,
+      ifcA,
+      ifcB,
+      pathlabel,
+      deviceA,
+      deviceB
+    );
+
     // Add the tunnel only for the device that is being synced
     const deviceTasks =
       deviceId.toString() === deviceA._id.toString() ? tasksA : tasksB;
@@ -1349,5 +1431,7 @@ module.exports = {
   prepareTunnelRemoveJob: prepareTunnelRemoveJob,
   prepareTunnelAddJob: prepareTunnelAddJob,
   queueTunnel: queueTunnel,
-  oneTunnelDel: oneTunnelDel
+  oneTunnelDel: oneTunnelDel,
+  shouldSetAsIncompleteTunnel: shouldSetAsIncompleteTunnel,
+  setIncompleteTunnelStatus: setIncompleteTunnelStatus
 };

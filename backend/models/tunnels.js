@@ -110,6 +110,21 @@ const tunnelSchema = new Schema({
   pendingTunnelModification: {
     type: Boolean,
     default: false
+  },
+  // indicate if this tunnel was sent to flexiEdge and configured only in manage
+  configStatus: {
+    type: String,
+    enum: [
+      '',
+      'completed',
+      'incomplete'
+    ],
+    default: ''
+  },
+  // reason for incomplete tunnel configuration
+  configStatusReason: {
+    type: String,
+    default: ''
   }
 }, {
   timestamps: true
