@@ -39,8 +39,7 @@ const isEmpty = require('lodash/isEmpty');
 */
 const getDevicesFirewallJobInfo = async (device) => {
   let op = 'install';
-  const { policy: id } = device.policies.firewall;
-  const firewallPolicy = await getFirewallPolicy(id);
+  const { policy: firewallPolicy } = device.policies.firewall;
   const policyParams = getFirewallParameters(firewallPolicy, device);
   if (!policyParams) op = 'uninstall';
   // Extract applications information
@@ -596,7 +595,7 @@ const remove = async (job) => {
 const sync = async (deviceId, org) => {
   const device = await devices.findOne(
     { _id: deviceId },
-    { 'policies.firewall': 1, 'firewall.rules': 1 }
+    { deviceSpecificRulesEnabled: 1, 'policies.firewall': 1, 'firewall.rules': 1 }
   );
 
   const { policy, status } = device.policies.firewall;

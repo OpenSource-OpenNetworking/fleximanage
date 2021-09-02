@@ -664,6 +664,9 @@ class DevicesService {
           case 'agentui':
             errorMessage = 'Failed to get flexiEdge UI logs';
             break;
+          case 'application_ids':
+            errorMessage = 'Failed to get Application Identification logs';
+            break;
           default:
             errorMessage = 'Failed to get device logs';
         }
@@ -911,25 +914,61 @@ class DevicesService {
                   }
                 }
               }
-              if (!updIntf.isAssigned || origIntf.type !== updIntf.type) {
-                // check firewall rules
-                if (deviceRequest.firewall) {
-                  const { rules } = deviceRequest.firewall;
-                  if (rules.some(r => r.direction === 'inbound' &&
-                    r.classification.destination.ipProtoPort.interface === origIntf.devId)) {
-                    throw new Error(
-                      `WAN interface ${origIntf.name} \
-                      has firewall rules. Please remove rules before modifying.`
-                    );
+            }
+            // check firewall rules
+            if (deviceRequest.firewall) {
+              let hadInbound = false;
+              let hadOutbound = false;
+              let hasInbound = false;
+              let hasOutbound = false;
+              for (const rule of deviceRequest.firewall.rules) {
+                if (rule.direction === 'inbound') {
+                  if (rule.classification.destination.ipProtoPort.interface === origIntf.devId) {
+                    hadInbound = true;
                   }
-                  if (rules.some(r => r.direction === 'outbound' &&
-                    r.interfaces.includes(origIntf.devId))) {
-                    throw new Error(
-                      `LAN Interface ${origIntf.name} \
-                      has firewall rules. Please remove rules before modifying.`
-                    );
+                  if (rule.classification.destination.ipProtoPort.interface === updIntf.devId) {
+                    hasInbound = true;
                   }
                 }
+                if (rule.direction === 'outbound') {
+                  if (rule.interfaces.includes(origIntf.devId)) {
+                    hadOutbound = true;
+                  }
+                  if (rule.interfaces.includes(updIntf.devId)) {
+                    hasOutbound = true;
+                  }
+                }
+              }
+              if (origIntf.type !== updIntf.type) {
+                if (hadInbound && updIntf.type !== 'WAN') {
+                  throw new Error(
+                    `WAN interface ${origIntf.name} \
+                    has firewall rules. Please remove rules before modifying.`
+                  );
+                }
+                if (hadOutbound && updIntf.type !== 'LAN') {
+                  throw new Error(
+                    `LAN Interface ${origIntf.name} \
+                    has firewall rules. Please remove rules before modifying.`
+                  );
+                }
+              }
+              if ((hasOutbound || hasInbound) && !updIntf.isAssigned) {
+                throw new Error(
+                  `Installing firewall on unassigned interface ${origIntf.name} is not allowed`
+                );
+              }
+              if (hasOutbound && updIntf.type !== 'LAN') {
+                throw new Error(
+                  `${updIntf.type} Interface ${origIntf.name} configured with outbound rules. \
+                  Outbound rules are allowed on LAN only.`
+                );
+              }
+              if (hasInbound && updIntf.type !== 'WAN') {
+                throw new Error(
+                  `${updIntf.type} Interface ${origIntf.name} configured with inbound rules. \
+                  Inbound rules are allowed on WAN only.`
+                );
               }
             }
 

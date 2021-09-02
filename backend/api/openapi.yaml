@@ -3050,6 +3050,7 @@ paths:
           - ospf
           - hostapd
           - agentui
+          - application_ids
           type: string
         style: form
       responses:

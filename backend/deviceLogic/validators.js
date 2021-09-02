@@ -84,10 +84,10 @@ const validateDhcpConfig = (device, modifiedInterfaces) => {
 /**
  * Checks whether firewall rules are valid
  * @param {Array} rules - array of firewall rules to validate
- * @param {Object}  device - the device to check for device-specific rules
- * @return {{valid: boolean, err: string}}  test result + error, if device is invalid
+ * @param {Array}  interfaces - interfaces of the device to check for device-specific rules
+ * @return {{valid: boolean, err: string}}  test result + error, if rules are invalid
  */
-const validateFirewallRules = (rules, device = undefined) => {
+const validateFirewallRules = (rules, interfaces = undefined) => {
   const inboundRuleTypes = ['edgeAccess', 'portForward', 'nat1to1'];
   // Common rules validation
   for (const rule of rules) {
@@ -121,14 +121,11 @@ const validateFirewallRules = (rules, device = undefined) => {
           return { valid: false, err: 'IP or ports range must be specified' };
         }
       };
-      if (ipProtoPort && !trafficId && !trafficTags) {
-        const { ip, ports, protocols } = ipProtoPort;
-        if (inbound !== 'nat1to1' && !ip && !ports && !protocols) {
-          return { valid: false, err: 'IP, ports or protocols must be specified' };
-        };
+      if (ipProtoPort && inbound !== 'nat1to1' && !trafficId && !trafficTags) {
+        const { protocols } = ipProtoPort;
         if (!Array.isArray(protocols) || protocols.length === 0) {
           return { valid: false, err: 'At least one protocol must be specified' };
-        }
+        };
       };
       if (trafficTags) {
         // Traffic Tags not allowed for source
@@ -145,7 +142,7 @@ const validateFirewallRules = (rules, device = undefined) => {
   };
 
   // Device-specific rules validation
-  if (device) {
+  if (interfaces) {
     // Port forward rules validation
     const forwardedPorts = {};
     const internalPorts = {};
@@ -155,9 +152,12 @@ const validateFirewallRules = (rules, device = undefined) => {
       if (isEmpty(devId)) {
         return { valid: false, err: 'WAN interface must be specified in port forward rule' };
       }
-      const dstIfc = device.interfaces.find(ifc => ifc.devId === devId);
-      if (!dstIfc || dstIfc !== 'WAN') {
-        return { valid: false, err: 'Only WAN interface can be selected in port forward rule' };
+      const dstIfc = interfaces.find(ifc => ifc.devId === devId);
+      if (!dstIfc || !dstIfc.isAssigned || dstIfc.type !== 'WAN') {
+        return {
+          valid: false,
+          err: 'Only Assigned WAN interface can be selected in port forward rule'
+        };
       }
       if (isEmpty(internalIP)) {
         return { valid: false, err: 'Internal IP address must be specified in port forward rule' };
@@ -178,7 +178,6 @@ const validateFirewallRules = (rules, device = undefined) => {
         const [portLow, portHigh] = destPorts.split('-');
         for (let usedPort = +portLow; usedPort <= +portHigh; usedPort++) {
           forwardedPorts[devId].push(usedPort);
-          console.log(usedPort, +internalPortStart + usedPort - portLow);
           internalPorts[internalIP].push(+internalPortStart + usedPort - portLow);
         }
       } else {
@@ -399,7 +398,8 @@ const validateDevice = (device, isRunning = false, organizationLanSubnets = []) 
 
   // Firewall rules validation
   if (device.firewall) {
-    const { valid, err } = validateFirewallRules(device.firewall.rules);
+    const { interfaces, firewall } = device;
+    const { valid, err } = validateFirewallRules(firewall.rules, interfaces);
     if (!valid) {
       return { valid, err };
     }
