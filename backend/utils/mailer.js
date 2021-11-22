@@ -55,11 +55,28 @@ class Mailer {
      */
   sendMailHTML (from, to, subject, html) {
     const mailOptions = {
+      // Envelop is needed for adding the sender in the mail envelop
+      // This fix the SPF failure as the sender is from flexiwan.com
+      // DKIM is also signed per from domain as part of the SMTP server
+      // This will send the mail as to <dest> from <from> via <noreply@flexiwan.com>
+      // To remove the via, we need to add SPF record to the customer email and
+      // use the <from> address in the envelop
+      envelope: {
+        from: 'flexiWAN <noreply@flexiwan.com>',
+        to: to
+      },
       from: from,
       to: to,
       subject: subject,
       generateTextFromHTML: true,
-      html: html
+      html: html + `<p style='color:#bbbbbb;'>You are receiving this email because 
+      you are registered on flexiWAN. 
+      If you wish to delete your account on flexiWAN, 
+      please open a support ticket by sending an email to
+      <a href="mailto:yourfriends@flexiwan.com">yourfriends@flexiwan.com</a> and put in 
+      the subject "Request to delete my account".
+      The request must be sent from the email of the account owner 
+      that opened the account on flexiWAN..</p>`
     };
 
     const p = new Promise((resolve, reject) => {
