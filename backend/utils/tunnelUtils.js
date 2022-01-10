@@ -163,8 +163,12 @@ const getTunnelsPipeline = (orgList, filters) => {
     $project: {
       num: 1,
       isActive: 1,
+      interfaceA: 1,
+      interfaceB: 1,
       'interfaceADetails.name': 1,
       'interfaceBDetails.name': 1,
+      'interfaceADetails.devId': 1,
+      'interfaceBDetails.devId': 1,
       peer: 1,
       'interfaceADetails.PublicPort': 1,
       'interfaceBDetails.PublicPort': 1,
