@@ -640,6 +640,10 @@ class DevicesService {
         .populate('interfaces.pathlabels', '_id name description color type')
         .populate('policies.firewall.policy', '_id name description rules')
         .populate('policies.multilink.policy', '_id name description');
+
+      if (!result) {
+        return Service.rejectResponse('Device not found', 404);
+      }
       const device = await DevicesService.selectDeviceParams(result);
 
       return Service.successResponse([device]);
