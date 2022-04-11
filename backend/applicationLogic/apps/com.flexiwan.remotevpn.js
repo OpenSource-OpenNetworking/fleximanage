@@ -385,6 +385,7 @@ class RemoteVpn extends IApplication {
         ? config.dnsDomains.split(/\s*,\s*/) : [];
 
       params.routeAllTrafficOverVpn = config.routeAllTrafficOverVpn || false;
+      params.clientToClient = config.clientToClient || false;
       params.port = config.serverPort ? config.serverPort : '';
       params.caCrt = caCrt;
       params.serverKey = serverKey;
@@ -411,6 +412,7 @@ class RemoteVpn extends IApplication {
     if (oldConfig.dnsIps !== updatedConfig.dnsIps) return true;
     if (oldConfig.dnsDomains !== updatedConfig.dnsDomains) return true;
     if (oldConfig.routeAllTrafficOverVpn !== updatedConfig.routeAllTrafficOverVpn) return true;
+    if (oldConfig.clientToClient !== updatedConfig.clientToClient) return true;
     return false;
   };
 
@@ -516,6 +518,7 @@ const allowedFields = [
   'networkId',
   'serverPort',
   'routeAllTrafficOverVpn',
+  'clientToClient',
   'dnsIps',
   'dnsDomains',
   'authentications',
@@ -530,6 +533,7 @@ const vpnConfigSchema = Joi.object().keys({
   networkId: Joi.string().pattern(/^[A-Za-z0-9]+$/).min(3).max(20).required(),
   serverPort: Joi.number().port().required(),
   routeAllTrafficOverVpn: Joi.boolean().required(),
+  clientToClient: Joi.boolean().required(),
   allowedPortalUsers: Joi.number().min(1).required(),
   dnsIps: Joi.string().custom((val, helpers) => {
     const domainList = val.split(/\s*,\s*/);
