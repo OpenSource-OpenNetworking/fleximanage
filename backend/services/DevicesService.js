@@ -32,7 +32,7 @@ const validator = require('validator');
 const net = require('net');
 const pick = require('lodash/pick');
 const isEqual = require('lodash/isEqual');
-
+const isEmpty = require('lodash/isEmpty');
 const uniqBy = require('lodash/uniqBy');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 const flexibilling = require('../flexibilling');
@@ -273,7 +273,8 @@ class DevicesService {
           'internalIP',
           'internalPortStart',
           'interfaces',
-          'system'
+          'system',
+          'reference'
         ]);
         retRule._id = retRule._id.toString();
         return retRule;
@@ -362,6 +363,12 @@ class DevicesService {
           }
         },
         {
+          $unwind: {
+            path: '$applications',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        {
           $lookup: {
             from: 'applications',
             localField: 'applications.app',
@@ -387,6 +394,23 @@ class DevicesService {
           $unwind: {
             path: '$applications.app.appStoreApp',
             preserveNullAndEmptyArrays: true
+          }
+        },
+        {
+          $group: {
+            _id: '$_id',
+            root: { $mergeObjects: '$$ROOT' },
+            applications: { $push: '$applications' }
+          }
+        },
+        {
+          $replaceRoot: {
+            newRoot: { $mergeObjects: ['$root', '$$ROOT'] }
+          }
+        },
+        {
+          $project: {
+            root: 0
           }
         },
         {
@@ -565,6 +589,12 @@ class DevicesService {
           } else {
             d.deviceStatus = { state: d.deviceState };
           }
+
+          // handle empty applications array
+          if (isEmpty(d.applications[0].app)) {
+            d.applications = [];
+          }
+
           return d;
         });
       } else if (requestParams.response === 'ids') {
@@ -680,6 +710,13 @@ class DevicesService {
         .populate('interfaces.pathlabels', '_id name description color type')
         .populate('policies.firewall.policy', '_id name description rules')
         .populate('policies.multilink.policy', '_id name description')
+        .populate('firewall.rules.reference')
+        // .populate({
+        //   path: 'firewall.rules.reference',
+        //   populate: {
+        //     path: 'applications'
+        //   }
+        // })
         .populate({
           path: 'applications.app',
           populate: {
