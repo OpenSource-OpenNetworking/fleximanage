@@ -16,9 +16,23 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 const validators = require('./validators');
+const { validateConfiguration } = require('../deviceLogic/interfaces');
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const mongoConns = require('../mongoConns.js')();
+const { firewallRuleSchema } = require('./firewallRule');
+const { pendingSchema } = require('./schemas/pendingSchema');
+
+const statusEnums = [
+  '',
+  'installing',
+  'installed',
+  'uninstalling',
+  'job queue failed',
+  'job deleted',
+  'installation failed',
+  'uninstallation failed'
+];
 
 /**
  * Interfaces Database Schema
@@ -31,17 +45,17 @@ const interfacesSchema = new Schema({
     maxlength: [50, 'Name length must be at most 50'],
     validate: {
       validator: validators.validateIfcName,
-      message: 'name should be a vaild interface name'
+      message: 'name should be a valid interface name'
     },
     required: [true, 'Interface name must be set']
   },
-  // PCI address
-  pciaddr: {
+  // Device bus address
+  devId: {
     type: String,
-    maxlength: [50, 'PCI address length must be at most 50'],
+    maxlength: [50, 'devId length must be at most 50'],
     validate: {
-      validator: validators.validatePciAddress,
-      message: 'pciaddr should be a vaild pci address'
+      validator: validators.validateDevId,
+      message: 'devId should be a valid devId address'
     },
     default: ''
   },
@@ -75,13 +89,24 @@ const interfacesSchema = new Schema({
     },
     default: 'no'
   },
+  dnsServers: {
+    type: [String],
+    default: ['8.8.8.8', '8.8.4.4']
+  },
+  dnsDomains: {
+    type: [String]
+  },
+  useDhcpDnsServers: {
+    type: Boolean,
+    default: true
+  },
   // ipv4 address
   IPv4: {
     type: String,
     maxlength: [20, 'IPv4 length must be at most 20'],
     validate: {
       validator: validators.validateIPv4,
-      message: 'IPv4 should be a vaild ip address'
+      message: 'IPv4 should be a valid ip address'
     },
     default: ''
   },
@@ -91,7 +116,7 @@ const interfacesSchema = new Schema({
     maxlength: [5, 'IPv4 mask length must be at most 5'],
     validate: {
       validator: validators.validateIPv4Mask,
-      message: 'IPv4Mask should be a vaild mask'
+      message: 'IPv4Mask should be a valid mask'
     }
   },
   // ipv6 address
@@ -100,7 +125,7 @@ const interfacesSchema = new Schema({
     maxlength: [50, 'IPv6 length must be at most 50'],
     validate: {
       validator: validators.validateIPv6,
-      message: 'IPv6 should be a vaild ip address'
+      message: 'IPv6 should be a valid ip address'
     },
     default: ''
   },
@@ -110,7 +135,7 @@ const interfacesSchema = new Schema({
     maxlength: [5, 'IPv6 mask length must be at most 5'],
     validate: {
       validator: validators.validateIPv6Mask,
-      message: 'IPv6Mask should be a vaild mask'
+      message: 'IPv6Mask should be a valid mask'
     }
   },
   // external ip address
@@ -144,6 +169,11 @@ const interfacesSchema = new Schema({
     type: Boolean,
     default: true
   },
+  // use port forwarding to define fixed public port
+  useFixedPublicPort: {
+    type: Boolean,
+    default: false
+  },
   // WAN interface default GW
   gateway: {
     type: String,
@@ -159,8 +189,17 @@ const interfacesSchema = new Schema({
     type: String,
     default: '0',
     validate: {
-      validator: validators.validateIsNumber,
+      validator: validators.validateMetric,
       message: 'Metric should be a number'
+    }
+  },
+  // MTU
+  mtu: {
+    type: Number,
+    default: 1500,
+    validate: {
+      validator: validators.validateMtu,
+      message: 'MTU should be a number between 500 and 9999'
     }
   },
   // assigned
@@ -206,9 +245,86 @@ const interfacesSchema = new Schema({
       'no'
     ],
     default: ''
+  },
+  // device type - wifi, lte
+  deviceType: {
+    type: String,
+    default: 'dpdk'
+  },
+  configuration: {
+    type: Object,
+    default: {}
+  },
+  deviceParams: {
+    type: Object,
+    default: {}
+  },
+  ospf: {
+    area: {
+      type: Schema.Types.Mixed,
+      default: 0,
+      required: true,
+      validate: {
+        validator: validators.validateOSPFArea,
+        message: 'area should be a valid number'
+      }
+    },
+    keyId: {
+      type: String,
+      validate: {
+        validator: validators.validateIsInteger,
+        message: 'keyId should be an integer'
+      }
+    },
+    key: {
+      type: String,
+      maxlength: [16, 'Key length must be at most 16']
+    },
+    cost: {
+      type: Number,
+      validate: {
+        validator: validators.validateOSPFCost
+      }
+    }
+  },
+  // false if ip configured in flexiManage but don't exists in the agent
+  // The purpose of this field is to know if we need to trigger the event of IP restored.
+  // Without this field, when we receive from the device an interface with IP,
+  // we can't know if ip was missing and now it restored,
+  // or it existed without any issues for a long time.
+  hasIpOnDevice: {
+    type: Boolean
+  },
+  // Device running status
+  status: {
+    type: String,
+    enum: ['', 'running', 'stopped', 'failed'],
+    default: ''
+  },
+  // Device connection status
+  isConnected: {
+    type: Boolean,
+    default: false
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  minimize: false,
+  discriminatorKey: 'deviceType'
+});
+
+interfacesSchema.path('configuration').validate(function (value) {
+  if (Object.keys(value).length > 0 && this) {
+    if (this.deviceType === 'lte' || this.deviceType === 'wifi') {
+      const inter = { ...this._doc };
+      const { valid, err } = validateConfiguration(inter, value);
+      if (valid === true) {
+        return true;
+      }
+
+      throw new Error(err);
+    }
+  }
+  return true;
 });
 
 /**
@@ -218,6 +334,7 @@ const staticroutesSchema = new Schema({
   // destination
   destination: {
     type: String,
+    required: [true, 'Destination name must be set'],
     validate: {
       validator: validators.validateIPv4WithMask,
       message: 'Destination should be a valid ipv4 with mask type'
@@ -226,6 +343,7 @@ const staticroutesSchema = new Schema({
   // gateway
   gateway: {
     type: String,
+    required: [true, 'Gateway name must be set'],
     validate: {
       validator: validators.validateIPv4,
       message: 'Gateway should be a valid ipv4 address'
@@ -233,17 +351,26 @@ const staticroutesSchema = new Schema({
   },
   // interface name
   ifname: {
-    type: String
+    type: String,
+    validate: {
+      validator: validators.validateDevId,
+      message: 'ifname should be a valid interface devId'
+    }
   },
   // metric
   metric: {
     type: String,
     default: '',
     validate: {
-      validator: validators.validateIsNumber,
+      validator: validators.validateMetric,
       message: 'Metric should be a number'
     }
-  }
+  },
+  redistributeViaOSPF: {
+    type: Boolean,
+    default: false
+  },
+  ...pendingSchema
 }, {
   timestamps: true
 });
@@ -275,7 +402,7 @@ const MACAssignmentSchema = new Schema({
     required: [true, 'IPv4 must be set'],
     validate: {
       validator: validators.validateIPv4,
-      message: 'IPv4 should be a vaild ip address'
+      message: 'IPv4 should be a valid ip address'
     },
     default: ''
   }
@@ -288,8 +415,8 @@ const DHCPSchema = new Schema({
     maxlength: [50, 'Interface length must be at most 50'],
     required: [true, 'Interface must be set'],
     validate: {
-      validator: validators.validatePciAddress,
-      message: 'Interface should be a vaild interface pci address'
+      validator: validators.validateDevId,
+      message: 'Interface should be a valid interface devId'
     }
   },
   rangeStart: {
@@ -404,9 +531,39 @@ const deviceVersionsSchema = new Schema({
 });
 
 /**
- * Device policy schema
+ * Device application Schema
  */
-const devicePolicySchema = new Schema({
+const deviceApplicationSchema = new Schema({
+  _id: false,
+  app: {
+    type: Schema.Types.ObjectId,
+    ref: 'applications',
+    default: null,
+    required: true
+  },
+  identifier: {
+    type: String,
+    required: true
+  },
+  status: {
+    type: String,
+    enum: [...statusEnums, 'upgrading'],
+    default: ''
+  },
+  configuration: {
+    type: Schema.Types.Mixed,
+    default: {}
+  },
+  requestTime: {
+    type: Date,
+    default: null
+  }
+});
+
+/**
+ * Device multilink policy schema
+ */
+const deviceMultilinkPolicySchema = new Schema({
   _id: false,
   policy: {
     type: Schema.Types.ObjectId,
@@ -415,16 +572,29 @@ const devicePolicySchema = new Schema({
   },
   status: {
     type: String,
-    enum: [
-      '',
-      'installing',
-      'installed',
-      'uninstalling',
-      'job queue failed',
-      'job deleted',
-      'installation failed',
-      'uninstallation failed'
-    ],
+    enum: statusEnums,
+    default: ''
+  },
+  // TODO: check if really needed
+  requestTime: {
+    type: Date,
+    default: null
+  }
+});
+
+/**
+ * Device firewall policy schema
+ */
+const deviceFirewallPolicySchema = new Schema({
+  _id: false,
+  policy: {
+    type: Schema.Types.ObjectId,
+    ref: 'FirewallPolicies',
+    default: null
+  },
+  status: {
+    type: String,
+    enum: statusEnums,
     default: ''
   },
   requestTime: {
@@ -439,6 +609,11 @@ const devicePolicySchema = new Schema({
 const versionUpgradeSchema = new Schema({
   // timestamp
   time: {
+    type: Date,
+    default: null
+  },
+  // timestamp
+  latestTry: {
     type: Date,
     default: null
   },
@@ -476,6 +651,27 @@ const deviceSyncSchema = new Schema({
     type: String,
     enum: ['on', 'off'],
     default: 'on'
+  }
+});
+
+/**
+ * IKEv2 parameters Database Schema
+ */
+const IKEv2Schema = new Schema({
+  // public certificate
+  certificate: {
+    type: String,
+    default: ''
+  },
+  // expiration time
+  expireTime: {
+    type: Date,
+    default: null
+  },
+  // queued or not
+  jobQueued: {
+    type: Boolean,
+    default: false
   }
 });
 
@@ -541,7 +737,7 @@ const deviceSchema = new Schema({
     maxlength: [50, 'defaultRoute length must be at most 50'],
     validate: {
       validator: validators.validateIPv4,
-      message: 'defaultRoute should be a vaild ip address'
+      message: 'defaultRoute should be a valid ip address'
     },
     default: ''
   },
@@ -601,6 +797,15 @@ const deviceSchema = new Schema({
     type: Boolean,
     default: false
   },
+  // Device coordinates
+  coords: {
+    type: [Number],
+    default: [40.416775, -3.703790],
+    validate: {
+      validator: (a) => a.length === 2,
+      message: 'Coordinates length must be 2'
+    }
+  },
   // versions
   versions: {
     type: deviceVersionsSchema,
@@ -623,14 +828,57 @@ const deviceSchema = new Schema({
   labels: [String],
   policies: {
     multilink: {
-      type: devicePolicySchema,
-      default: devicePolicySchema
+      type: deviceMultilinkPolicySchema,
+      default: deviceMultilinkPolicySchema
+    },
+    firewall: {
+      type: deviceFirewallPolicySchema,
+      default: deviceFirewallPolicySchema
     }
+  },
+  deviceSpecificRulesEnabled: {
+    type: Boolean,
+    default: true
+  },
+  firewall: {
+    rules: [firewallRuleSchema]
   },
   sync: {
     type: deviceSyncSchema,
     default: deviceSyncSchema
-  }
+  },
+  // IKEv2 parameters
+  IKEv2: {
+    type: IKEv2Schema,
+    default: IKEv2Schema
+  },
+  ospf: {
+    routerId: {
+      type: String,
+      required: false,
+      validate: {
+        validator: validators.validateIPv4,
+        message: props => `${props.value} should be a valid ip address`
+      }
+    },
+    helloInterval: {
+      type: Number,
+      default: 10,
+      validate: {
+        validator: validators.validateOSPFInterval,
+        message: props => `${props.value} should be a valid integer`
+      }
+    },
+    deadInterval: {
+      type: Number,
+      default: 40,
+      validate: {
+        validator: validators.validateOSPFInterval,
+        message: props => `${props.value} should be a valid integer`
+      }
+    }
+  },
+  applications: [deviceApplicationSchema]
 },
 {
   timestamps: true

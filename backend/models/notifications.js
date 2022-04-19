@@ -79,6 +79,9 @@ notificationsSchema.index(
     partialFilterExpression: { status: 'read' }
   }
 );
+notificationsSchema.index({ org: 1 });
+notificationsSchema.index({ account: 1 });
+notificationsSchema.index({ status: 1 });
 
 // Default exports
 module.exports = mongoConns.getAnalyticsDB().model('notifications', notificationsSchema);

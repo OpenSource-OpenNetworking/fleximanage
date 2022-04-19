@@ -41,14 +41,61 @@ class MongoConns {
     }, (err) => {
       logger.error('Failed to connect to analyticsDB', { params: { err: err.message } });
     });
+
+    this.vpnDB = mongoose.createConnection(configs.get('mongoVpnUrl'), {
+      useNewUrlParser: true,
+      useCreateIndex: true
+    });
+    this.vpnDB.then((db) => {
+      logger.info('Connected to MongoDB vpnDB');
+    }, (err) => {
+      logger.error('Failed to connect to vpnDB', { params: { err: err.message } });
+    });
   }
 
   getMainDB () {
     return this.mainDB;
   }
 
+  /**
+   * Run session based operation with the main database
+   * @async
+   * @param  {Function} func          Async function to be called as part of the transaction,
+   *                                  this function get the session as a parameter
+   * @param  {Boolean}  closeSession  Whether to end the session when the transaction completed
+   *                                  or allow to the caller to close the session
+   *                                  This is needed if some transaction objects are still used
+   *                                  after the transaction completed
+   * @param  {Number}   times         How many times to try in case of WriteConflict Mongo error
+   * @return {Object}   session used  The session used, if closeSession is false, the session will
+   *                                  be provided to the caller to close the session
+   */
+  async mainDBwithTransaction (func, closeSession = true, times = 3) {
+    let execNum = 0;
+    let session;
+    try {
+      session = await this.mainDB.startSession();
+      await session.withTransaction(async () => {
+        // Prevent infinite loop, if more than 'times' transient errors (writeConflict), exit
+        execNum += 1;
+        if (execNum > times) {
+          throw new Error(`Error writing to database, too many attempts (${times})`);
+        }
+        await func(session);
+      });
+    } finally {
+      // This creates an issue with some updates, need to understand why
+      if (closeSession && session) session.endSession();
+    }
+    return session;
+  }
+
   getAnalyticsDB () {
     return this.analyticsDB;
+  }
+
+  getVpnDB () {
+    return this.vpnDB;
   }
 }
 

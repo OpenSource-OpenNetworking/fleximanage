@@ -18,11 +18,12 @@
 const net = require('net');
 const email = require('isemail');
 const urlValidator = require('valid-url');
+const validator = require('validator');
 const filenamify = require('filenamify');
 const phoneUtil = require('google-libphonenumber').PhoneNumberUtil.getInstance();
 
 // Globals
-const protocols = ['OSPF', 'BGP', 'NONE'];
+const protocols = ['OSPF', 'NONE'];
 const interfaceTypes = ['WAN', 'LAN', 'NONE'];
 
 // Helper functions
@@ -31,7 +32,7 @@ const isValidURL = (url) => { return urlValidator.isUri(url) !== undefined; };
 const isValidFileName = (name) => {
   return !isEmpty(name) && name !== '' && filenamify(name) === name;
 };
-const validateIsNumber = (val) => !isNaN(Number(val));
+const validateIsInteger = val => Number.isInteger(+val);
 
 const validateIsPhoneNumber = (number) => {
   try {
@@ -67,12 +68,26 @@ const validateIPv6Mask = mask => {
 };
 const validateIPv6 = (ip) => { return ip === '' || net.isIPv6(ip); };
 const validateIPaddr = (ip) => { return validateIPv4(ip) || validateIPv6(ip); };
+const validateDevId = (devId) => {
+  return (
+    validatePciAddress(devId) ||
+    validateUsbAddress(devId)
+  );
+};
 const validatePciAddress = pci => {
   return (
     pci === '' ||
-    /^([A-F0-9]{2,4}:)?([A-F0-9]{2}|[A-F0-9]{4}):[A-F0-9]{2}\.[A-F0-9]{2}$/i.test(
+    /^pci:([A-F0-9]{2,4}:)?([A-F0-9]{2}|[A-F0-9]{4}):[A-F0-9]{2}\.[A-F0-9]{2}$/i.test(
       pci
     )
+  );
+};
+const validateUsbAddress = usb => {
+  return (
+    usb === '' ||
+    /^usb:usb[0-9]\/[0-9]+-[0-9]+\/[0-9]+-[0-9]+:[0-9]+\.[0-9]+$/i.test(usb) ||
+    /* eslint-disable max-len */
+    /^usb:usb[0-9]\/[0-9]+-[0-9]+\/[0-9]+-[0-9]+.[0-9]+\/[0-9]+-[0-9]+.[0-9]:[0-9].[0-9]+$/i.test(usb)
   );
 };
 const validateIfcName = (name) => { return /^[a-zA-Z0-9_]{1,15}$/i.test(name || ''); };
@@ -113,7 +128,7 @@ const validateIpList = (list) => {
   return true;
 };
 const isPort = (val) => {
-  return !isEmpty(val) && !(val === '') && validateIsNumber(val) && val >= 0 && val <= 65535;
+  return !isEmpty(val) && !(val === '') && validateIsInteger(+val) && val >= 0 && val <= 65535;
 };
 const validatePort = port => port === '' || isPort(port);
 const validatePortRange = (range) => {
@@ -121,7 +136,7 @@ const validatePortRange = (range) => {
   if (!(range || '').includes('-')) return isPort(range);
 
   const [portLow, portHigh] = (range || '').split('-');
-  return isPort(portLow) && isPort(portHigh);
+  return isPort(portLow) && isPort(portHigh) && (+portLow < +portHigh);
 };
 const validateMachineID = (id) => { return /^[a-f0-9-]{1,50}$/i.test(id || ''); };
 const validateSerial = (id) => {
@@ -149,6 +164,15 @@ const validateLabelColor = (color) => { return /^#[0-9A-F]{6}$/i.test(color); };
 const validatePolicyName = (name) => { return /^[a-z0-9-_ .]{3,50}$/i.test(name || ''); };
 const validateRuleName = (name) => { return /^[a-z0-9-_ .]{3,15}$/i.test(name || ''); };
 
+const validateMetric = (val) => val === '' || (val && validateIsInteger(val) && +val >= 0);
+const validateMtu = (val) => val && validateIsInteger(val) && +val >= 500 && +val <= 9999;
+const validateOSPFArea = (val) => val !== null && (validateIPv4(val) || (validateIsInteger(val) && +val >= 0));
+const validateOSPFCost = (val) => val === null || (validateIsInteger(val) && +val >= 0 && +val < 65535);
+const validateOSPFInterval = val => val && validateIsInteger(val) && +val >= 1 && +val < 65535;
+const validateFQDN = val => val && validator.isFQDN(val);
+const validateStringNoSpaces = str => { return str === '' || /^\S+$/i.test(str || ''); };
+const validateApplicationIdentifier = str => { return /[A-Za-z_.-]/i.test(str || ''); };
+
 module.exports = {
   validateDHCP,
   validateIPv4,
@@ -156,6 +180,7 @@ module.exports = {
   validateIPv6,
   validateIPaddr,
   validatePciAddress,
+  validateDevId,
   validateIfcName,
   validateIPv4Mask,
   validateIPv6Mask,
@@ -183,5 +208,13 @@ module.exports = {
   validateLabelColor,
   validatePolicyName,
   validateRuleName,
-  validateIsNumber
+  validateMetric,
+  validateMtu,
+  validateIsInteger,
+  validateOSPFArea,
+  validateOSPFCost,
+  validateOSPFInterval,
+  validateFQDN,
+  validateStringNoSpaces,
+  validateApplicationIdentifier
 };

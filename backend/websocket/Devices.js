@@ -25,6 +25,13 @@ class Devices {
     this.removeDeviceInfo = this.removeDeviceInfo.bind(this);
     this.getAllDevices = this.getAllDevices.bind(this);
     this.updateDeviceInfo = this.updateDeviceInfo.bind(this);
+
+    // Connection status by will be added on every connection changed
+    // periodically stored into the db and cleared in memory after that
+    this.connectionStatusByOrg = {};
+    this.setConnectionStatusByOrg = this.setConnectionStatusByOrg.bind(this);
+    this.getConnectionStatusByOrg = this.getConnectionStatusByOrg.bind(this);
+    this.clearConnectionStatusByOrg = this.clearConnectionStatusByOrg.bind(this);
   }
 
   /**
@@ -36,6 +43,7 @@ class Devices {
      */
   setDeviceInfo (deviceID, info) {
     this.devices[deviceID] = info;
+    this.setConnectionStatusByOrg(deviceID, false);
   }
 
   /**
@@ -47,6 +55,9 @@ class Devices {
      */
   updateDeviceInfo (deviceID, key, value) {
     if (this.devices[deviceID]) {
+      if (key === 'ready') {
+        this.setConnectionStatusByOrg(deviceID, value);
+      }
       this.devices[deviceID][key] = value;
     }
   }
@@ -66,7 +77,10 @@ class Devices {
      * @return {void}
      */
   removeDeviceInfo (deviceID) {
-    delete this.devices[deviceID];
+    if (this.devices[deviceID]) {
+      this.setConnectionStatusByOrg(deviceID, false);
+      delete this.devices[deviceID];
+    }
   }
 
   /**
@@ -85,6 +99,54 @@ class Devices {
   disconnectDevice (deviceID) {
     if (deviceID && this.devices[deviceID] && this.devices[deviceID].socket) {
       this.devices[deviceID].socket.close();
+      this.devices[deviceID].ready = false;
+      this.setConnectionStatusByOrg(deviceID, false);
+    }
+  }
+
+  /**
+   * Sets the devices connection status information in memory by org
+   * @param  {string} deviceID device machine id
+   * @param  {bool}   status   connection status
+   * @return {void}
+   */
+  setConnectionStatusByOrg (deviceID, status) {
+    if (this.devices[deviceID]) {
+      const { org, deviceObj } = this.devices[deviceID];
+      if (org && deviceObj && status !== undefined) {
+        if (!this.connectionStatusByOrg.hasOwnProperty(org)) {
+          this.connectionStatusByOrg[org] = {};
+        }
+        this.connectionStatusByOrg[org][deviceObj] = status;
+      }
+    }
+  }
+
+  /**
+   * Gets all organizations ids with updated connection status
+   * @return {Array} array of org ids
+   */
+  getConnectionStatusOrgs () {
+    return Object.keys(this.connectionStatusByOrg);
+  }
+
+  /**
+   * Gets all devices with updated connection status
+   * @return {Object} an object of devices ids of the org grouped by status
+   * or undefined if no updated statuses
+   */
+  getConnectionStatusByOrg (org) {
+    return this.connectionStatusByOrg[org];
+  }
+
+  /**
+   * Deletes devices connection status for the org.
+   * @param  {string} org the org id
+   * @return {void}
+   */
+  clearConnectionStatusByOrg (org) {
+    if (org && this.connectionStatusByOrg.hasOwnProperty(org)) {
+      delete this.connectionStatusByOrg[org];
     }
   }
 }

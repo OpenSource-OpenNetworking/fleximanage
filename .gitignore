@@ -21,3 +21,6 @@ debian/fleximanage
 
 # Jest coverage report
 coverage/
+
+# tmp pki directory
+backend/tmp/openvpn_pki*

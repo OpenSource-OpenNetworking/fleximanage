@@ -63,13 +63,6 @@ describe('Minimal required multi link policy schema', () => {
     });
   });
 
-  it('Should be an invalid policy if policy description is missing', () => {
-    mLPolicyFullSchema.description = null;
-    mLPolicyFullSchema.validate((err) => {
-      expect(err.message).toBe('MultiLinkPolicies validation failed: description: Path `description` is required.');
-    });
-  });
-
   it('Should be an invalid policy if policy rule name is missing', () => {
     mLPolicyFullSchema.rules[0].name = null;
     mLPolicyFullSchema.validate((err) => {

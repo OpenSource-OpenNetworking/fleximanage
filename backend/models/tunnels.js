@@ -18,6 +18,7 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const mongoConns = require('../mongoConns.js')();
+const { pendingSchema } = require('./schemas/pendingSchema');
 
 // Tunnels params schema
 const tunnelKeysSchema = new Schema({
@@ -44,6 +45,27 @@ const tunnelKeysSchema = new Schema({
   }
 });
 
+// Tunnel advanced options schema
+const tunnelAdvancedOptionsSchema = new Schema({
+  _id: false,
+  // MTU of the tunnel
+  mtu: {
+    type: String,
+    default: ''
+  },
+  // TCP MSS Clamping
+  mssClamp: {
+    type: String,
+    enum: ['', 'yes', 'no'],
+    default: ''
+  },
+  // OSPF cost
+  ospfCost: {
+    type: String,
+    default: ''
+  }
+});
+
 /**
  * Tunnels Database Schema
  */
@@ -63,6 +85,11 @@ const tunnelSchema = new Schema({
   isActive: {
     type: Boolean,
     default: false
+  },
+  encryptionMethod: {
+    type: String,
+    enum: ['none', 'psk', 'ikev2'],
+    default: 'psk'
   },
   // device A participate in the tunnel
   deviceA: {
@@ -105,7 +132,25 @@ const tunnelSchema = new Schema({
   pendingTunnelModification: {
     type: Boolean,
     default: false
-  }
+  },
+  // Tunnel status
+  status: {
+    type: String,
+    enum: ['', 'up', 'down'],
+    default: ''
+  },
+  // The peer configuration for the tunnel
+  peer: {
+    type: Schema.Types.ObjectId,
+    ref: 'peers',
+    default: null
+  },
+  // Tunnel advanced options
+  advancedOptions: {
+    type: tunnelAdvancedOptionsSchema,
+    default: null
+  },
+  ...pendingSchema
 }, {
   timestamps: true
 });

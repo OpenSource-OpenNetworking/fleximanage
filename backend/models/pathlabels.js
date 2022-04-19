@@ -48,7 +48,7 @@ const pathLabelSchema = new Schema({
   },
   description: {
     type: String,
-    required: true,
+    required: false,
     validate: {
       validator: validateDescription,
       message: 'Path label description format is invalid'

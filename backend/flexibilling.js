@@ -24,7 +24,11 @@ const config = require('./flexibillingconfig.json');
  */
 class FlexiBilling {
   async getMaxDevicesRegisteredSummmary (account) {
-    return { current: 'N/A', max: 'N/A' };
+    return null;
+  }
+
+  async getMaxDevicesRegisteredSummmaryByAccounts (accounts) {
+    return [];
   }
 
   async getMaxDevicesAllowed (id) {
@@ -132,6 +136,26 @@ class FlexiBilling {
       this.Instance = new FlexiBilling();
     }
     return this.Instance;
+  }
+
+  async getBillingAccountsSummary () {
+    return [];
+  }
+
+  async updateAccountOrganizations (id, organizations) {
+    return null;
+  }
+
+  async getFeatureMax (account, feature, org = null) {
+    return config.billing.features[feature];
+  }
+
+  async updateFeature (account, org, feature, count, orgCount) {
+    return true;
+  }
+
+  async getFeaturesSummaryByAccounts (accounts) {
+    return [];
   }
 }
 

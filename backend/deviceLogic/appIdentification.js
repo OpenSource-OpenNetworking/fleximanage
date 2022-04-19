@@ -25,6 +25,7 @@ const deviceQueues = require('../utils/deviceQueue')(
 const mongoose = require('mongoose');
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
 const { getMajorVersion } = require('../versioning');
+const compressObj = require('../utils/compression');
 
 /**
  * Queues an add appIdentification or delete appIdentification job to a device.
@@ -57,7 +58,7 @@ const apply = async (devices, user, data) => {
       tasks.push({ entity: 'agent', message, params });
       const jobPromise = deviceQueues.addJob(machineId, userName, org,
         // Data
-        { title: title, tasks: tasks },
+        { title: `${title} ${device.name}`, tasks: tasks },
         // Response data
         {
           method: 'appIdentification',
@@ -67,7 +68,7 @@ const apply = async (devices, user, data) => {
           }
         },
         // Metadata
-        { priority: 'low', attempts: 1, removeOnComplete: false },
+        { priority: 'normal', attempts: 1, removeOnComplete: false },
         // Complete callback
         null);
       jobPromises.push(jobPromise);
@@ -81,7 +82,7 @@ const apply = async (devices, user, data) => {
       arr.push(job);
       logger.info('App Identification Job Queued', {
         params: {
-          jobResponse: job.data.response, jobId: job.id
+          job: job
         }
       });
     } else {
@@ -107,7 +108,6 @@ const apply = async (devices, user, data) => {
  * @return {void}
  */
 const complete = async (jobId, res) => {
-  logger.info('appIdentification job complete', { params: { result: res, jobId: jobId } });
   try {
     await devices.findOneAndUpdate(
       { _id: mongoose.Types.ObjectId(res.deviceId) },
@@ -224,10 +224,11 @@ const getDevicesAppIdentificationJobInfo = async (org, client, deviceIdList, isI
   // if isInstall==false, we need to remove the apps from the device if
   //  the called client is the last one or no clients defined but last updated time is not null
   // If there are other clients using applications it will be kept installed
-  let opDevices, update;
+  let opDevices;
   let requestTime = null;
   let appRules = null;
   let updateAt = null;
+  const updateOps = [];
 
   // On sync device, no client is allowed and device should be installed if has clients
   if (sync && !client && isInstall) {
@@ -238,14 +239,19 @@ const getDevicesAppIdentificationJobInfo = async (org, client, deviceIdList, isI
           { 'appIdentification.clients': { $ne: [] } },
           { 'appIdentification.clients': { $ne: null } }
         ]
-      }, { _id: 1 });
+      }, { _id: 1, 'versions.agent': 1 });
     if (opDevices.length) {
       // get full application list for this organization
       appRules = await getOrgAppIdentifications(org);
       // Get latest update time
       requestTime = (appRules.meta.importedUpdatedAt >= appRules.meta.customUpdatedAt)
         ? appRules.meta.importedUpdatedAt : appRules.meta.customUpdatedAt;
-      update = { $set: { 'appIdentification.lastRequestTime': requestTime } };
+      updateOps.push({
+        updateMany: {
+          filter: { _id: { $in: opDevices.map((d) => d._id) } },
+          update: { $set: { 'appIdentification.lastRequestTime': requestTime } }
+        }
+      });
     }
   } else if (isInstall) {
     // get full application list for this organization
@@ -273,58 +279,34 @@ const getDevicesAppIdentificationJobInfo = async (org, client, deviceIdList, isI
               }
             }
           ]
-        }, { _id: 1 });
-      update = { $set: { 'appIdentification.lastRequestTime': updateAt } };
+        }, { _id: 1, 'versions.agent': 1 });
+      const update = { $set: { 'appIdentification.lastRequestTime': updateAt } };
+      // if client is set then attach it to all devices in db and send apps to opDevices only
+      if (client) {
+        update.$addToSet = { 'appIdentification.clients': client };
+      };
+      updateOps.push({
+        updateMany: {
+          filter: {
+            _id: { $in: client ? deviceIdList : opDevices.map(d => d._id) }
+          },
+          update
+        }
+      });
     } else {
       opDevices = [];
-      update = {};
       logger.warn('getDevicesAppIdentificationJobInfo: No application data found ', {
         params: { org: org, client: client }
       });
     }
   } else {
-    opDevices = await devices.find(
-      {
-        _id: { $in: deviceIdList },
-        'appIdentification.lastRequestTime': { $ne: requestTime },
-        $or: [
-          // This client is the only one left, we can remove
-          { 'appIdentification.clients': [client] },
-          // request time and update time are not equal - job failed or removed
-          {
-            $expr: {
-              $ne: [
-                '$appIdentification.lastRequestTime',
-                '$appIdentification.lastUpdateTime'
-              ]
-            }
-          },
-          // No client exist but last update is not null - apps still installed
-          {
-            $and: [
-              { 'appIdentification.clients': [] },
-              { 'appIdentification.lastUpdateTime': { $ne: null } }
-            ]
-          }
-        ]
-      }, { _id: 1 });
-    update = { $set: { 'appIdentification.lastRequestTime': null } };
+    // no need to remove app identifications, they will be stored in device's local db
+    opDevices = [];
   }
 
-  if (client) {
-    if (isInstall) {
-      update.$addToSet = { 'appIdentification.clients': client };
-    } else {
-      update.$pull = { 'appIdentification.clients': client };
-    }
-  }
-  // Update op devices
-  const opDevicesIds = opDevices.map((d) => d._id);
-  if (opDevicesIds.length) {
-    await devices.updateMany(
-      { _id: { $in: opDevicesIds } },
-      update
-    );
+  // Update devices in db
+  if (updateOps.length) {
+    await devices.bulkWrite(updateOps);
   }
 
   // return parameters
@@ -332,9 +314,27 @@ const getDevicesAppIdentificationJobInfo = async (org, client, deviceIdList, isI
   ret.message = (isInstall) ? 'add-application' : 'remove-application';
   const titlePrefix = (isInstall) ? 'Add' : 'Remove';
   ret.title = `${titlePrefix} appIdentifications to device`;
-  ret.installIds = opDevices.reduce((obj, d) => { obj[d._id] = true; return obj; }, {});
-  ret.params = (appRules && appRules.appIdentifications && isInstall)
-    ? { applications: appRules.appIdentifications } : {};
+  const idsAndVersion = opDevices.reduce((obj, d) => {
+    obj.ids[d._id] = true;
+    obj.minVer = (d.versions && d.versions.agent)
+      ? Math.min(obj.minVer, getMajorVersion(d.versions.agent)) : 0;
+    return obj;
+  }, { ids: {}, minVer: Number.MAX_VALUE });
+  ret.installIds = idsAndVersion.ids;
+  if (appRules && appRules.appIdentifications && isInstall) {
+    // If some devices with older version than 5 use old application scheme
+    if (idsAndVersion.minVer < 5) {
+      ret.params = { applications: appRules.appIdentifications };
+    } else {
+      // Add devices support compression, try to compress
+      try {
+        ret.params = { applications: await compressObj(appRules.appIdentifications) };
+      } catch (err) {
+        logger.error('Application compression error', { params: { err: err.message } });
+        ret.params = { applications: appRules.appIdentifications };
+      }
+    }
+  } else ret.params = {};
   ret.deviceJobResp = {
     requestTime: requestTime,
     message: ret.message,

@@ -58,7 +58,7 @@ resourcesRouter
         username: req.user.username,
         key: randomKey,
         link:
-                      configs.get('restServerUrl') +
+                      configs.get('restServerUrl', 'list')[0] +
                       '/download/' +
                       randomKey +
                       '/' +

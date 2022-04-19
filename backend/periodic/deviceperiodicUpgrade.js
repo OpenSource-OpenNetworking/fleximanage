@@ -74,23 +74,30 @@ class DeviceSwUpgrade {
         } = await this.devSwUpd.getLatestSwVersions();
         const version = versions.device;
         const now = Date.now();
+        // prevent sending an update task if was sent within the last 24 hours
+        const skipBefore = new Date(now);
+        skipBefore.setDate(skipBefore.getDate() - 1);
         // If the software version deadline has passed, upgrade all
         // devices that are still not running the latest version.
         // Otherwise, upgrade only devices scheduled to this period.
         // This is done only if there is no pending previous upgrade
         // jobs already in the devices' queue.
-        const query = versionDeadline < now
-          ? {
-            'versions.device': { $ne: version },
-            $and: [{ 'upgradeSchedule.jobQueued': { $ne: true } }]
-          }
-          : {
-            'upgradeSchedule.time': { $lte: new Date(now) },
-            $and: [
-              { 'versions.device': { $ne: version } },
-              { 'upgradeSchedule.jobQueued': { $ne: true } }
-            ]
-          };
+        const query = {
+          $and: [
+            { 'versions.device': { $ne: version } },
+            { 'upgradeSchedule.jobQueued': { $ne: true } },
+            {
+              $or: [
+                { 'upgradeSchedule.latestTry': { $exists: false } },
+                { 'upgradeSchedule.latestTry': null },
+                { 'upgradeSchedule.latestTry': { $lte: skipBefore } }
+              ]
+            }
+          ]
+        };
+        if (versionDeadline >= now) {
+          query.$and.push({ 'upgradeSchedule.time': { $lte: new Date(now) } });
+        }
 
         // Group the the devices that require upgrade
         // under the users that own them
@@ -122,7 +129,12 @@ class DeviceSwUpgrade {
           const deviceIDs = orgDevice.devices.map(device => { return device._id; });
           const result = await devices.updateMany(
             { _id: { $in: deviceIDs }, org: orgDevice._id },
-            { $set: { 'upgradeSchedule.jobQueued': true } }
+            {
+              $set: {
+                'upgradeSchedule.jobQueued': true,
+                'upgradeSchedule.latestTry': new Date(now)
+              }
+            }
           );
           if (result.nModified !== deviceIDs.length) {
             logger.error('Device upgrade pending was not set for all devices', {

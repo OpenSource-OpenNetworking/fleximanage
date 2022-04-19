@@ -20,7 +20,10 @@ const Service = require('./Service');
 const Accounts = require('../models/accounts');
 const Users = require('../models/users');
 const { getToken } = require('../tokens');
-const { getUserAccounts, orgUpdateFromNull } = require('../utils/membershipUtils');
+const {
+  getUserAccounts,
+  orgUpdateFromNull
+} = require('../utils/membershipUtils');
 
 class AccountsService {
   /**
@@ -32,7 +35,7 @@ class AccountsService {
    **/
   static async accountsGET ({ offset, limit }, { user }) {
     try {
-      const accounts = await getUserAccounts(user);
+      const accounts = await getUserAccounts(user, offset, limit);
       return Service.successResponse(accounts);
     } catch (e) {
       return Service.rejectResponse(
@@ -50,7 +53,12 @@ class AccountsService {
    **/
   static async accountsIdGET ({ id }, { user }) {
     try {
-      const account = await Accounts.findOne({ _id: user.defaultAccount._id });
+      if (user.defaultAccount._id.toString() !== id) {
+        return Service.rejectResponse(
+          'No permission to access this account', 403
+        );
+      }
+      const account = await Accounts.findOne({ _id: id });
       const {
         logoFile,
         organizations,
@@ -79,9 +87,15 @@ class AccountsService {
    **/
   static async accountsIdPUT ({ id, accountRequest }, { user }, response) {
     try {
+      if (user.defaultAccount._id.toString() !== id) {
+        return Service.rejectResponse(
+          'No permission to access this account', 403
+        );
+      }
+      const { name, companyType, companyDesc, country, enableNotifications } = accountRequest;
       const account = await Accounts.findOneAndUpdate(
         { _id: id },
-        { $set: accountRequest },
+        { $set: { name, companyType, companyDesc, country, enableNotifications } },
         { upsert: false, new: true, runValidators: true });
 
       // Update token
@@ -116,6 +130,7 @@ class AccountsService {
    **/
   static async accountsSelectPOST ({ accountSelectRequest }, req, res) {
     const user = req.user;
+    const { account } = accountSelectRequest;
 
     try {
       if (!user.defaultAccount || !user.defaultAccount._id || !user._id) {
@@ -123,8 +138,15 @@ class AccountsService {
       }
 
       // If current account not changed, return OK
-      if (user.defaultAccount._id.toString() === accountSelectRequest.account) {
+      if (user.defaultAccount._id.toString() === account) {
         return Service.successResponse({ _id: user.defaultAccount._id.toString() }, 201);
+      }
+
+      const accounts = await getUserAccounts(user);
+      if (!accounts.find(acc => acc._id === account)) {
+        return Service.rejectResponse(
+          'No permission to access this account', 403
+        );
       }
 
       // Get organizations for the new account
@@ -133,7 +155,7 @@ class AccountsService {
         { _id: user._id },
         // Update account, set default org to null so the system
         // will choose an organization on login if something failed
-        { defaultAccount: accountSelectRequest.account, defaultOrg: null },
+        { defaultAccount: account, defaultOrg: null },
         // Options
         { upsert: false, new: true }
       ).populate('defaultAccount');

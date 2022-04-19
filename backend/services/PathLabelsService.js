@@ -149,7 +149,6 @@ class PathLabelsService {
    * returns PathLabel
    **/
   static async pathlabelsIdPUT ({ id, org, pathLabelRequest }, { user }) {
-    let session;
     let newPathLabel;
     try {
       const { name, description, color, type } = pathLabelRequest;
@@ -162,8 +161,7 @@ class PathLabelsService {
       // 2. Check if the label type has changed
       // 3. Check if the label is being used
       //    and if so we abort the transaction
-      session = await mongoConns.getMainDB().startSession();
-      await session.withTransaction(async () => {
+      await mongoConns.mainDBwithTransaction(async (session) => {
         const origPathLabel = await PathLabels.findOneAndUpdate(
           {
             org: { $in: orgList },
@@ -222,8 +220,6 @@ class PathLabelsService {
         e.message || 'Internal Server Error',
         e.status || 500
       );
-    } finally {
-      session.endSession();
     }
   }
 

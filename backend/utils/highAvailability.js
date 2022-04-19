@@ -21,7 +21,7 @@
  */
 const configs = require('../configs')();
 const redis = require('redis');
-const Leader = require('redis-leader');
+const Leader = require('./redis-leader');
 const logger = require('../logging/logging')({ module: module.filename, type: 'periodic' });
 
 class HighAvailability {

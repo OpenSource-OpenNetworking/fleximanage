@@ -290,16 +290,17 @@ describe('validatePortRange', () => {
 describe('validatePCI basic BDF format', () => {
   it.each`
         pci                     | result
-        ${'00:02.00'}           | ${true}
-        ${'0000:02.00'}         | ${true}
-        ${'0:01.00'}            | ${false}
-        ${'000:01.00'}          | ${false}
-        ${'00:1.00'}            | ${false}
-        ${'00:.00'}             | ${false}
-        ${'00:00.1'}            | ${false}
-        ${'00:00.100'}          | ${false}
-        ${'TT:00.00'}           | ${false}
-        ${'00:00.PP'}           | ${false}
+        ${'pci:00:02.00'}           | ${true}
+        ${'pci:0000:02.00'}         | ${true}
+        ${'00:02.00'}           | ${false}
+        ${'pci:0:01.00'}            | ${false}
+        ${'pci:000:01.00'}          | ${false}
+        ${'pci:00:1.00'}            | ${false}
+        ${'pci:00:.00'}             | ${false}
+        ${'pci:00:00.1'}            | ${false}
+        ${'pci:00:00.100'}          | ${false}
+        ${'pci:TT:00.00'}           | ${false}
+        ${'pci:00:00.PP'}           | ${false}
   `('Should return $result if pci address is $pci', ({ pci, result }) => {
     expect(validators.validatePciAddress(pci)).toEqual(result);
   });
@@ -332,11 +333,11 @@ describe('validateIPaddr', () => {
 describe('validatePCI extended BDF format', () => {
   it.each`
         pci                     | result
-        ${'0000:0000:00.12'}    | ${true}
-        ${'0000:00:03.00'}      | ${true}
-        ${'00:00:03.00'}        | ${true}
-        ${'0:00:03.00'}         | ${false}
-        ${'0:00:03.00'}         | ${false}
+        ${'pci:0000:0000:00.12'}    | ${true}
+        ${'pci:0000:00:03.00'}      | ${true}
+        ${'pci:00:00:03.00'}        | ${true}
+        ${'pci:0:00:03.00'}         | ${false}
+        ${'pci:0:00:03.00'}         | ${false}
   `('Should return $result if pci address is $pci', ({ pci, result }) => {
     expect(validators.validatePciAddress(pci)).toEqual(result);
   });
@@ -346,9 +347,9 @@ describe('validatePCI extended BDF format', () => {
 describe('validatePCI case sensitivity', () => {
   it.each`
         pci                     | result
-        ${'00:00:ab.00'}        | ${true}
-        ${'00:00:AB.00'}        | ${true}
-        ${'00:00:Ab.00'}        | ${true}
+        ${'pci:00:00:ab.00'}        | ${true}
+        ${'pci:00:00:AB.00'}        | ${true}
+        ${'pci:00:00:Ab.00'}        | ${true}
   `('Should return $result if pci address is $pci', ({ pci, result }) => {
     expect(validators.validatePciAddress(pci)).toEqual(result);
   });
@@ -431,8 +432,6 @@ describe('validateRoutingProto', () => {
         protocol                     | result
         ${'OSPF'}                    | ${true}
         ${'ospf'}                    | ${true}
-        ${'BGP'}                     | ${true}
-        ${'bGp'}                     | ${true}
         ${'None'}                    | ${true}
         ${null}                      | ${false}
         ${undefined}                 | ${false}

@@ -239,12 +239,17 @@ organizationsRouter.route('/:orgId')
         const deviceCount = await devices
           .countDocuments({ account: req.user.defaultAccount._id })
           .session(session);
+        const deviceOrgCount = await devices
+          .countDocuments({ account: req.user.defaultAccount._id, org: req.params.orgId })
+          .session(session);
         // Delete all devices
         await devices.deleteMany({ org: req.params.orgId }, { session: session });
         // Unregister a device (by removing the removed org number)
         await flexibilling.registerDevice({
           account: req.user.defaultAccount._id,
+          org: req.params.orgId,
           count: deviceCount,
+          orgCount: deviceOrgCount,
           increment: -orgDevices.length
         }, session);
         // Disconnect all devices

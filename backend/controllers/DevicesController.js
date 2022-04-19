@@ -66,6 +66,10 @@ class DevicesController {
     await Controller.handleRequest(request, response, this.service.devicesIdDELETE);
   }
 
+  async devicesDELETE (request, response) {
+    await Controller.handleRequest(request, response, this.service.devicesDELETE);
+  }
+
   async devicesIdExecutePOST (request, response) {
     await Controller.handleRequest(request, response, this.service.devicesIdExecutePOST);
   }
@@ -84,6 +88,10 @@ class DevicesController {
 
   async devicesIdRoutesGET (request, response) {
     await Controller.handleRequest(request, response, this.service.devicesIdRoutesGET);
+  }
+
+  async devicesIdTunnelsGET (request, response) {
+    await Controller.handleRequest(request, response, this.service.devicesIdTunnelsGET);
   }
 
   async devicesIdStaticroutesGET (request, response) {
@@ -143,9 +151,37 @@ class DevicesController {
     await Controller.handleRequest(request, response, this.service.devicesIdDhcpPOST);
   }
 
+  async devicesIdInterfacesIdStatusGET (request, response) {
+    await Controller.handleRequest(
+      request, response, this.service.devicesIdInterfacesIdStatusGET
+    );
+  }
+
   async devicesIdStatusGET (request, response) {
     await Controller.handleRequest(request, response, this.service.devicesIdStatusGET);
   }
+
+  async devicesIdInterfacesIdActionPOST (request, response) {
+    await Controller.handleRequest(
+      request, response, this.service.devicesIdInterfacesIdActionPOST
+    );
+  }
+
+  async devicesIdSendPOST (request, response) {
+    await Controller.handleRequest(request, response, this.service.devicesIdSendPOST);
+  };
+
+  async devicesIdRoutingOSPFGET (request, response) {
+    await Controller.handleRequest(request, response, this.service.devicesIdRoutingOSPFGET);
+  };
+
+  async devicesIdRoutingOSPFPUT (request, response) {
+    await Controller.handleRequest(request, response, this.service.devicesIdRoutingOSPFPUT);
+  };
+
+  async devicesIdCoordsPUT (request, response) {
+    await Controller.handleRequest(request, response, this.service.devicesIdCoordsPUT);
+  };
 }
 
 module.exports = DevicesController;

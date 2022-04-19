@@ -21,7 +21,10 @@ const isEqual = require('lodash/isEqual');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
 const MultiLinkPolicies = require('../models/mlpolicies');
 const { devices } = require('../models/devices');
+const pathLabelsModel = require('../models/pathlabels');
 const { ObjectId } = require('mongoose').Types;
+const { applyPolicy } = require('../deviceLogic/mlpolicy');
+const { validateMultilinkPolicy } = require('../deviceLogic/validators');
 
 const emptyPrefix = {
   ip: '',
@@ -39,6 +42,13 @@ const emptyApp = {
 class MultiLinkPoliciesService {
   static async verifyRequestSchema (mLPolicyRequest, org) {
     const { _id, name, rules } = mLPolicyRequest;
+    // Check if any enabled rule exists
+    if (!rules.some(rule => rule.enabled)) {
+      return {
+        valid: false,
+        message: 'Policy must have at least one enabled rule'
+      };
+    }
     for (const rule of rules) {
       // At least application or prefix
       // should exist in the request
@@ -77,16 +87,43 @@ class MultiLinkPoliciesService {
           message: 'Enabled rule must contain Path Labels'
         };
       }
+
+      // Link-quality with DIA labels not allowed
+      if (rule.action.links.some(link => (link.order === 'link-quality' &&
+          link.pathlabels.some(label => label.type === 'DIA')
+      ))) {
+        return {
+          valid: false,
+          message: 'Link-quality with DIA labels not allowed'
+        };
+      };
     };
 
     // Duplicate names are not allowed in the same organization
     const hasDuplicateName = await MultiLinkPolicies.findOne(
-      { org, name, _id: { $ne: _id } }
+      { org, name: { $regex: new RegExp(`^${name}$`, 'i') }, _id: { $ne: ObjectId(_id) } }
     );
     if (hasDuplicateName) {
       return {
         valid: false,
         message: 'Duplicate names are not allowed in the same organization'
+      };
+    };
+
+    // Not allowed to assign path labels of a different organization
+    let orgPathLabels = await pathLabelsModel.find({ org }, '_id').lean();
+    orgPathLabels = orgPathLabels.map(pl => pl._id.toString());
+    const notAllowedPathLabels = rules.map(rule =>
+      rule.action && !Array.isArray(rule.action.links) ? []
+        : rule.action.links.map(link =>
+          !Array.isArray(link.pathlabels) ? []
+            : link.pathlabels.map(pl => pl._id).filter(id => !orgPathLabels.includes(id))
+        )
+    ).flat(3);
+    if (notAllowedPathLabels.length) {
+      return {
+        valid: false,
+        message: 'Not allowed to assign path labels of a different organization'
       };
     };
     return { valid: true, message: '' };
@@ -108,16 +145,11 @@ class MultiLinkPoliciesService {
         {
           name: 1,
           description: 1,
-          rules: 1,
-          'rules.name': 1,
-          'rules.enabled': 1,
-          'rules.priority': 1,
-          'rules._id': 1,
-          'rules.classification': 1,
-          'rules.action': 1
+          applyOnWan: 1,
+          overrideDefaultRoute: 1,
+          rules: 1
         }
       )
-        .lean()
         .skip(offset)
         .limit(limit)
         .populate(
@@ -206,16 +238,11 @@ class MultiLinkPoliciesService {
         {
           name: 1,
           description: 1,
-          rules: 1,
-          'rules.name': 1,
-          'rules.enabled': 1,
-          'rules.priority': 1,
-          'rules._id': 1,
-          'rules.classification': 1,
-          'rules.action': 1
+          applyOnWan: 1,
+          overrideDefaultRoute: 1,
+          rules: 1
         }
       )
-        .lean()
         .populate(
           'rules.action.links.pathlabels',
           '_id name description color type'
@@ -244,15 +271,28 @@ class MultiLinkPoliciesService {
    **/
   static async mlpoliciesIdPUT ({ id, org, mLPolicyRequest }, { user }) {
     try {
-      const { name, description, rules } = mLPolicyRequest;
+      const { name, description, applyOnWan, overrideDefaultRoute, rules } = mLPolicyRequest;
       const orgList = await getAccessTokenOrgList(user, org, true);
 
+      const opDevices = await devices.find(
+        {
+          org: orgList[0],
+          'policies.multilink.policy': id,
+          'policies.multilink.status': { $in: ['installing', 'installed'] }
+        }
+      );
       // Verify request schema
       const { valid, message } = await MultiLinkPoliciesService.verifyRequestSchema(
         mLPolicyRequest, orgList[0]
       );
       if (!valid) {
         throw createError(400, message);
+      }
+
+      // Devices specific apply validation
+      const { valid: validToApply, err } = validateMultilinkPolicy(mLPolicyRequest, opDevices);
+      if (!validToApply) {
+        throw createError(400, err);
       }
 
       const MLPolicy = await MultiLinkPolicies.findOneAndUpdate(
@@ -264,35 +304,37 @@ class MultiLinkPoliciesService {
           org: orgList[0].toString(),
           name: name,
           description: description,
+          applyOnWan: applyOnWan,
+          overrideDefaultRoute: overrideDefaultRoute,
           rules: rules
         },
         {
           fields: {
             name: 1,
             description: 1,
-            rules: 1,
-            'rules.name': 1,
-            'rules.enabled': 1,
-            'rules.priority': 1,
-            'rules._id': 1,
-            'rules.classification': 1,
-            'rules.action': 1
+            applyOnWan: 1,
+            overrideDefaultRoute: 1,
+            rules: 1
           },
           new: true
         }
-      )
-        .lean()
-        .populate(
-          'rules.action.links.pathlabels',
-          '_id name description color type'
-        );
+      );
 
       if (!MLPolicy) {
         return Service.rejectResponse('Not found', 404);
       }
+      // apply on devices
+      const applied = await applyPolicy(
+        opDevices, MLPolicy.toObject(), 'install', user, orgList[0]
+      );
 
-      const converted = JSON.parse(JSON.stringify(MLPolicy));
-      return Service.successResponse(converted);
+      const populated = await MLPolicy.populate(
+        'rules.action.links.pathlabels',
+        '_id name description color type'
+      ).execPopulate();
+
+      const converted = JSON.parse(JSON.stringify(populated));
+      return Service.successResponse({ ...converted, ...applied });
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
@@ -337,7 +379,7 @@ class MultiLinkPoliciesService {
    **/
   static async mlpoliciesPOST ({ mLPolicyRequest, org }, { user }) {
     try {
-      const { name, description, rules } = mLPolicyRequest;
+      const { name, description, applyOnWan, overrideDefaultRoute, rules } = mLPolicyRequest;
       const orgList = await getAccessTokenOrgList(user, org, true);
 
       // Verify request schema
@@ -352,6 +394,8 @@ class MultiLinkPoliciesService {
         org: orgList[0].toString(),
         name: name,
         description: description,
+        applyOnWan: applyOnWan,
+        overrideDefaultRoute: overrideDefaultRoute,
         rules: rules
       });
 
@@ -360,10 +404,12 @@ class MultiLinkPoliciesService {
         '_id name description color type'
       ).execPopulate();
 
-      const MLPolicy = (({ _id, name, description, rules }) => ({
+      const MLPolicy = (({ _id, name, description, applyOnWan, overrideDefaultRoute, rules }) => ({
         _id,
         name,
         description,
+        applyOnWan,
+        overrideDefaultRoute,
         rules
       }))(result);
 

@@ -24,9 +24,13 @@ const tunnels = require('./tunnels');
 const staticroutes = require('./staticroutes');
 const upgrade = require('./applyUpgrade');
 const mlpolicy = require('./mlpolicy');
+const application = require('./application');
+const firewallPolicy = require('./firewallPolicy');
 const dhcp = require('./dhcp');
 const appIdentification = require('./appIdentification');
 const sync = require('./sync');
+const IKEv2 = require('./IKEv2');
+const replace = require('./replace');
 const configs = require('../configs')();
 const deviceQueues = require('../utils/deviceQueue')(
   configs.get('kuePrefix'),
@@ -62,8 +66,8 @@ const methods = {
   modify: {
     apply: modify.apply,
     complete: modify.complete,
-    error: errorNOOP,
-    remove: errorNOOP
+    error: modify.error,
+    remove: modify.remove
   },
   tunnels: {
     apply: tunnels.apply.applyTunnelAdd,
@@ -99,6 +103,18 @@ const methods = {
     error: mlpolicy.error,
     remove: mlpolicy.remove
   },
+  application: {
+    apply: application.apply,
+    complete: application.complete,
+    error: application.error,
+    remove: application.remove
+  },
+  firewallPolicy: {
+    apply: firewallPolicy.apply,
+    complete: firewallPolicy.complete,
+    error: firewallPolicy.error,
+    remove: firewallPolicy.remove
+  },
   appIdentification: {
     apply: appIdentification.apply,
     complete: appIdentification.complete,
@@ -110,6 +126,17 @@ const methods = {
     complete: sync.complete,
     error: sync.error,
     remove: errorNOOP
+  },
+  ikev2: {
+    apply: IKEv2.apply,
+    complete: IKEv2.complete,
+    error: IKEv2.error,
+    remove: IKEv2.remove
+  },
+  replace: {
+    apply: replace.apply,
+    complete: errorNOOP,
+    error: errorNOOP
   }
 };
 

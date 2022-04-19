@@ -31,19 +31,21 @@ const logger = require('../logging/logging')({ module: module.filename, type: 'j
  * @param  {Object}   data      Additional data used by caller
  * @return {None}
  */
-const apply = async (device, user, data) => {
-  // Set the device state to "pending". Device state will
-  // be updated again when the device sends periodic message
-  deviceStatus.setDeviceStatsField(device[0].machineId, 'state', 'pending');
-
+const apply = async (devices, user, data) => {
   const { username } = user;
-  const org = data.org;
-  const { machineId, hostname, _id } = device[0];
+  const { org } = data;
+  const applyPromises = [];
+  for (const device of devices) {
+    const { machineId, hostname, _id } = device;
+    logger.info('Resetting device:', { params: { machineId, user, data } });
 
-  const tasks = [{ entity: 'agent', message: 'reset-device' }];
+    // Set the device state to "pending". Device state will
+    // be updated again when the device sends periodic message
+    deviceStatus.setDeviceState(machineId, 'pending');
 
-  try {
-    const job = await deviceQueues.addJob(
+    const tasks = [{ entity: 'agent', message: 'reset-device' }];
+
+    applyPromises.push(deviceQueues.addJob(
       machineId,
       username,
       org,
@@ -58,19 +60,36 @@ const apply = async (device, user, data) => {
         }
       },
       // Metadata
-      { priority: 'medium', attempts: 1, removeOnComplete: false },
+      { priority: 'normal', attempts: 1, removeOnComplete: false },
       // Complete callback
       null
-    );
-
-    logger.info('Reset device job queued', { params: { job } });
-    return { ids: [job.id], status: 'completed', message: '' };
-  } catch (err) {
-    logger.error('Reset device job failed to be queued', {
-      params: { machineId, error: err.message }
-    });
-    throw (new Error(err.message || 'Internal server error'));
-  }
+    ));
+  };
+  const promisesStatus = await Promise.allSettled(applyPromises);
+  const { fulfilled, reasons } = promisesStatus.reduce(({ fulfilled, reasons }, elem) => {
+    if (elem.status === 'fulfilled') {
+      const job = elem.value;
+      logger.info('Reset device job queued', {
+        params: {
+          jobId: job.id,
+          machineId: job.type
+        }
+      });
+      fulfilled.push(job.id);
+    } else {
+      if (!reasons.includes(elem.reason.message)) {
+        reasons.push(elem.reason.message);
+      }
+    };
+    return { fulfilled, reasons };
+  }, { fulfilled: [], reasons: [] });
+  const status = fulfilled.length < devices.length
+    ? 'partially completed' : 'completed';
+  const message = fulfilled.length < devices.length
+    ? `Warning: ${fulfilled.length} of ${devices.length} reset device jobs added.` +
+      `Some devices have following errors: ${reasons.join('. ')}`
+    : `Reset device job${devices.length > 1 ? 's' : ''} added successfully`;
+  return { ids: fulfilled, status, message };
 };
 
 /**

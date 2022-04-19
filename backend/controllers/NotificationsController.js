@@ -33,5 +33,9 @@ class NotificationsController {
   async notificationsPUT (request, response) {
     await Controller.handleRequest(request, response, this.service.notificationsPUT);
   }
+
+  async notificationsDELETE (request, response) {
+    await Controller.handleRequest(request, response, this.service.notificationsDELETE);
+  }
 }
 module.exports = NotificationsController;

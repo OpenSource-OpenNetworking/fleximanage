@@ -52,14 +52,6 @@ describe('Minimal required path label schema', () => {
     });
   });
 
-  it('Should be an invalid path label model if description field is missing', () => {
-    pathLabelsFullSchema.description = null;
-
-    pathLabelsFullSchema.validate((err) => {
-      expect(err.message).toBe('PathLabels validation failed: description: Path `description` is required.');
-    });
-  });
-
   it('Should be an invalid path label model if color field is missing', () => {
     pathLabelsFullSchema.color = null;
 

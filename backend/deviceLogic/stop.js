@@ -24,7 +24,6 @@ const deviceQueues = require('../utils/deviceQueue')(
 const tunnelsModel = require('../models/tunnels');
 const mongoose = require('mongoose');
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
-const { getMajorVersion } = require('../versioning');
 
 /**
  * Creates and queues the stop-router job.
@@ -34,55 +33,65 @@ const { getMajorVersion } = require('../versioning');
  * @param  {Object}   data      Additional data used by caller
  * @return {None}
  */
-const apply = async (device, user, data) => {
-  logger.info('Stopping device:', {
-    params: { machineId: device[0].machineId, user: user, data: data }
-  });
-  deviceStatus.setDeviceStatsField(device[0].machineId, 'state', 'pending');
+const apply = async (devices, user, data) => {
+  const { username } = user;
+  const { org } = data;
+  const applyPromises = [];
 
-  const userName = user.username;
-  const org = data.org;
-  const machineID = device[0].machineId;
-  const majorAgentVersion = getMajorVersion(device[0].versions.agent);
-  const stopParams = {};
+  for (const device of devices) {
+    const { machineId, hostname, _id } = device;
+    logger.info('Stopping device:', { params: { machineId, user, data } });
+    // Set the device state to "pending". Device state will
+    // be updated again when the device sends periodic message
+    deviceStatus.setDeviceState(machineId, 'pending');
+    const stopParams = {};
+    const tasks = [{ entity: 'agent', message: 'stop-router', params: stopParams }];
 
-  if (majorAgentVersion < 2) {
-    // Stop router command might change IP address of the
-    // interface connected to the MGMT. Tell the agent to
-    // reconnect to the MGMT after processing this command.
-    stopParams.reconnect = true;
-  }
-
-  const tasks = [{ entity: 'agent', message: 'stop-router', params: stopParams }];
-
-  try {
-    const job = await deviceQueues.addJob(
-      machineID,
-      userName,
+    applyPromises.push(deviceQueues.addJob(
+      machineId,
+      username,
       org,
       // Data
-      { title: 'Stop device ' + device[0].hostname, tasks: tasks },
+      { title: 'Stop device ' + hostname, tasks: tasks },
       // Response data
       {
         method: 'stop',
         data: {
-          device: device[0]._id,
-          org: org,
-          shouldUpdateTunnel: majorAgentVersion === 0
+          device: _id,
+          org: org
         }
       },
       // Metadata
-      { priority: 'medium', attempts: 1, removeOnComplete: false },
+      { priority: 'normal', attempts: 1, removeOnComplete: false },
       // Complete callback
       null
-    );
-
-    logger.info('Stop device job queued', { params: { job } });
-    return { ids: [job.id], status: 'completed', message: '' };
-  } catch (err) {
-    logger.error('Stop device job failed', { params: { machineID, error: err.message } });
-    throw (new Error(err.message || 'Internal server error'));
+    ));
   }
+  const promisesStatus = await Promise.allSettled(applyPromises);
+  const { fulfilled, reasons } = promisesStatus.reduce(({ fulfilled, reasons }, elem) => {
+    if (elem.status === 'fulfilled') {
+      const job = elem.value;
+      logger.info('Stop device job queued', {
+        params: {
+          jobId: job.id,
+          machineId: job.type
+        }
+      });
+      fulfilled.push(job.id);
+    } else {
+      if (!reasons.includes(elem.reason.message)) {
+        reasons.push(elem.reason.message);
+      }
+    };
+    return { fulfilled, reasons };
+  }, { fulfilled: [], reasons: [] });
+  const status = fulfilled.length < devices.length
+    ? 'partially completed' : 'completed';
+  const message = fulfilled.length < devices.length
+    ? `Warning: ${fulfilled.length} of ${devices.length} stop device jobs added.` +
+      `Some devices have following errors: ${reasons.join('. ')}`
+    : `Stop device job${devices.length > 1 ? 's' : ''} added successfully`;
+  return { ids: fulfilled, status, message };
 };
 
 /**
@@ -93,7 +102,6 @@ const apply = async (device, user, data) => {
  * @return {void}
  */
 const complete = (jobId, res) => {
-  logger.info('Stop Machine complete', { params: { result: res, jobId: jobId } });
   if (!res || !res.device || !res.org) {
     logger.warn('Got an invalid job result', { params: { result: res, jobId: jobId } });
     return;

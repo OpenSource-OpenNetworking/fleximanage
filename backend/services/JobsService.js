@@ -1,6 +1,6 @@
 // flexiWAN SD-WAN software - flexiEdge, flexiManage.
 // For more information go to https://flexiwan.com
-// Copyright (C) 2020  flexiWAN Ltd.
+// Copyright (C) 2021  flexiWAN Ltd.
 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as
@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+const createError = require('http-errors');
 const Service = require('./Service');
 const configs = require('../configs')();
 const deviceQueues = require('../utils/deviceQueue')(
@@ -61,12 +62,16 @@ class JobsService {
   /**
    * Get all Jobs
    *
-   * offset Integer The number of items to skip before starting to collect the result set (optional)
-   * limit Integer The numbers of items to return (optional)
-   * status String A filter on the job status (optional)
+   * @param {Integer} offset The number of items to skip before collecting the result (optional)
+   * @param {Integer} limit The numbers of items to return (optional)
+   * @param {String} sortField The field by which the data will be ordered (optional)
+   * @param {String} sortOrder Sorting order [asc|desc] (optional)
+   * @param {String} status Filter on the job status (optional)
+   * @param {String} ids Filter on job ids (comma separated) (optional)
    * returns List
    **/
-  static async jobsGET ({ offset, limit, org, status, ids }, { user }) {
+  static async jobsGET (requestParams, { user }) {
+    const { org, offset, limit, status, ids, filters } = requestParams;
     try {
       const stateOpts = ['complete', 'failed', 'inactive', 'delayed', 'active'];
       // Check state provided is allowed
@@ -92,24 +97,14 @@ class JobsService {
         );
         return Service.successResponse(result);
       }
-      if (status === 'all') {
-        await Promise.all(
-          stateOpts.map(async (s) => {
-            await deviceQueues.iterateJobsByOrg(orgList[0].toString(), s, (job) => {
-              const parsedJob = JobsService.selectJobsParams(job);
-              result.push(parsedJob);
-            });
-          })
-        );
-      } else {
-        await deviceQueues.iterateJobsByOrg(orgList[0].toString(),
-          status, (job) => {
-            const parsedJob = JobsService.selectJobsParams(job);
-            result.push(parsedJob);
-          }
-        );
-      }
-
+      const parsedFilters = filters ? JSON.parse(filters) : [];
+      await deviceQueues.iterateJobsByOrg(orgList[0].toString(),
+        status, (job) => {
+          const parsedJob = JobsService.selectJobsParams(job);
+          result.push(parsedJob);
+          return true; // Mark job as done
+        }, 0, -1, 'desc', offset, limit, parsedFilters
+      );
       return Service.successResponse(result);
     } catch (e) {
       return Service.rejectResponse(
@@ -120,14 +115,22 @@ class JobsService {
   }
 
   /**
-   * Delete jobs
+   * Delete all jobs matching the filters
    *
    * no response value expected for this operation
    **/
   static async jobsDELETE ({ org, jobsDeleteRequest }, { user }) {
     try {
       const orgList = await getAccessTokenOrgList(user, org, true);
-      await deviceQueues.removeJobIdsByOrg(orgList[0].toString(), jobsDeleteRequest.ids);
+      const { ids, filters } = jobsDeleteRequest;
+      if (ids && filters) {
+        throw createError(400, 'Only ids or filters can be specified as a parameter');
+      }
+      if (ids) {
+        await deviceQueues.removeJobIdsByOrg(orgList[0].toString(), ids);
+      } else {
+        await deviceQueues.removeJobsByOrgAndFilters(orgList[0].toString(), filters);
+      }
       return Service.successResponse(null, 204);
     } catch (e) {
       return Service.rejectResponse(

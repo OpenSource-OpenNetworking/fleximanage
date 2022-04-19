@@ -21,6 +21,7 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const configs = require('./configs')();
+const clientConfig = configs.getClientConfig();
 const swaggerUI = require('swagger-ui-express');
 const yamljs = require('yamljs');
 const express = require('express');
@@ -33,9 +34,11 @@ const createError = require('http-errors');
 
 const passport = require('passport');
 const auth = require('./authenticate');
+const { connectRouter } = require('./routes/connect');
 const morgan = require('morgan');
 const logger = require('./logging/logging')({ module: module.filename, type: 'req' });
 const { reqLogger, errLogger } = require('./logging/request-logging');
+const serialize = require('serialize-javascript');
 
 // periodic tasks
 const deviceStatus = require('./periodic/deviceStatus')();
@@ -44,14 +47,14 @@ const deviceSwVersion = require('./periodic/deviceSwVersion')();
 const deviceSwUpgrade = require('./periodic/deviceperiodicUpgrade')();
 const notifyUsers = require('./periodic/notifyUsers')();
 const appRules = require('./periodic/appRules')();
+const applications = require('./periodic/applications')();
+const statusesInDb = require('./periodic/statusesInDb')();
+
+require('./applicationLogic/initializeApps');
 
 // rate limiter
 const rateLimit = require('express-rate-limit');
 const RateLimitStore = require('./rateLimitStore');
-
-// mongo database UI
-const mongoExpress = require('mongo-express/lib/middleware');
-const mongoExpressConfig = require('./mongo_express_config');
 
 // Internal routers definition
 const adminRouter = require('./routes/admin');
@@ -60,6 +63,7 @@ const adminRouter = require('./routes/admin');
 const WebSocket = require('ws');
 const connections = require('./websocket/Connections')();
 const broker = require('./broker/broker.js');
+const roleSelector = require('./utils/roleSelector')(configs.get('redisUrl'));
 
 class ExpressServer {
   constructor (port, securePort, openApiYaml) {
@@ -68,14 +72,16 @@ class ExpressServer {
     this.app = express();
     this.openApiPath = openApiYaml;
     this.schema = yamljs.load(openApiYaml);
-    const restServerUrl = configs.get('restServerUrl');
+    const restServerUrl = configs.get('restServerUrl', 'list');
     const servers = this.schema.servers.filter(server => server.url.includes(restServerUrl));
     if (servers.length === 0) {
-      this.schema.servers.unshift({
-        description: 'Local Server',
-        url: restServerUrl + '/api'
-      });
-    }
+      this.schema.servers.unshift(...restServerUrl.map((restServer, idx) => {
+        return {
+          description: `Local Server #${idx + 1}`,
+          url: restServer + '/api'
+        };
+      }));
+    };
 
     this.setupMiddleware = this.setupMiddleware.bind(this);
     this.addErrorHandler = this.addErrorHandler.bind(this);
@@ -87,7 +93,7 @@ class ExpressServer {
     this.setupMiddleware();
   }
 
-  setupMiddleware () {
+  async setupMiddleware () {
     // this.setupAllowedMedia();
     this.app.use((req, res, next) => {
       console.log(`${req.method}: ${req.url}`);
@@ -118,6 +124,10 @@ class ExpressServer {
     // Use morgan request logger in development mode
     if (configs.get('environment') === 'development') this.app.use(morgan('dev'));
 
+    // Initialize websocket traffic handler role selector
+    // On every new websocket connection it will try to set itself as active
+    roleSelector.initializeSelector('websocketHandler');
+
     // Start periodic device tasks
     deviceStatus.start();
     deviceQueues.start();
@@ -125,6 +135,8 @@ class ExpressServer {
     deviceSwUpgrade.start();
     notifyUsers.start();
     appRules.start();
+    applications.start();
+    statusesInDb.start();
 
     // Secure traffic only
     this.app.all('*', (req, res, next) => {
@@ -165,6 +177,7 @@ class ExpressServer {
     this.app.use(cookieParser());
 
     // Routes allowed without authentication
+    this.app.get('/', (req, res) => this.sendIndexFile(res));
     this.app.use(express.static(path.join(__dirname, configs.get('clientStaticDir'))));
 
     // Secure traffic only
@@ -181,7 +194,7 @@ class ExpressServer {
     });
 
     // no authentication
-    this.app.use('/api/connect', require('./routes/connect'));
+    this.app.use('/api/connect', connectRouter);
     this.app.use('/api/users', require('./routes/users'));
 
     // add API documentation
@@ -193,7 +206,11 @@ class ExpressServer {
     // Enable db admin only in development mode
     if (configs.get('environment') === 'development') {
       logger.warn('Warning: Enabling UI database access');
-      this.app.use('/admindb', mongoExpress(mongoExpressConfig));
+      // mongo database UI
+      const mongoExpress = require('mongo-express/lib/middleware');
+      const mongoExpressConfig = require('./mongo_express_config');
+      const expressApp = await mongoExpress(mongoExpressConfig);
+      this.app.use('/admindb', expressApp);
     }
 
     // Enable routes for non-authorized links
@@ -202,6 +219,7 @@ class ExpressServer {
     this.app.get('/hello', (req, res) => res.send('Hello World'));
 
     this.app.get('/api/version', (req, res) => res.json({ version }));
+    this.app.get('/api/restServers', (req, res) => res.json({ version }));
 
     this.app.use(cors.corsWithOptions);
     this.app.use(auth.verifyUserJWT);
@@ -232,24 +250,50 @@ class ExpressServer {
 
     const validator = new OpenApiValidator({
       apiSpec: this.openApiPath,
-      validateRequests: true,
+      validateRequests: configs.get('validateOpenAPIRequest', 'boolean'),
       validateResponses: configs.get('validateOpenAPIResponse', 'boolean')
     });
 
     validator
       .install(this.app)
       .then(async () => {
-        await this.app.use(openapiRouter());
+        await this.app.use(openapiRouter(this.schema.components.schemas));
         await this.launch();
         logger.info('Express server running');
       });
+  }
+
+  sendIndexFile (res) {
+    const transformIndex = (origIndex) => {
+      let modifiedIndex = configs.get('removeBranding', 'boolean')
+        ? origIndex.replace('<title>FlexiWAN Management</title>',
+          `<title>${configs.get('companyName')} Management</title>`)
+        : origIndex;
+      const m = modifiedIndex.match(/const __FLEXIWAN_SERVER_CONFIG__=(.*?);/);
+      if (m instanceof Array && m.length > 0) { // successful match
+        // eslint-disable-next-line no-eval
+        const newConfig = eval('(' + m[1] + ')');
+        // Update default config with backend variables
+        for (const c in clientConfig) {
+          newConfig[c] = clientConfig[c];
+        }
+        modifiedIndex = modifiedIndex.replace(m[0],
+          'const __FLEXIWAN_SERVER_CONFIG__=' + serialize(newConfig, { isJSON: true }) + ';');
+      }
+      return modifiedIndex;
+    };
+
+    const indexFile =
+        fs.readFileSync(path.join(__dirname, configs.get('clientStaticDir'), 'index.html'));
+    const transformedIndex = transformIndex(indexFile.toString());
+    res.send(transformedIndex);
   }
 
   addErrorHandler () {
     // "catchall" handler, for any request that doesn't match one above, send back index.html file.
     this.app.get('*', (req, res, next) => {
       logger.info('Route not found', { req: req });
-      res.sendFile(path.join(__dirname, configs.get('clientStaticDir'), 'index.html'));
+      this.sendIndexFile(res);
     });
 
     // catch 404 and forward to error handler
@@ -295,9 +339,11 @@ class ExpressServer {
         case 'EACCES':
           console.error(bind + ' requires elevated privileges');
           process.exit(1);
+          break;
         case 'EADDRINUSE':
           console.error(bind + ' is already in use');
           process.exit(1);
+          break;
         default:
           throw error;
       }

@@ -16,14 +16,19 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 const { isIPv4Address } = require('./validators');
+const wifiChannels = require('../utils/wifi-channels');
+const Joi = require('joi');
+const omitBy = require('lodash/omitBy');
+const omit = require('lodash/omit');
 
 /**
  * Builds collection of interfaces to be sent to device
  *
- * @param {*} deviceInterfaces interfaces stored in db
+ * @param {array} deviceInterfaces interfaces stored in db
+ * @param {object} globalOSPF global OSPF configuration to apply on each interfaces
  * @returns array of interfaces
  */
-const buildInterfaces = (deviceInterfaces) => {
+const buildInterfaces = (deviceInterfaces, globalOSPF) => {
   const interfaces = [];
   for (const ifc of deviceInterfaces) {
     // Skip unassigned/un-typed interfaces, as they
@@ -31,13 +36,11 @@ const buildInterfaces = (deviceInterfaces) => {
     if (!ifc.isAssigned || ifc.type.toLowerCase() === 'none') continue;
 
     const {
-      pciaddr,
+      devId,
       IPv4,
       IPv6,
       IPv4Mask,
       IPv6Mask,
-      PublicIP,
-      PublicPort,
       useStun,
       monitorInternet,
       routing,
@@ -45,7 +48,14 @@ const buildInterfaces = (deviceInterfaces) => {
       pathlabels,
       gateway,
       metric,
-      dhcp
+      mtu,
+      dhcp,
+      deviceType,
+      configuration,
+      dnsServers,
+      dnsDomains,
+      useDhcpDnsServers,
+      ospf
     } = ifc;
     // Non-DIA interfaces should not be
     // sent to the device
@@ -54,31 +64,256 @@ const buildInterfaces = (deviceInterfaces) => {
     );
     // Skip interfaces with invalid IPv4 addresses.
     // Currently we allow empty IPv6 address
-    if (dhcp !== 'yes' && !isIPv4Address(IPv4, IPv4Mask)) continue;
+    if (dhcp !== 'yes' && !isIPv4Address(IPv4, IPv4Mask) && deviceType !== 'wifi') continue;
 
     const ifcInfo = {
-      pci: pciaddr,
+      dev_id: devId,
       dhcp: dhcp || 'no',
       addr: `${(IPv4 && IPv4Mask ? `${IPv4}/${IPv4Mask}` : '')}`,
       addr6: `${(IPv6 && IPv6Mask ? `${IPv6}/${IPv6Mask}` : '')}`,
+      mtu,
       routing,
       type,
-      multilink: { labels: labels.map((label) => label._id.toString()) }
+      multilink: { labels: labels.map((label) => label._id.toString()) },
+      deviceType,
+      configuration
     };
     if (ifc.type === 'WAN') {
       ifcInfo.gateway = gateway;
       ifcInfo.metric = metric;
-      ifcInfo.PublicIP = PublicIP;
-      ifcInfo.PublicPort = PublicPort;
       ifcInfo.useStun = useStun;
       ifcInfo.monitorInternet = monitorInternet;
+      ifcInfo.dnsServers = dnsServers;
+      ifcInfo.dnsDomains = dnsDomains;
+
+      // if useDhcpDnsServers is true, we set empty array to the agent
+      if (ifcInfo.dhcp === 'yes' && useDhcpDnsServers === true) {
+        ifcInfo.dnsServers = [];
+      }
     }
+
+    if (ifc.routing === 'OSPF') {
+      ifcInfo.ospf = {
+        ...ospf,
+        ...globalOSPF
+      };
+
+      // remove empty values since they are optional
+      ifcInfo.ospf = omitBy(ifcInfo.ospf, val => val === '');
+
+      // No need to send this field for interfaces. We use them for other things in the system
+      const omitFields = ['routerId'];
+      ifcInfo.ospf = omit(ifcInfo.ospf, omitFields);
+    }
+
+    ifcInfo.bridge_addr = ifc.type === 'LAN' && deviceInterfaces.some(i => {
+      return devId !== i.devId && i.isAssigned && IPv4 === i.IPv4 && IPv4Mask === i.IPv4Mask;
+    }) ? ifcInfo.addr : null;
+
     interfaces.push(ifcInfo);
   }
 
   return interfaces;
 };
 
+const lteConfigurationSchema = Joi.object().keys({
+  enable: Joi.boolean().required(),
+  apn: Joi.string().required(),
+  auth: Joi.string().valid('MSCHAPV2', 'PAP', 'CHAP').allow(null, ''),
+  user: Joi.string().allow(null, ''),
+  password: Joi.string().allow(null, ''),
+  pin: Joi.string().allow(null, '')
+});
+
+const shared = {
+  enable: Joi.boolean().required(),
+  ssid: Joi.alternatives().conditional('enable', {
+    is: true,
+    then: Joi.string().required(),
+    otherwise: Joi.string().allow(null, '')
+  }).required(),
+  password: Joi.alternatives().conditional('enable', {
+    is: true,
+    then: Joi.alternatives().conditional('securityMode', {
+      is: 'wep',
+      then: Joi.string()
+        .regex(/^([a-z0-9]{5}|[a-z0-9]{13}|[a-z0-9]{16})$/)
+        .error(() => 'Password length must be 5, 13 or 16'),
+      otherwise: Joi.string().min(8)
+    }).required(),
+    otherwise: Joi.string().allow(null, '')
+  }).required(),
+  operationMode: Joi.alternatives().conditional('enable', {
+    is: true,
+    then: Joi.string().required().valid('b', 'g', 'n', 'a', 'ac'),
+    otherwise: Joi.string().allow(null, '')
+  }).required(),
+  channel: Joi.string().regex(/^\d+$/).required(),
+  bandwidth: Joi.string().valid('20').required(),
+  securityMode: Joi.alternatives().conditional('enable', {
+    is: true,
+    then: Joi.string().valid(
+      'open', 'wpa-psk', 'wpa2-psk'
+      // 'wpa-eap', 'wpa2-eap'
+    ).required().error(() => 'Security mode is required field on enabled WiFi band'),
+    otherwise: Joi.string().allow(null, '')
+  }).required(),
+  hideSsid: Joi.boolean().required(),
+  encryption: Joi.string().valid('aes-ccmp').required(),
+  region: Joi.alternatives().conditional('enable', {
+    is: true,
+    then: Joi.string().required()
+      .regex(/^([A-Z]{2}|other)$/).error(() => 'Region  must be 2 uppercase letters or "other"'),
+    otherwise: Joi.string().allow(null, '')
+  }).required()
+};
+
+const WifiConfigurationSchema = Joi.alternatives().try(
+  Joi.object().keys({ '2.4GHz': Joi.object().keys(shared) }),
+  Joi.object().keys({ '5GHz': Joi.object().keys(shared) }),
+  Joi.object().keys({ '5GHz': Joi.object().keys(shared), '2.4GHz': Joi.object().keys(shared) })
+);
+
+const validateWifiCountryCode = (configurationReq) => {
+  const regions = Object.values(wifiChannels);
+  let err = null;
+  for (const band in configurationReq) {
+    if (configurationReq[band].enable === false) {
+      continue;
+    }
+
+    const region = configurationReq[band].region;
+    const exists = regions.find(r => r.code === region);
+    if (!exists) {
+      err = `Region ${region} is not valid`;
+      break;
+    };
+
+    const channel = parseInt(configurationReq[band].channel);
+
+    if (channel < 0) {
+      err = 'Channel must be greater than or equal to 0';
+      break;
+    }
+
+    if (band === '2.4GHz') {
+      if ((region === 'US' || region === 'TW') && channel > 11) {
+        err = 'Channel must be between 0 to 11';
+        break;
+      }
+
+      if (channel > 13) {
+        err = 'Channel must be between 0 to 13';
+        break;
+      }
+    }
+
+    if (band === '5GHz') {
+      const validChannels = exists.channels;
+      if (channel > 0 && validChannels.findIndex(c => c === channel) === -1) {
+        err = `Channel ${channel} is not valid number for country ${region}`;
+        break;
+      }
+    }
+  };
+
+  if (err) {
+    return { err: err, valid: false };
+  }
+  return { err: '', valid: true };
+};
+
+/**
+ * Validate dynamic configuration object for different types of interfaces
+ *
+ * @param {*} deviceInterface interface stored in db
+ * @param {*} configurationReq configuration request to save
+ * @returns array of interfaces
+ */
+const validateConfiguration = (deviceInterface, configurationReq) => {
+  const interfacesTypes = {
+    lte: lteConfigurationSchema,
+    wifi: WifiConfigurationSchema
+  };
+
+  const intType = deviceInterface.deviceType;
+
+  if (interfacesTypes[intType]) {
+    const result = interfacesTypes[intType].validate(configurationReq);
+
+    if (result.error) {
+      return {
+        valid: false,
+        err: `${result.error.details[result.error.details.length - 1].message}`
+      };
+    }
+
+    if (intType === 'wifi') {
+      const { err } = validateWifiCountryCode(configurationReq);
+      if (err) {
+        return { valid: false, err: err };
+      }
+    }
+
+    return { valid: true, err: '' };
+  }
+
+  return { valid: false, err: 'You can\'t save configuration for this interface' };
+};
+
+const lteOperationSchema = Joi.object().keys({
+  op: Joi.string().valid('reset', 'pin').required(),
+  params: Joi.object().optional()
+});
+
+const wifiOperationSchema = Joi.object().keys({
+  op: Joi.string().valid('start', 'stop').required(),
+  params: Joi.object().required()
+});
+
+/**
+ * Validate dynamic operation object for different types of interfaces
+ *
+ * @param {*} deviceInterfaces interfaces stored in db
+ * @param {*} configurationReq configuration request to save
+ * @returns array of interfaces
+ */
+const validateOperations = (deviceInterfaces, operationReq) => {
+  const interfacesTypes = {
+    lte: lteOperationSchema,
+    wifi: wifiOperationSchema
+  };
+
+  const intType = deviceInterfaces.deviceType;
+
+  if (interfacesTypes[intType]) {
+    const result = interfacesTypes[intType].validate(operationReq);
+
+    if (result.error) {
+      return { valid: false, err: `${result.error.details[0].message}` };
+    }
+
+    if (intType === 'wifi') {
+      const configuration = operationReq.params.configuration;
+      const isBand2Enabled = configuration['2.4GHz'] && configuration['2.4GHz'].enable;
+      const isBand5Enabled = configuration['5GHz'] && configuration['5GHz'].enable;
+
+      if (isBand2Enabled && isBand5Enabled) {
+        return {
+          valid: false,
+          err: 'You can\'t enabled two bands at the same time. Please enable one of them'
+        };
+      }
+    }
+
+    return { valid: true, err: '' };
+  }
+
+  return { valid: false, err: 'You can\'t perform requested operation for this interface' };
+};
+
 module.exports = {
-  buildInterfaces
+  buildInterfaces,
+  validateConfiguration,
+  validateOperations
 };

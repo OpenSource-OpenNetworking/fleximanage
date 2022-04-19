@@ -28,14 +28,17 @@ const configEnv = {
   // This is the default configuration, override by the following sections
   default: {
     // URL of the rest server
-    restServerUrl: 'https://local.flexiwan.com:3443',
+    restServerUrl: ['https://local.flexiwan.com:3443'],
     // URL of the UI server
-    uiServerUrl: 'https://local.flexiwan.com:3000',
+    uiServerUrl: ['https://local.flexiwan.com:3000'],
     // Key used for users tokens, override default with environment variable USER_SECRET_KEY
     userTokenSecretKey: 'abcdefg1234567',
     // Whether to validate open API response. True for testing and dev, False for production,
     // to remove unneeded fields from the response, use validateOpenAPIResponse = { removeAdditional: 'failing' }
     validateOpenAPIResponse: true,
+    // Whether to validate open API request, now False for all.
+    // Not described in schema fields will be removed if true,
+    validateOpenAPIRequest: false,
     // Number of REST requests allowed in 5 min per IP address, more requests will be rate limited
     userIpReqRateLimit: 300,
     // Unread notification email period (in msec), a mail is sent once a period
@@ -48,6 +51,10 @@ const configEnv = {
     userRefreshTokenExpiration: 604800,
     // The time to wait for job response before declaring the job as timeout
     jobTimeout: 180000,
+    // The time to wait for deviceSendMessage response before declaring the req as timeout
+    directMessageTimeout: 15000,
+    // The time to retain jobs until deleted from the database, in msec
+    jobRetainTimeout: 604800000,
     // Key used for device tokens, override default with environment variable DEVICE_SECRET_KEY
     deviceTokenSecretKey: 'abcdefg1234567',
     // Key used to validate google captcha token, generated at https://www.google.com/u/1/recaptcha/admin/create
@@ -59,6 +66,8 @@ const configEnv = {
     mongoAnalyticsUrl: `mongodb://${hostname}:27017,${hostname}:27018,${hostname}:27019/flexiwanAnalytics?replicaSet=rs`,
     // Mongo Billing database
     mongoBillingUrl: `mongodb://${hostname}:27017,${hostname}:27018,${hostname}:27019/flexibilling?replicaSet=rs`,
+    // Mongo VPN database
+    mongoVpnUrl: `mongodb://${hostname}:27017,${hostname}:27018,${hostname}:27019/flexivpn?replicaSet=rs`,
     // Billing Redirect OK page url
     billingRedirectOkUrl: 'https://local.flexiwan.com/ok.html',
     // Biling config site - this is used as the billing site name in ChargeBee
@@ -108,7 +117,7 @@ const configEnv = {
     // Client static root directory
     clientStaticDir: 'public',
     // Mgmt-Agent protocol version
-    agentApiVersion: '2.0.0',
+    agentApiVersion: '5.0.0',
     // Mgmt log files
     logFilePath: './logs/app.log',
     reqLogFilePath: './logs/req.log',
@@ -122,8 +131,8 @@ const configEnv = {
     mailerBypassCert: false,
     // From address used when sending emails
     mailerFromAddress: 'noreply@flexiwan.com',
-    // Name of the company, is used in email templates
-    companyName: 'flexiWAN',
+    // Mail envelop from address
+    mailerEnvelopeFromAddress: 'flexiWAN <noreply@flexiwan.com>',
     // Allow users registration, otherwise by invitation only
     allowUsersRegistration: true,
     // Software version query link
@@ -141,6 +150,8 @@ const configEnv = {
     webHookRegisterDeviceSecret: 'ABC',
     // Global app identification rules file location
     appRulesUrl: 'https://sandbox.flexiwan.com/Protocols/app-rules.json',
+    // Global applications file locations
+    applicationsUrl: 'https://sandbox.flexiwan.com/Templates/applications.json',
     // Default port for tunnels
     tunnelPort: '4789',
     // If to allow manager role to delete organizations, devices, tokens, tunnels, appIdentifications,
@@ -156,7 +167,48 @@ const configEnv = {
     // This value is for storing in the database, it's not impacting the interval presented in the UI
     analyticsUpdateTime: 300,
     // Do not allow organization LAN subnet overlaps for running devices flag. Default = true
-    forbidLanSubnetOverlaps: true
+    forbidLanSubnetOverlaps: true,
+    // Expiration period in days for generated IKEv2 keys on the devices. Default = 360 days
+    ikev2ExpireDays: 360,
+    // Number of days before expiration to renew IKEv2 keys. Default = 30 days
+    ikev2RenewBeforeExpireDays: 30,
+    // IKEv2 lifetime parameter in seconds.
+    ikev2Lifetime: 3600,
+    // Reconfig block time in seconds.
+    reconfigErrorBlockTime: 60 * 60, // one hour
+    // Public IP/Port block time in seconds.
+    publicAddrBlockTime: 60 * 60, // one hour
+    // Tunnel MTU in bytes. Now provisioned globally per server. Specify number to set specific MTU.
+    // Use 0 to set the MTU based on the WAN interface MTU - tunnel header size
+    globalTunnelMtu: 1500,
+    // flexiVpn server portal url
+    flexiVpnServer: 'https://localvpn.flexiwan.com:4443',
+    // After successful vpn client authentication, the OpenVPN server will generate tmp token valid for the below number of seconds.
+    // On the following renegotiations, the OpenVPN client will pass this token instead of the users password
+    vpnTmpTokenTime: 43200,
+    /****************************************************/
+    /*         Client Fields                            */
+    /****************************************************/
+    // Name of the company, is used in email templates
+    companyName: 'flexiWAN',
+    // URL that appears in contact us link in the UI,
+    contactUsUrl: 'mailto:yourfriends@flexiwan.com',
+    // Repository setup URL
+    agentRepositoryUrl: 'https://deb.flexiwan.com/setup',
+    // Captcha client key for flexiwan domain
+    captchaSiteKey: '6LfkP8IUAAAAABt2dxrb9U2WzxonxJlhs0_2Hadi',
+    // HTML content of the UI about page
+    aboutContent: '',
+    // UI URL for feedback
+    feedbackUrl: '',
+    // If to show device limit alert banner
+    showDeviceLimitAlert: true,
+    // Whether to remove branding, e.g. powered by...
+    removeBranding: false,
+    // URL for account qualification
+    qualifiedAccountsURL: 'https://www.flexiwan.com',
+    // VPN portal URL
+    vpnBaseUrl: 'https://localvpn.flexiwan.com:8000'
   },
   // Override for development environment, default environment if not specified
   development: {
@@ -164,19 +216,20 @@ const configEnv = {
     mailerBypassCert: true,
     SwRepositoryUrl: 'https://deb.flexiwan.com/info/flexiwan-router/latest-testing',
     userTokenExpiration: 604800,
-    logLevel: 'info',
+    logLevel: 'debug',
     mailerPort: 1025
   },
   testing: {
     // Mgmt-Agent protocol version for testing purposes
-    agentApiVersion: '2.0.0',
+    agentApiVersion: '5.0.0',
     // Kue prefix
-    kuePrefix: 'testq'
+    kuePrefix: 'testq',
+    logLevel: 'debug'
   },
   // Override for production environment
   production: {
-    restServerUrl: 'https://app.flexiwan.com:443',
-    uiServerUrl: 'https://app.flexiwan.com:443',
+    restServerUrl: ['https://app.flexiwan.com:443'],
+    uiServerUrl: ['https://app.flexiwan.com:443'],
     shouldRedirectHttps: false,
     redirectHttpsPort: 443,
     agentBroker: 'app.flexiwan.com:443',
@@ -190,12 +243,13 @@ const configEnv = {
     billingRedirectOkUrl: 'https://app.flexiwan.com/ok.html',
     logLevel: 'info',
     logUserName: true,
-    corsWhiteList: ['https://app.flexiwan.com:443', 'http://app.flexiwan.com:80']
+    corsWhiteList: ['https://app.flexiwan.com:443', 'http://app.flexiwan.com:80'],
+    vpnBaseUrl: 'https://vpn.flexiwan.com'
   },
   hosted: {
     // modify next params for hosted server
-    restServerUrl: 'https://hosted.server.com:443',
-    uiServerUrl: 'https://hosted.server.com:443',
+    restServerUrl: ['https://hosted.server.com:443'],
+    uiServerUrl: ['https://hosted.server.com:443'],
     agentBroker: 'hosted.server.com:443',
     corsWhiteList: 'https://hosted.server.com:443, http://hosted.server.com:80',
     billingRedirectOkUrl: 'https://hosted.server.com/ok.html',
@@ -214,8 +268,8 @@ const configEnv = {
   },
   // Override for manage environment for production
   manage: {
-    restServerUrl: 'https://manage.flexiwan.com:443',
-    uiServerUrl: 'https://manage.flexiwan.com:443',
+    restServerUrl: ['https://manage.flexiwan.com:443'],
+    uiServerUrl: ['https://manage.flexiwan.com:443'],
     shouldRedirectHttps: false,
     redirectHttpsPort: 443,
     kuePrefix: 'mngdeviceq',
@@ -231,12 +285,13 @@ const configEnv = {
     SwRepositoryUrl: 'https://deb.flexiwan.com/info/flexiwan-router/latest',
     logLevel: 'info',
     logUserName: true,
-    corsWhiteList: ['https://manage.flexiwan.com:443', 'http://manage.flexiwan.com:80']
+    corsWhiteList: ['https://manage.flexiwan.com:443', 'http://manage.flexiwan.com:80'],
+    vpnBaseUrl: 'https://vpn.flexiwan.com'
   },
   // Override for appqa01 environment
   appqa01: {
-    restServerUrl: 'https://appqa01.flexiwan.com:443',
-    uiServerUrl: 'https://appqa01.flexiwan.com:443',
+    restServerUrl: ['https://appqa01.flexiwan.com:443'],
+    uiServerUrl: ['https://appqa01.flexiwan.com:443'],
     shouldRedirectHttps: false,
     redirectHttpsPort: 443,
     userTokenExpiration: 300,
@@ -252,14 +307,16 @@ const configEnv = {
     useFlexiBilling: true,
     billingRedirectOkUrl: 'https://appqa01.flexiwan.com/ok.html',
     SwRepositoryUrl: 'https://deb.flexiwan.com/info/flexiwan-router/latest-testing',
-    logLevel: 'info',
+    logLevel: 'debug',
     logUserName: true,
-    corsWhiteList: ['https://appqa01.flexiwan.com:443', 'http://appqa01.flexiwan.com:80']
+    corsWhiteList: ['https://appqa01.flexiwan.com:443', 'http://appqa01.flexiwan.com:80'],
+    flexiVpnServer: 'https://vpnqa01.flexiwan.com:443',
+    vpnBaseUrl: 'https://vpnqa01.flexiwan.com'
   },
   // Override for appqa02 environment
   appqa02: {
-    restServerUrl: 'https://appqa02.flexiwan.com:443',
-    uiServerUrl: 'https://appqa02.flexiwan.com:443',
+    restServerUrl: ['https://appqa02.flexiwan.com:443'],
+    uiServerUrl: ['https://appqa02.flexiwan.com:443'],
     shouldRedirectHttps: false,
     redirectHttpsPort: 443,
     userTokenExpiration: 300,
@@ -275,9 +332,11 @@ const configEnv = {
     useFlexiBilling: true,
     billingRedirectOkUrl: 'https://appqa02.flexiwan.com/ok.html',
     SwRepositoryUrl: 'https://deb.flexiwan.com/info/flexiwan-router/latest-testing',
-    logLevel: 'info',
+    logLevel: 'debug',
     logUserName: true,
-    corsWhiteList: ['https://appqa02.flexiwan.com:443', 'http://appqa02.flexiwan.com:80']
+    corsWhiteList: ['https://appqa02.flexiwan.com:443', 'http://appqa02.flexiwan.com:80'],
+    flexiVpnServer: 'https://vpnqa02.flexiwan.com:443',
+    vpnBaseUrl: 'https://vpnqa02.flexiwan.com'
   }
 };
 
@@ -301,6 +360,7 @@ class Configs {
     combinedConfig.mongoUrl = process.env.MONGO_URL || combinedConfig.mongoUrl;
     combinedConfig.mongoBillingUrl = process.env.MONGO_BILLING_URL || combinedConfig.mongoBillingUrl;
     combinedConfig.mongoAnalyticsUrl = process.env.MONGO_ANALYTICS_URL || combinedConfig.mongoAnalyticsUrl;
+    combinedConfig.mongoVpnUrl = process.env.MONGO_VPN_URL || combinedConfig.mongoVpnUrl;
     combinedConfig.billingApiKey = process.env.FLEXIBILLING_API_KEY || combinedConfig.billingApiKey;
     combinedConfig.redisUrl = process.env.REDIS_URL || combinedConfig.redisUrl;
     combinedConfig.webHookAddUserUrl = process.env.WEBHOOK_ADD_USER_URL || combinedConfig.webHookAddUserUrl;
@@ -309,6 +369,19 @@ class Configs {
       combinedConfig.webHookRegisterDeviceUrl;
     combinedConfig.webHookRegisterDeviceSecret = process.env.WEBHOOK_REGISTER_DEVICE_KEY ||
       combinedConfig.webHookRegisterDeviceSecret;
+
+    /****************************************************/
+    /*           Applications URL workaround            */
+    /****************************************************/
+    // Currently and temporarily we take the "Template" folder from the "SwVersionUpdateUrl".
+    // In the future we will have "APPLICATIONS_URL" ENV for applications url.
+    if (process.env.APPLICATIONS_URL) {
+      combinedConfig.applicationsUrl = process.env.APPLICATIONS_URL;
+    } else {
+      const regex = /Templates.*\//g;
+      const templateDirName = combinedConfig.SwVersionUpdateUrl.match(regex)[0];
+      combinedConfig.applicationsUrl = combinedConfig.applicationsUrl.replace('Templates/', templateDirName);
+    }
 
     this.config_values = combinedConfig;
     console.log('Configuration used:\n' + JSON.stringify(this.config_values, null, 2));
@@ -348,6 +421,27 @@ class Configs {
 
   getAll () {
     return this.config_values;
+  }
+
+  // The info returned by this function will be shared with the client
+  // Add fields that needs to be known by the client
+  // Pay attention not to expose confidential fields
+  // When adding a new variable add also in client/public/index.html
+  getClientConfig () {
+    return {
+      baseUrl: this.get('restServerUrl', 'list')[0] + '/api/',
+      companyName: this.get('companyName'),
+      allowUsersRegistration: this.get('allowUsersRegistration', 'boolean'),
+      contactUsUrl: this.get('contactUsUrl'),
+      agentRepositoryUrl: this.get('agentRepositoryUrl'),
+      captchaSiteKey: this.get('captchaSiteKey'),
+      aboutContent: this.get('aboutContent'),
+      feedbackUrl: this.get('feedbackUrl'),
+      showDeviceLimitAlert: this.get('showDeviceLimitAlert', 'boolean'),
+      removeBranding: this.get('removeBranding', 'boolean'),
+      qualifiedAccountsURL: this.get('qualifiedAccountsURL'),
+      vpnBaseUrl: this.get('vpnBaseUrl') + '/'
+    };
   }
 }
 

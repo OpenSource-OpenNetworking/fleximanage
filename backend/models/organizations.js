@@ -41,6 +41,15 @@ const OrgSchema = new Schema({
   account: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'accounts'
+  },
+  encryptionMethod: {
+    type: String,
+    enum: [
+      'none',
+      'psk',
+      'ikev2'
+    ],
+    default: 'psk'
   }
 });
 

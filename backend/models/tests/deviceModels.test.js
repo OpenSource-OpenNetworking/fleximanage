@@ -236,7 +236,7 @@ describe('Interface schema', () => {
 
     interfaceModel.validate((err) => {
       expect(err.message).toBe(
-        'interfaces validation failed: IPv4: IPv4 should be a vaild ip address'
+        'interfaces validation failed: IPv4: IPv4 should be a valid ip address'
       );
     });
   });
@@ -246,7 +246,7 @@ describe('Interface schema', () => {
 
     interfaceModel.validate((err) => {
       expect(err.message).toBe(
-        'interfaces validation failed: IPv4Mask: IPv4Mask should be a vaild mask'
+        'interfaces validation failed: IPv4Mask: IPv4Mask should be a valid mask'
       );
     });
   });
@@ -265,7 +265,7 @@ describe('Interface schema', () => {
 
     interfaceModel.validate((err) => {
       expect(err.message).toBe(
-        'interfaces validation failed: IPv6: IPv6 should be a vaild ip address'
+        'interfaces validation failed: IPv6: IPv6 should be a valid ip address'
       );
     });
   });
@@ -275,7 +275,7 @@ describe('Interface schema', () => {
 
     interfaceModel.validate((err) => {
       expect(err.message).toBe(
-        'interfaces validation failed: IPv6Mask: IPv6Mask should be a vaild mask'
+        'interfaces validation failed: IPv6Mask: IPv6Mask should be a valid mask'
       );
     });
   });
@@ -290,12 +290,12 @@ describe('Interface schema', () => {
     });
   });
 
-  it('Should be invalid if pci address is invalid', () => {
-    interfaceModel.pciaddr = null;
+  it('Should be invalid if dev_id address is invalid', () => {
+    interfaceModel.devId = null;
 
     interfaceModel.validate((err) => {
       expect(err.message).toBe(
-        'interfaces validation failed: pciaddr: pciaddr should be a vaild pci address'
+        'interfaces validation failed: devId: devId should be a valid devId address'
       );
     });
   });

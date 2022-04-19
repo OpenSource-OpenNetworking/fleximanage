@@ -3,7 +3,7 @@ module.exports = {
     commonjs: true,
     es6: true,
     node: true,
-    "jest/globals": true
+    'jest/globals': true
   },
   extends: [
     'standard'
@@ -13,15 +13,15 @@ module.exports = {
     SharedArrayBuffer: 'readonly'
   },
   parserOptions: {
-    ecmaVersion: 2018
+    ecmaVersion: 2020
   },
   rules: {
-    "semi": ["error", "always"],
-    "no-constant-condition": ["off", "always"],
-    "handle-callback-err": ["warn", "always"],
-    "no-trailing-spaces": ["error"],
-    "no-prototype-builtins": ["off"],
-    "max-len": ["error", { "code": 100 }]
+    semi: ['error', 'always'],
+    'no-constant-condition': ['off', 'always'],
+    'handle-callback-err': ['warn', 'always'],
+    'no-trailing-spaces': ['error'],
+    'no-prototype-builtins': ['off'],
+    'max-len': ['error', { code: 100 }]
   },
-  "plugins": ["jest"]
-}
+  plugins: ['jest']
+};

@@ -8,6 +8,7 @@ For the full list of open source used by flexiWAN check [this page](https://docs
 Name | Web Page | License | Modified? | Copyrights 
 --- | --- | --- | --- | ---
 mongodb | https://www.npmjs.com/package/mongodb | Apache | No | 2009-2012 Christian Amor Kvalheim, 2012-present MongoDB Contributors 
+geoip-lite | https://www.npmjs.com/package/geoip-lite | Apache | No | 2011 Philip Tellis 
 
 ```
 
@@ -253,8 +254,10 @@ cidr-tools | https://www.npmjs.com/package/cidr-tools | BSD-2 | No | silverwind
 Name | Web Page | License | Modified? | Copyrights 
 --- | --- | --- | --- | ---
 redis | https://redis.io/ | BSD-3 | No | 2006-2015, Salvatore Sanfilippo 
-@hapi/joi | https://www.npmjs.com/package/@hapi/joi | BSD-3 | No | 2012-2014, Walmart  2012-2019, Sideway Inc, and project contributors 
+joi | https://www.npmjs.com/package/joi | BSD-3 | No | 2012-2014, Walmart  2012-2019, Sideway Inc, and project contributors 
 isemail | https://www.npmjs.com/package/isemail | BSD-3 | No | 2008-2011, Dominic Sayers 2013-2014, GlobeSherpa 2014-2015, Eli Skeggs and Project contributors 
+node-forge | https://www.npmjs.com/package/node-forge | BSD-3 | No | Digital Bazaar, Inc 
+serialize-javascript | https://www.npmjs.com/package/serialize-javascript | BSD-3 | No | Yahoo! Inc. 
 
 ```
 
@@ -293,6 +296,7 @@ isemail | https://www.npmjs.com/package/isemail | BSD-3 | No | 2008-2011, Domini
 Name | Web Page | License | Modified? | Copyrights 
 --- | --- | --- | --- | ---
 eslint-plugin-promise | https://www.npmjs.com/package/eslint-plugin-promise | ISC | No | MMXV jden, 2016 Jamund Ferguson 
+rate-limiter-flexible | https://www.npmjs.com/package/rate-limiter-flexible | ISC |  | Copyright 2019 Roman Voloboev 
 
 ```
 
@@ -336,7 +340,7 @@ mongo-express | https://www.npmjs.com/package/mongo-express | MIT | No | 2012 Ch
 mongoose | https://www.npmjs.com/package/mongoose | MIT | No | 2010 LearnBoost dev@learnboost.com 
 morgan | https://www.npmjs.com/package/morgan | MIT | No | 2014 Jonathan Ong, 2014-2017 Douglas Christopher Wilson 
 netmask | https://www.npmjs.com/package/netmask | MIT | No | 2011 Olivier Poitrey 
-node-fetch | https://www.npmjs.com/package/node-fetch | MIT | No | 2016 David Frank 
+fetch-with-proxy | https://www.npmjs.com/package/fetch-with-proxy | MIT | No | Nicolas Thouvenin 
 node-mocks-http | https://www.npmjs.com/package/node-mocks-http | MIT | No | 2012-2014, Howard Abrams and other collaborators 
 node.js | https://nodejs.org/ | MIT | No | 2012-2018 by various contributors,2017-2018 by Adrian Heine,2007 - 2018, Daniel Stenberg with many contributors,1995-2016 International Business Machines Corporation and others,2006-2008, Google Inc.,1999 TaBE Project.,1999 Pai-Hsiang Hsiao.,1999 Computer Systems and Communication Lab,,2013 International Business Machines Corporation,2013 Brian Eugene Wilson, Robert Martin Campbell.,2014 International Business Machines Corporation,2013, LeRoy Benjamin Sharon,2015-present libuv project contributors.,1998-2019 The OpenSSL Project.  All rights reserved.,2016 Jean-Philippe Aumasson <jeanphilippe.aumasson@gmail.com>,1995-2017 Jean-loup Gailly and Mark Adler,npm, Inc. and Contributors,their respective copyright owners,Mathias Pettersson and Brian Hammond,Tjarda Koster, https://jelloween.deviantart.com,2000-2006, The Perl Foundation.,2009 Google Inc. All rights reserved.,2009 by the Jinja Team,2010 by Armin Ronacher and contributors.,2009 Google Inc. All rights reserved.,2014-2016 Sebastian McKenzie <sebmck@gmail.com>,2012, 2014, 2015, 2016 Tatsuhiro Tsujikawa,2012, 2014, 2015, 2016 nghttp2 contributors,2018 Intel Corporation,2011 Google Inc.,2018 Agoric,2009, 2010, 2013-2016 by the Brotli Authors.,2012, 2013, 2014 Gil Tene,2014 Michael Barker,2014 Matt Warren,2012, Ben Noordhuis <info@bnoordhuis.nl>,2014, StrongLoop Inc.,Isaac Z. Schlueter and Contributors,2019 Colin Ihrig and Contributors 
 passport | https://www.npmjs.com/package/passport | MIT | No | 2011-2019 Jared Hanson 
@@ -359,6 +363,7 @@ eslint-plugin-node | https://www.npmjs.com/package/eslint-plugin-node | MIT | No
 eslint-plugin-standard | https://www.npmjs.com/package/eslint-plugin-standard | MIT | No | 2015 Jamund Ferguson 
 express-openapi-validator | https://www.npmjs.com/package/express-openapi-validator | MIT | No | 2019 Carmine M. DiMascio 
 yamljs | https://www.npmjs.com/package/yamljs | MIT | No | 2010 Jeremy Faivre 
+easyrsa | https://www.npmjs.com/package/easyrsa | MIT | No | 2016 Olivier Louvignes 
 openapi-generator-cli | https://www.npmjs.com/package/@openapitools/openapi-generator-cli | MIT | No | 2018 HarmoWatch / Kay Schecker 
 
 ```

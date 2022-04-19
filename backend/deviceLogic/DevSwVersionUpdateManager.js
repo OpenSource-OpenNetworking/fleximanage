@@ -130,21 +130,33 @@ class SwVersionUpdateManager {
       // Fetch all relevant memberships and send the notification email to their users.
       const accounts = await Accounts.find();
       for (const account of accounts) {
-        const memberships = await membership.find({
-          account: account._id,
-          to: 'account',
-          role: 'owner'
-        },
-        'user')
-          .populate('user');
+        try {
+          const memberships = await membership.find({
+            account: account._id,
+            to: 'account',
+            role: 'owner'
+          },
+          'user')
+            .populate('user');
 
-        // Send a reminder email to all email addresses that belong to the account
-        const emailAddresses = memberships.map(doc => { return doc.user.email; });
-        await mailer.sendMailHTML(configs.get('mailerFromAddress'), emailAddresses, subject, body);
-        logger.info('Version update email sent', {
-          params: { emailAddresses: emailAddresses },
-          periodic: { task: this.taskInfo }
-        });
+          // Send a reminder email to all email addresses that belong to the account
+          const emailAddresses = memberships.map(doc => { return doc.user.email; });
+          await mailer.sendMailHTML(
+            configs.get('mailerEnvelopeFromAddress'),
+            configs.get('mailerFromAddress'),
+            emailAddresses,
+            subject,
+            body);
+          logger.info('Version update email sent', {
+            params: { emailAddresses: emailAddresses },
+            periodic: { task: this.taskInfo }
+          });
+        } catch (errAccount) {
+          logger.error('Version update email failed to send', {
+            params: { err: errAccount.message, accountId: account._id },
+            periodic: { task: this.taskInfo }
+          });
+        }
       }
     } catch (err) {
       logger.error('Failed to send version notification email to users', {

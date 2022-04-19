@@ -24,9 +24,8 @@ const createError = require('http-errors');
 const { verifyPermissionEx } = require('../authenticate');
 
 function handleError (err, request, response, next) {
-  logger.error(err);
-  const code = err.code || 400;
-  return next(createError(code, err.error));
+  logger.error(err.error);
+  return next(createError(err.code, err.error));
 }
 
 /**
@@ -43,7 +42,7 @@ function handleError (err, request, response, next) {
  * are passed on to the next middleware handler.
  * @returns {Function}
  */
-function openApiRouter () {
+function openApiRouter (openapiSchemas) {
   return async (request, response, next) => {
     try {
       /**
@@ -64,8 +63,11 @@ function openApiRouter () {
       const controllerName = request.openapi.schema['x-openapi-router-controller'];
       const serviceName = request.openapi.schema['x-openapi-router-service'];
       if (!controllers[controllerName] || controllers[controllerName] === undefined) {
-        handleError(`request sent to controller '${controllerName}' which has not been defined`,
-          request, response, next);
+        const err = {
+          code: 400,
+          error: `request sent to controller '${controllerName}' which has not been defined`
+        };
+        handleError(err, request, response, next);
       } else {
         const apiController = new controllers[controllerName](Services[serviceName]);
         const controllerOperation = request.openapi.schema.operationId;
@@ -81,6 +83,8 @@ function openApiRouter () {
           const err = `Operation ${controllerOperation} not found in controller ${name}`;
           throw new Error(err);
         }
+
+        request.openapi.refs = openapiSchemas;
 
         await apiController[controllerOperation](request, response, next);
       }

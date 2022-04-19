@@ -20,7 +20,9 @@ const Service = require('./Service');
 const notificationsDb = require('../models/notifications');
 const { devices } = require('../models/devices');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
+const mongoose = require('mongoose');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
+const { getMatchFilters } = require('../utils/filterUtils');
 
 class NotificationsService {
   /**
@@ -30,14 +32,81 @@ class NotificationsService {
    * limit Integer The numbers of items to return (optional)
    * returns List
    **/
-  static async notificationsGET ({ org, offset, limit, op, status }, { user }) {
+  static async notificationsGET (requestParams, { user }, response) {
+    const { org, op, status, offset, limit, sortField, sortOrder, filters } = requestParams;
     let orgList;
     try {
       orgList = await getAccessTokenOrgList(user, org, false);
-      const query = { org: { $in: orgList } };
+      const query = { org: { $in: orgList.map(o => mongoose.Types.ObjectId(o)) } };
       if (status) {
         query.status = status;
       }
+      const pipeline = op !== 'count' ? [
+        {
+          $match: query
+        },
+        {
+          $project: {
+            _id: { $toString: '$_id' },
+            time: 1,
+            device: 1,
+            title: 1,
+            details: 1,
+            status: 1,
+            machineId: 1
+          }
+        }
+      ] : [];
+      let devicesArray;
+      if (filters) {
+        const parsedFilters = JSON.parse(filters);
+        const matchFilters = getMatchFilters(parsedFilters);
+        if (matchFilters.length > 0) {
+          // if there is a 'device.*' filter we need another query, $lookup will not work
+          // because 'devices' and 'notifications' are in different databases
+          const [deviceFilters, notificationFilters] = matchFilters.reduce((res, filter) => {
+            for (const key in filter) {
+              if (key.startsWith('device.')) {
+                res[0].push({ [key.replace('device.', '')]: filter[key] });
+              } else {
+                res[1].push(filter);
+              }
+            }
+            return res;
+          }, [[], []]);
+          if (deviceFilters.length > 0) {
+            devicesArray = await devices.find({
+              $and: [...deviceFilters, {
+                org: { $in: orgList.map(o => mongoose.Types.ObjectId(o)) }
+              }]
+            }, { name: 1 });
+            notificationFilters.push({ device: { $in: devicesArray.map(d => d._id) } });
+          };
+          if (notificationFilters.length > 0) {
+            pipeline.push({
+              $match: { $and: notificationFilters }
+            });
+          }
+        }
+      }
+      if (sortField) {
+        const order = sortOrder.toLowerCase() === 'desc' ? -1 : 1;
+        pipeline.push({
+          $sort: { [sortField]: order }
+        });
+      };
+      const paginationParams = [{
+        $skip: offset > 0 ? +offset : 0
+      }];
+      if (limit !== undefined) {
+        paginationParams.push({ $limit: +limit });
+      };
+      pipeline.push({
+        $facet: {
+          records: paginationParams,
+          meta: [{ $count: 'total' }]
+        }
+      });
 
       // If operation is 'count', return the amount
       // of notifications for each device
@@ -50,11 +119,19 @@ class NotificationsService {
             }
           }
         ])
-        : await notificationsDb.find(
-          query,
-          'time device title details status machineId'
-        ).populate('device', 'name -_id', devices);
+        : await notificationsDb.aggregate(pipeline).allowDiskUse(true);
 
+      let devicesNames = {};
+      if (op !== 'count' && notifications[0].meta.length > 0) {
+        response.setHeader('records-total', notifications[0].meta[0].total);
+        if (!devicesArray) {
+          // there was no 'device.*' filter
+          devicesArray = await devices.find({
+            _id: { $in: notifications[0].records.map(n => n.device) }
+          }, { name: 1 });
+        }
+        devicesNames = devicesArray.reduce((r, d) => ({ ...r, [d._id]: d.name }), {});
+      };
       const result = (op === 'count')
         ? notifications.map(element => {
           return {
@@ -62,14 +139,12 @@ class NotificationsService {
             count: element.count
           };
         })
-        : notifications.map(element => {
+        : notifications[0].records.map(element => {
           return {
+            ...element,
             _id: element._id.toString(),
-            status: element.status,
-            details: element.details,
-            title: element.title,
-            device: (element.device) ? element.device.name : null,
-            machineId: element.machineId,
+            deviceId: element.device.toString() || null,
+            device: element.device ? devicesNames[element.device] : null || null,
             time: element.time.toISOString()
           };
         });
@@ -152,6 +227,35 @@ class NotificationsService {
       );
       if (notificationsPutRequest.ids && res.n !== notificationsPutRequest.ids.length) {
         throw new Error('Some notification IDs were not found');
+      }
+      return Service.successResponse(null, 204);
+    } catch (e) {
+      return Service.rejectResponse(
+        e.message || 'Internal Server Error',
+        e.status || 500
+      );
+    }
+  }
+
+  /**
+   * Delete all notifications matching the filters
+   *
+   * no response value expected for this operation
+   **/
+  static async notificationsDELETE ({ org, notificationsDeleteRequest }, { user }) {
+    try {
+      const orgList = await getAccessTokenOrgList(user, org, true);
+      const query = { org: { $in: orgList.map(o => mongoose.Types.ObjectId(o)) } };
+      const { filters } = notificationsDeleteRequest;
+      if (filters) {
+        const matchFilters = getMatchFilters(filters);
+        if (matchFilters.length > 0) {
+          query.$and = matchFilters;
+        }
+      }
+      const { deletedCount } = await notificationsDb.deleteMany(query);
+      if (deletedCount === 0) {
+        return Service.rejectResponse('Not found', 404);
       }
       return Service.successResponse(null, 204);
     } catch (e) {

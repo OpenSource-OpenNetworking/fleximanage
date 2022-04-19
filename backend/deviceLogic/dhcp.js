@@ -138,8 +138,6 @@ const apply = async (device, user, data) => {
  * @return {void}
  */
 const complete = async (jobId, res) => {
-  logger.info('DHCP job complete', { params: { result: res, jobId: jobId } });
-
   if (!res || !res.deviceId || !res.message || !res.dhcpId) {
     logger.warn('DHCP job complete got an invalid job result', {
       params: { result: res, jobId: jobId }
@@ -251,7 +249,7 @@ const error = async (jobId, res) => {
 const remove = async (job) => {
   if (['inactive', 'delayed', 'active'].includes(job._state)) {
     logger.info('DHCP remove job, mark as deleted', {
-      params: { job: job }
+      params: { jobId: job.id }
     });
     const deviceId = job.data.response.data.deviceId;
     const dhcpId = job.data.response.data.dhcpId;
@@ -268,7 +266,9 @@ const remove = async (job) => {
         }
       );
     } catch (error) {
-      logger.warn('Failed to remove DHCP job', { params: { job: job, message: error.message } });
+      logger.warn('Failed to remove DHCP job', {
+        params: { jobId: job.id, message: error.message }
+      });
     }
   }
 };

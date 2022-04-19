@@ -28,7 +28,6 @@ const dispatcher = require('../deviceLogic/dispatcher');
 const { updateSyncStatus, updateSyncStatusBasedOnJobResult } =
   require('../deviceLogic/sync');
 const connections = require('../websocket/Connections')();
-const omit = require('lodash/omit');
 
 /**
  * A callback that is called when a device connects to the MGMT
@@ -37,7 +36,7 @@ const omit = require('lodash/omit');
  * @return {void}
  */
 exports.deviceConnectionOpened = async (deviceId) => {
-  logger.info('Broker: device connection opened', { params: { deviceID: deviceId } });
+  logger.debug('Broker: device connection opened', { params: { deviceID: deviceId } });
   try {
     await deviceQueues.startQueue(deviceId, deviceProcessor);
   } catch (err) {
@@ -52,7 +51,7 @@ exports.deviceConnectionOpened = async (deviceId) => {
  * @return {void}
  */
 exports.deviceConnectionClosed = async (deviceId) => {
-  logger.info('Broker: device connection closed', { params: { deviceID: deviceId } });
+  logger.debug('Broker: device connection closed', { params: { deviceID: deviceId } });
   try {
     await deviceQueues.pauseQueue(deviceId);
   } catch (err) {
@@ -67,14 +66,8 @@ exports.deviceConnectionClosed = async (deviceId) => {
  * @return {Promise}     a promise for processing the job
  */
 const deviceProcessor = async (job) => {
-  // limit the print job tasks param size
-  const logJob = omit(job, ['data.message.tasks']);
-  logJob.data.message.tasks = job.data.message.tasks.map(
-    t => JSON.stringify(t).substring(0, 2048)
-  );
-
   // Job is passed twice - for event data and event header.
-  logger.info('Processing job', { params: { job: logJob }, job: logJob });
+  logger.info('Processing job', { params: { job: job }, job: job });
 
   // Get tasks
   const tasks = job.data.message.tasks;
@@ -95,7 +88,7 @@ const deviceProcessor = async (job) => {
     // 3. Update transaction job progress
     async.waterfall(operations, async (error, results) => {
       if (error) {
-        logger.error('Job error', { params: { job: logJob, err: error.message }, job: logJob });
+        logger.error('Job error', { params: { job: job, err: error.message }, job: job });
         // Call error callback only if the job reached maximal retries
         // We check if the remaining attempts are less than 1 instead of 0
         // since this code runs before the number of attempts is decreased.
@@ -112,9 +105,15 @@ const deviceProcessor = async (job) => {
         }
         try {
           if (connections.isConnected(mId)) {
-            const { deviceObj } = connections.getDeviceInfo(mId);
-            // This call takes care of setting the legacy device sync status to not-synced.
-            await updateSyncStatusBasedOnJobResult(org, deviceObj, mId, false);
+            const deviceInfo = connections.getDeviceInfo(mId);
+            if (deviceInfo) {
+              // This call takes care of setting the legacy device sync status to not-synced.
+              await updateSyncStatusBasedOnJobResult(org, deviceInfo.deviceObj, mId, false);
+            } else {
+              logger.warn('Failed to update sync status, no device info returned', {
+                params: { machineId: mId }
+              });
+            }
           } else {
             logger.warn('Failed to update sync status, device not connected', {
               params: { machineId: mId }
@@ -129,21 +128,30 @@ const deviceProcessor = async (job) => {
       } else {
         logger.info('Job completed', {
           params: {
-            job: logJob,
             results: results.message,
             deviceHash: results['router-cfg-hash'] || 'n/a'
           },
-          job: logJob
+          job: job
         });
         // Dispatch the response for Job completion
         // In the past this was called from job complete event but there were some missing events
         // So moved the dispatcher to here
-        dispatcher.complete(job.id, job.data.response);
+        const response = {
+          ...job.data.response,
+          data: { ...job.data.response.data, agentMessage: results.message }
+        };
+        dispatcher.complete(job.id, response);
         // Device configuration hash is included in every job
         // response. Use it to update the device's sync status
         try {
-          const { deviceObj } = connections.getDeviceInfo(mId);
-          await updateSyncStatus(org, deviceObj, mId, results['router-cfg-hash']);
+          const deviceInfo = connections.getDeviceInfo(mId);
+          if (deviceInfo) {
+            await updateSyncStatus(org, deviceInfo.deviceObj, mId, results['router-cfg-hash']);
+          } else {
+            logger.warn('Device sync status update failed, no device info returned', {
+              params: { machineId: mId }
+            });
+          }
         } catch (err) {
           logger.error('Device sync status update failed', {
             params: { err: err.message, machineId: mId }

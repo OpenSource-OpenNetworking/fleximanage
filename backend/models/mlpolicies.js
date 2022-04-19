@@ -104,7 +104,7 @@ const multiLinkRuleSchema = new Schema({
       }],
       order: {
         type: String,
-        enum: ['priority', 'load-balancing'],
+        enum: ['priority', 'load-balancing', 'link-quality'],
         default: 'priority',
         required: true
       }
@@ -142,11 +142,21 @@ const multiLinkPolicySchema = new Schema({
   },
   description: {
     type: String,
-    required: true,
+    required: false,
     validate: {
       validator: validateDescription,
       message: 'Multi Link policy description format is invalid'
     }
+  },
+  applyOnWan: {
+    type: Boolean,
+    default: false,
+    required: false
+  },
+  overrideDefaultRoute: {
+    type: Boolean,
+    default: true,
+    required: false
   },
   version: {
     type: Number,

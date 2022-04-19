@@ -47,10 +47,15 @@ const apply = async (device, user, data) => {
 
     let message = 'add-route';
     let titlePrefix = 'Add';
-    const params = { addr: data.destination, via: data.gateway };
+
+    const params = {
+      addr: data.destination,
+      via: data.gateway,
+      redistributeViaOSPF: data.redistributeViaOSPF
+    };
 
     if (data.ifname) {
-      params.pci = data.ifname;
+      params.devId = data.ifname;
     }
 
     if (data.metric) {
@@ -92,8 +97,6 @@ const apply = async (device, user, data) => {
  * @return {void}
  */
 const complete = async (jobId, res) => {
-  logger.info('Add static route job complete', { params: { result: res, jobId: jobId } });
-
   if (!res || !res.deviceId || !res.message || !res.routeId) {
     logger.warn('Got an invalid job result', { params: { result: res, jobId: jobId } });
     return;
@@ -167,7 +170,7 @@ const error = async (jobId, res) => {
  */
 const remove = async (job) => {
   if (['inactive', 'delayed', 'active'].includes(job._state)) {
-    logger.info('Rolling back device changes for removed task', { params: { job: job } });
+    logger.info('Rolling back device changes for removed task', { params: { jobId: job.id } });
     const deviceId = job.data.response.data.deviceId;
     const routeId = job.data.response.data.routeId;
 
@@ -180,7 +183,7 @@ const remove = async (job) => {
         }
       );
     } catch (error) {
-      logger.warn('Failed to update database', { params: { job: job } });
+      logger.warn('Failed to update database', { params: { jobId: job.id } });
     }
   }
 };

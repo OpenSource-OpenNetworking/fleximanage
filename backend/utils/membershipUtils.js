@@ -25,8 +25,10 @@ const logger = require('../logging/logging')({ module: module.filename, type: 'r
 /**
  * Get all organizations available for a user
  * @param {Object} user - user DB object
+ * @param {Integer} offset The number of items to skip (optional)
+ * @param {Integer} limit The numbers of items to return (optional)
  */
-const getUserOrganizations = async (user) => {
+const getUserOrganizations = async (user, offset = 0, limit = 0) => {
   if (!user.defaultAccount || !user.defaultAccount._id || !user._id) return [];
 
   /* Organizations permitted are:
@@ -59,7 +61,7 @@ const getUserOrganizations = async (user) => {
     const groupOrgs = await organizations.find({
       account: user.defaultAccount._id,
       group: { $in: groups }
-    });
+    }).skip(offset).limit(limit);
     groupOrgs.forEach((entry) => { resultSet[entry._id] = entry; });
 
     // Add all organizations permitted for user
@@ -131,8 +133,10 @@ const getAccessTokenOrgList = async (user, orgId, orgIdRequired = false) => {
 /**
  * Get all accounts available for a user
  * @param {Object} user - user object with user _id
+ * @param {Integer} offset The number of items to skip (optional)
+ * @param {Integer} limit The numbers of items to return (optional)
  */
-const getUserAccounts = async (user) => {
+const getUserAccounts = async (user, offset = 0, limit = 0) => {
   if (!user._id) return [];
 
   const resultSet = {};
@@ -141,6 +145,8 @@ const getUserAccounts = async (user) => {
     const accounts = await membership.find({
       user: user._id
     })
+      .skip(offset)
+      .limit(limit)
       .populate('account');
     accounts.forEach((entry) => { resultSet[entry.account._id] = entry.account.name; });
     const result = Object.keys(resultSet).map(key => {

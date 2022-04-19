@@ -24,12 +24,15 @@ const tokens = require('../models/tokens');
 const { devices } = require('../models/devices');
 const jwt = require('jsonwebtoken');
 const mongoConns = require('../mongoConns.js')();
-const { checkDeviceVersion } = require('../versioning');
+const { verifyAgentVersion } = require('../versioning');
+const DevSwUpdater = require('../deviceLogic/DevSwVersionUpdateManager');
 const webHooks = require('../utils/webhooks')();
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
-
+const url = require('url');
 // billing support
 const flexibilling = require('../flexibilling');
+const { mapLteNames } = require('../utils/deviceUtils');
+const geoip = require('geoip-lite');
 
 const connectRouter = express.Router();
 connectRouter.use(bodyParser.json());
@@ -54,8 +57,75 @@ const genToken = function (data) {
   return jwt.sign(data, configs.get('deviceTokenSecretKey'));
 };
 
+// Express middleware for /register API
+const checkDeviceVersion = async (req, res, next) => {
+  const agentVer = req.body.fwagent_version;
+  const { valid, statusCode, err } = verifyAgentVersion(agentVer);
+  if (!valid) {
+    logger.warn('Device version validation failed', {
+      params: {
+        agentVersion: agentVer,
+        reason: err,
+        machineId: req.body.machine_id
+      },
+      req: req
+    });
+    const swUpdater = DevSwUpdater.getSwVerUpdaterInstance();
+    const { versions } = await swUpdater.getLatestSwVersions();
+    console.log('versions=' + versions);
+    res.setHeader('latestVersion', versions.device); // set last device version
+    return next(createError(statusCode, err));
+  }
+  next();
+};
+
+// Try to determine the coordinates for a device
+function getCoordinates (interfaces, sourceIp) {
+  let ll = null;
+  const lookupIp = (ip) => {
+    const geoIpInfo = geoip.lookup(ip);
+    if (geoIpInfo) {
+      ll = geoIpInfo.ll;
+      return true; // Stop the interface loop
+    }
+    return false;
+  };
+  // Try first to find location based on source IP
+  if (!sourceIp || !lookupIp(sourceIp)) {
+    if (interfaces) {
+      interfaces
+        // Check WAN interfaces IPs
+        .filter((i) => i.type === 'WAN')
+        // Put LTE last
+        .sort((i1, i2) => {
+          if (i1.deviceType === 'lte' && i2.deviceType !== 'lte') return 1;
+          if (i1.deviceType !== 'lte' && i2.deviceType === 'lte') return -1;
+          return 0;
+        })
+        // Try to find first location
+        .some((i) => {
+        // Try to match public IP first
+          if (i.PublicIP) return lookupIp(i.PublicIP);
+          if (i.IPv4) return lookupIp(i.IPv4);
+        });
+    }
+  }
+  return ll;
+}
+
 // Register device. When device connects for the first
 // time, it tries to authenticate by accessing this URL
+// Register Error Codes:
+// 400 - Wrong version or Too high Agent version
+// 401 - Invalid token
+// 402 - Maximum number of free devices reached
+// 403 - Too low Agent version
+// 404 - Token not found
+// 405 -
+// 406 -
+// 407 - Device Already Exists
+// 408 - Mongo error
+// 500 - General Error
 connectRouter.route('/register')
   .post(cors.cors, checkDeviceVersion, (req, res, next) => {
     var sourceIP = req.ip || 'Unknown';
@@ -88,8 +158,10 @@ connectRouter.route('/register')
               ifs.forEach((intf) => {
                 intf.isAssigned = false;
                 intf.useStun = true;
+                intf.useFixedPublicPort = false;
                 intf.internetAccess = intf.internetAccess === undefined ? ''
                   : intf.internetAccess ? 'yes' : 'no';
+                intf.mtu = !isNaN(intf.mtu) ? +intf.mtu : 1500;
                 if (!defaultIntf && intf.name === req.body.default_dev) {
                   // old version agent
                   intf.PublicIP = intf.public_ip || sourceIP;
@@ -99,14 +171,23 @@ connectRouter.route('/register')
                   intf.dhcp = intf.dhcp || 'no';
                   intf.gateway = req.body.default_route;
                   intf.metric = '0';
-                } else if (intf.gateway) {
+                } else if (intf.gateway || ['lte', 'pppoe'].includes(intf.deviceType)) {
                   intf.type = 'WAN';
                   intf.dhcp = intf.dhcp || 'no';
-                  intf.metric = (!intf.metric && intf.gateway === req.body.default_route)
-                    ? '0' : intf.metric || (autoAssignedMetric++).toString();
+                  if (intf.deviceType === 'lte') {
+                    intf.deviceParams = mapLteNames(intf.deviceParams);
+                    // LTE devices are not enabled at registration stage so they can't have a metric
+                    intf.metric = '';
+                  } else {
+                    intf.metric = (!intf.metric && intf.gateway === req.body.default_route)
+                      ? '0' : intf.metric || (autoAssignedMetric++).toString();
+                  }
                   intf.PublicIP = intf.public_ip || (intf.metric === lowestMetric ? sourceIP : '');
                   intf.PublicPort = intf.public_port || '';
                   intf.NatType = intf.nat_type || '';
+                  if (intf.deviceType === 'pppoe') {
+                    intf.dhcp = 'yes';
+                  }
                 } else {
                   intf.type = 'LAN';
                   intf.dhcp = 'no';
@@ -131,12 +212,19 @@ connectRouter.route('/register')
               // Initialize session
               let session;
               let keepCount; // current number of docs per account
+              let keepOrgCount; // current number of docs per account
               mongoConns.getMainDB().startSession()
                 .then((_session) => {
                   session = _session;
                   return session.startTransaction();
                 })
                 .then(() => {
+                  return devices.countDocuments({
+                    account: account, org: decoded.org
+                  }).session(session);
+                })
+                .then((orgCount) => {
+                  keepOrgCount = orgCount;
                   return devices.countDocuments({ account: account }).session(session);
                 })
                 .then(async (count) => {
@@ -145,6 +233,10 @@ connectRouter.route('/register')
                     if (session) await session.abortTransaction();
                     return next(createError(402, 'Maximum number of free devices reached'));
                   }
+
+                  // Get device location
+                  let ll = getCoordinates(ifs, sourceIP);
+                  if (!ll) ll = [40.416775, -3.703790]; // Default coordinate
 
                   // Create the device
                   devices.create([{
@@ -161,12 +253,15 @@ connectRouter.route('/register')
                     deviceToken: deviceToken,
                     isApproved: false,
                     isConnected: false,
+                    coords: ll,
                     versions: versions
                   }], { session: session })
                     .then(async (result) => {
                       await flexibilling.registerDevice({
                         account: result[0].account,
                         count: keepCount,
+                        org: decoded.org,
+                        orgCount: keepOrgCount,
                         increment: 1
                       }, session);
 
@@ -201,7 +296,14 @@ connectRouter.route('/register')
                         });
                       res.statusCode = 200;
                       res.setHeader('Content-Type', 'application/json');
-                      res.json({ deviceToken: deviceToken, server: configs.get('agentBroker') });
+
+                      let server = configs.get('agentBroker');
+                      if (decoded.server) {
+                        const urlSchema = new url.URL(decoded.server);
+                        server = `${urlSchema.hostname}:${urlSchema.port}`;
+                      }
+
+                      res.json({ deviceToken: deviceToken, server: server });
                     }, async (err) => {
                       // abort transaction on error
                       if (session) {
@@ -242,4 +344,7 @@ connectRouter.route('/register')
   });
 
 // Default exports
-module.exports = connectRouter;
+module.exports = {
+  connectRouter: connectRouter,
+  checkDeviceVersion: checkDeviceVersion
+};

@@ -265,10 +265,17 @@ class MembersService {
         .populate('account')
         .populate('organization');
 
+      if (!member) {
+        throw (new Error('Member not found'));
+      }
+
       // Verify if default organization still accessible by the
       // user after the change, if not switch to another org
       const _user = await Users.findOne({ _id: memberRequest.userId })
         .populate('defaultAccount');
+      if (!user) {
+        throw (new Error('User not found'));
+      }
 
       if (_user.defaultAccount._id.toString() === user.defaultAccount._id.toString()) {
         const orgs = await getUserOrganizations(_user);
@@ -290,7 +297,7 @@ class MembersService {
           reason: err.message
         }
       });
-      return Service.rejectResponse(err, 400);
+      return Service.rejectResponse(err.message, 400);
     }
   }
 
@@ -401,7 +408,7 @@ class MembersService {
    * memberRequest MemberRequest  (optional)
    * returns Member
    **/
-  static async membersPOST ({ memberRequest }, { user }) {
+  static async membersPOST ({ memberRequest }, { user, restUiUrl }) {
     let session;
     try {
       // Check that input parameters are OK
@@ -486,6 +493,7 @@ class MembersService {
 
       // Send email
       await mailer.sendMailHTML(
+        configs.get('mailerEnvelopeFromAddress'),
         configs.get('mailerFromAddress'),
         memberRequest.email,
         `You are invited to a ${configs.get('companyName')} Account`,
@@ -493,7 +501,7 @@ class MembersService {
         <b>You have been invited to a ${configs.get('companyName')}
         ${memberRequest.userPermissionTo}. </b>`) + ((registerUser)
           ? `<b>Click below to set your password</b>
-        <p><a href="${configs.get('uiServerUrl')}/reset-password?id=${
+        <p><a href="${restUiUrl}/reset-password?id=${
           registerUser._id
         }&t=${resetPWKey}">
           <button style="color:#fff;background-color:#F99E5B;

@@ -41,6 +41,37 @@ paths:
       tags:
       - Version
       x-swagger-router-controller: Version
+  /configuration/restServers:
+    get:
+      operationId: configurationRestServersGET
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestServers'
+          description: Successful operation
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get flexiManage configurations
+      tags:
+      - Configuration
+      x-swagger-router-controller: Configuration
+      x-openapi-router-controller: ConfigurationController
+      x-openapi-router-service: ConfigurationService
   /tokens:
     get:
       operationId: tokensGET
@@ -582,7 +613,20 @@ paths:
         schema:
           type: integer
         style: form
-      - description: The numbers of items to return
+        example: 10
+      - description: Type of returned data
+        explode: true
+        in: query
+        name: response
+        required: false
+        schema:
+          enum:
+          - detailed
+          - summary
+          - ids
+          type: string
+        example: summary
+      - description: The number of items to return, total records count added to the 'records-total' header of the response
         explode: true
         in: query
         name: limit
@@ -590,6 +634,34 @@ paths:
         schema:
           type: integer
         style: form
+        example: 10
+      - description: The field by which the data will be ordered
+        explode: true
+        in: query
+        name: sortField
+        required: false
+        schema:
+          type: string
+        style: form
+        example: name
+      - description: Sorting order
+        explode: true
+        in: query
+        name: sortOrder
+        required: false
+        schema:
+          type: string
+        style: form
+        example: asc
+      - description: Stringified array of filter objects
+        explode: true
+        in: query
+        name: filters
+        required: false
+        schema:
+          type: string
+        style: form
+        example: '[{"key":"name","op":"contains","val":"hub"}]'
       - description: Organization to be filtered by
         explode: true
         in: query
@@ -641,6 +713,63 @@ paths:
       - apiKey: []
       - bearerAuth: []
       summary: Get all registered devices
+      tags:
+      - Devices
+      x-swagger-router-controller: Devices
+      x-openapi-router-controller: DevicesController
+      x-openapi-router-service: DevicesService
+    delete:
+      operationId: devicesDELETE
+      parameters:
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DevicesDeleteRequest'
+      responses:
+        "204":
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - bearerAuth: []
+      - apiKey: []
+      summary: Delete devices by IDs or matching the filter
       tags:
       - Devices
       x-swagger-router-controller: Devices
@@ -1335,10 +1464,9 @@ paths:
 #      x-swagger-router-controller: Devices
 #      x-openapi-router-controller: DevicesController
 #      x-openapi-router-service: DevicesService
-
-  /tunnels:
+  /peers:
     get:
-      operationId: tunnelsGET
+      operationId: peersGET
       parameters:
       - description: The number of items to skip before starting to collect the result
           set
@@ -1357,6 +1485,305 @@ paths:
         schema:
           type: integer
         style: form
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Peer'
+                type: array
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Retrieve peers configuration
+      tags:
+      - Peers
+      x-swagger-router-controller: Peers
+      x-openapi-router-controller: PeersController
+      x-openapi-router-service: PeersService
+    post:
+      operationId: peersPOST
+      parameters:
+      - description: Organization to create peer for
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Peer'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+          description: Peer has been added
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - bearerAuth: []
+      - apiKey: []
+      summary: Create new peer
+      tags:
+      - Peers
+      x-swagger-router-controller: Peers
+      x-openapi-router-controller: PeersController
+      x-openapi-router-service: PeersService
+  /peers/{id}:
+    put:
+      operationId: peersIdPUT
+      parameters:
+      - description: Peer ID
+        explode: true
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - description: Organization to delete peer for
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Peer'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeersIdPUTResponse'
+          description: Undated peer
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - bearerAuth: []
+      - apiKey: []
+      summary: Update peer
+      tags:
+      - Peers
+      x-swagger-router-controller: Peers
+      x-openapi-router-controller: PeersController
+      x-openapi-router-service: PeersService
+    delete:
+      operationId: peersIdDelete
+      parameters:
+      - description: Peer ID
+        explode: true
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - description: Organization to delete the peer for
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Peer'
+      responses:
+        "204":
+          description: Successful operation
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - bearerAuth: []
+      - apiKey: []
+      summary: Delete peer
+      tags:
+      - Peers
+      x-swagger-router-controller: Peers
+      x-openapi-router-controller: PeersController
+      x-openapi-router-service: PeersService
+  /tunnels:
+    get:
+      operationId: tunnelsGET
+      parameters:
+      - description: The number of items to skip before starting to collect the result
+          set
+        explode: true
+        in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+        style: form
+        example: 10
+      - description: The number of items to return, total records count added to the 'records-total' header of the response
+        explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+        style: form
+        example: 10
+      - description: The field by which the data will be ordered
+        explode: true
+        in: query
+        name: sortField
+        required: false
+        schema:
+          type: string
+        style: form
+        example: tunnelStatus
+      - description: Sorting order
+        explode: true
+        in: query
+        name: sortOrder
+        required: false
+        schema:
+          type: string
+        style: form
+        example: desc
+      - description: Stringified array of filter objects
+        explode: true
+        in: query
+        name: filters
+        required: false
+        schema:
+          type: string
+        style: form
+        example: '[{"key":"peer.name","op":"contains","val":"my"}]'
       - description: Organization to be filtered by
         explode: true
         in: query
@@ -1548,6 +1975,216 @@ paths:
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
+  /devices/{id}/routing/ospf:
+    get:
+      operationId: devicesIdRoutingOSPFGET
+      parameters:
+      - description: Numeric ID of the Device to fetch information about
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OspfConfigs'
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get OSPF configuration
+      tags:
+      - Routing
+      x-swagger-router-controller: Devices
+      x-openapi-router-controller: DevicesController
+      x-openapi-router-service: DevicesService
+    put:
+      operationId: devicesIdRoutingOSPFPUT
+      parameters:
+      - description: Numeric ID of the Device
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OspfConfigs'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OspfConfigs'
+          description: Successful operation
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OspfConfigs'
+          description: Operation queued for processing
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Modify OSPF configuration
+      tags:
+      - Routing
+      x-swagger-router-controller: Devices
+      x-openapi-router-controller: DevicesController
+      x-openapi-router-service: DevicesService
+  /devices/{id}/coords:
+    put:
+      operationId: devicesIdCoordsPUT
+      parameters:
+      - description: Numeric ID of the Device
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CoordsConfigs'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoordsConfigs'
+          description: Successful operation
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Update device coordinates
+      tags:
+      - Devices
+      x-swagger-router-controller: Devices
+      x-openapi-router-controller: DevicesController
+      x-openapi-router-service: DevicesService
   /devices/{id}/staticroutes:
     post:
       operationId: devicesIdStaticroutesPOST
@@ -1564,7 +2201,7 @@ paths:
         explode: true
         in: query
         name: org
-        required: false
+        required: true
         schema:
           type: string
       requestBody:
@@ -2439,7 +3076,7 @@ paths:
         required: false
         schema:
           type: string
-      - description: Interface Number (PCI Address) to filter
+      - description: Interface Dev Id to filter
         explode: true
         in: query
         name: ifnum
@@ -2506,6 +3143,73 @@ paths:
       summary: Retrieve device statistics information
       tags:
       - Statistics
+      x-swagger-router-controller: Devices
+      x-openapi-router-controller: DevicesController
+      x-openapi-router-service: DevicesService
+  /devices/{id}/tunnels:
+    get:
+      operationId: devicesIdTunnelsGET
+      parameters:
+      - description: Numeric ID of the Device to fetch information about
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Tunnel'
+                type: array
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Retrieve device tunnels
+      tags:
+      - Tunnels
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
@@ -2681,6 +3385,161 @@ paths:
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
+  /devices/{id}/interfaces/{interfaceId}/action:
+    post:
+      operationId: devicesIdInterfacesIdActionPOST
+      parameters:
+      - description: Numeric ID of the device to perform an operation
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The interface name to save configuration for
+        explode: false
+        in: path
+        name: interfaceId
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterfaceOperationReq'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterfaceOperationResponse'
+          description: Successful operation
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequestError'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Perform Interface Operation
+      tags:
+      - Interface
+      x-swagger-router-controller: Devices
+      x-openapi-router-controller: DevicesController
+      x-openapi-router-service: DevicesService
+  /devices/{id}/interfaces/{interfaceId}/status:
+    get: 
+      operationId: devicesIdInterfacesIdStatusGET
+      parameters:
+      - description: Numeric ID of the Device to fetch information about
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The ID of interface to fetch information about
+        explode: false
+        in: path
+        name: interfaceId
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Indicator if need to take data from the device
+        in: query
+        name: getEdgeData
+        required: false
+        schema:
+          type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterfaceStatus'
+          description: Successful operation
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequestError'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get interface info
+      tags:
+      - Interface
+      x-swagger-router-controller: Devices
+      x-openapi-router-controller: DevicesController
+      x-openapi-router-service: DevicesService
   /devices/{id}/logs:
     get:
       operationId: devicesIdLogsGET
@@ -2722,6 +3581,10 @@ paths:
           - dhcp
           - vpp
           - ospf
+          - hostapd
+          - agentui
+          - application_ids
+          - com.flexiwan.remotevpn
           type: string
         style: form
       responses:
@@ -2928,6 +3791,70 @@ paths:
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
+  /devices/{id}/send:
+    post:
+      operationId: devicesIdSendPOST
+      parameters:
+      - description: Numeric ID of the Device to start
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceSendRequest'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceSendResponse'
+          description: Execution Applied
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Execute a Linux command on the device side
+      tags:
+      - Devices
+      x-swagger-router-controller: Devices
+      x-openapi-router-controller: DevicesController
+      x-openapi-router-service: DevicesService
   /jobs:
     get:
       operationId: jobsGET
@@ -2956,6 +3883,7 @@ paths:
         schema:
           type: integer
         style: form
+        example: 10
       - description: The numbers of items to return
         explode: true
         in: query
@@ -2964,6 +3892,16 @@ paths:
         schema:
           type: integer
         style: form
+        example: 10
+      - description: Stringified array of filter objects
+        explode: true
+        in: query
+        name: filters
+        required: false
+        schema:
+          type: string
+        style: form
+        example: '[{"key":"data.message.title","op":"contains","val":"upgrade"}]'
       - description: A filter on specific job ids (comma separated)
         explode: true
         in: query
@@ -3080,7 +4018,7 @@ paths:
       security:
       - apiKey: []
       - bearerAuth: []
-      summary: Delete all jobs
+      summary: Delete jobs by IDs or matching the filter
       tags:
       - Jobs
       x-swagger-router-controller: Jobs
@@ -3224,7 +4162,8 @@ paths:
         schema:
           type: integer
         style: form
-      - description: The numbers of items to return
+        example: 10
+      - description: The number of items to return, total records count added to the 'records-total' header of the response
         explode: true
         in: query
         name: limit
@@ -3232,6 +4171,34 @@ paths:
         schema:
           type: integer
         style: form
+        example: 10
+      - description: The field by which the data will be ordered
+        explode: true
+        in: query
+        name: sortField
+        required: false
+        schema:
+          type: string
+        style: form
+        example: time
+      - description: Sorting order
+        explode: true
+        in: query
+        name: sortOrder
+        required: false
+        schema:
+          type: string
+        style: form
+        example: desc
+      - description: Stringified array of filter objects
+        explode: true
+        in: query
+        name: filters
+        required: false
+        schema:
+          type: string
+        style: form
+        example: '[{"key":"time","op":"<","val":"2022-01-26"}]'
       - description: Organization to be filtered by
         explode: true
         in: query
@@ -3356,6 +4323,63 @@ paths:
       - apiKey: []
       - bearerAuth: []
       summary: Modify notifications
+      tags:
+      - Notifications
+      x-swagger-router-controller: Notifications
+      x-openapi-router-controller: NotificationsController
+      x-openapi-router-service: NotificationsService
+    delete:
+      operationId: notificationsDELETE
+      parameters:
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationsDeleteRequest'
+      responses:
+        "204":
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - bearerAuth: []
+      - apiKey: []
+      summary: Delete all notifications matching the filter
       tags:
       - Notifications
       x-swagger-router-controller: Notifications
@@ -4398,6 +5422,57 @@ paths:
       - apiKey: []
       - bearerAuth: []
       summary: Modify organization
+      tags:
+      - Organizations
+      x-swagger-router-controller: Organizations
+      x-openapi-router-controller: OrganizationsController
+      x-openapi-router-service: OrganizationsService
+  /organizations/summary:
+    get:
+      operationId: organizationsSummaryGET
+      parameters:
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationSummary'
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get Organization Summary by ID
       tags:
       - Organizations
       x-swagger-router-controller: Organizations
@@ -5918,6 +6993,862 @@ paths:
       x-swagger-router-controller: AppIdentifications
       x-openapi-router-controller: AppIdentificationsController
       x-openapi-router-service: AppIdentificationsService
+  /firewallpolicies:
+    get:
+      operationId: firewallPoliciesGET
+      parameters:
+      - description: The number of items to skip before starting to collect the result
+          set
+        explode: true
+        in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+        style: form
+      - description: The numbers of items to return
+        explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+        style: form
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/FirewallPolicy'
+                type: array
+                x-content-type: application/json
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get all Firewall policies
+      tags:
+      - Firewall Policies
+      x-swagger-router-controller: FirewallPolicies
+      x-openapi-router-controller: FirewallPoliciesController
+      x-openapi-router-service: FirewallPoliciesService
+    post:
+      operationId: firewallPoliciesPOST
+      parameters:
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FirewallPolicyRequest'
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirewallPolicy'
+          description: Firewall policy created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Add a new Firewall policy
+      tags:
+      - Firewall Policies
+      x-swagger-router-controller: FirewallPolicies
+      x-openapi-router-controller: FirewallPoliciesController
+      x-openapi-router-service: FirewallPoliciesService
+  /firewallpolicies/{id}:
+    get:
+      operationId: firewallPoliciesIdGET
+      parameters:
+      - description: Numeric ID of the Firewall policy to retrieve
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirewallPolicy'
+                x-content-type: application/json
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get a Firewall policy by id
+      tags:
+      - Firewall Policies
+      x-swagger-router-controller: FirewallPolicies
+      x-openapi-router-controller: FirewallPoliciesController
+      x-openapi-router-service: FirewallPoliciesService
+    put:
+      operationId: firewallPoliciesIdPUT
+      parameters:
+      - description: Numeric ID of the Firewall policy to modify
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FirewallPolicyRequest'
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirewallPolicy'
+          description: A new Firewall created
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirewallPolicy'
+          description: Firewall was modified
+        "400":
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Modify a Firewall policy
+      tags:
+      - Firewall Policies
+      x-swagger-router-controller: FirewallPolicies
+      x-openapi-router-controller: FirewallPoliciesController
+      x-openapi-router-service: FirewallPoliciesService
+    delete:
+      operationId: firewallPoliciesIdDELETE
+      parameters:
+      - description: Numeric ID of the Firewall policy to delete
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "204":
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Delete a Firewall policy
+      tags:
+      - Firewall Policies
+      x-swagger-router-controller: FirewallPolicies
+      x-openapi-router-controller: FirewallPoliciesController
+      x-openapi-router-service: FirewallPoliciesService
+  /firewallpolicies/list:
+    get:
+      operationId: firewallPoliciesListGET
+      parameters:
+      - description: The number of items to skip before starting to collect the result
+          set
+        explode: true
+        in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+        style: form
+      - description: The numbers of items to return
+        explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+        style: form
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/FirewallPolicyList'
+                type: array
+                x-content-type: application/json
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get all Firewall policies names and IDs only
+      tags:
+      - Firewall Policies
+      x-swagger-router-controller: FirewallPolicies
+      x-openapi-router-controller: FirewallPoliciesController
+      x-openapi-router-service: FirewallPoliciesService
+  /firewallpolicies/meta:
+    get:
+      operationId: firewallPoliciesMetaGET
+      parameters:
+      - description: The number of items to skip before starting to collect the result
+          set
+        explode: true
+        in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+        style: form
+      - description: The numbers of items to return
+        explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+        style: form
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/FirewallPolicyMetaData'
+                type: array
+                x-content-type: application/json
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get all Firewall metadata
+      tags:
+      - Firewall Policies
+      x-swagger-router-controller: FirewallPolicies
+      x-openapi-router-controller: FirewallPoliciesController
+      x-openapi-router-service: FirewallPoliciesService
+  /appstore:
+    get:
+      operationId: appstoreGET
+      parameters:
+      - description: Stringified array of filter objects
+        explode: true
+        in: query
+        name: filters
+        required: false
+        schema:
+          type: string
+        style: form
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Application'
+                type: array
+          x-content-type: application/json
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get all repository applications
+      tags:
+      - Applications
+      x-swagger-router-controller: Applications
+      x-openapi-router-controller: ApplicationsController
+      x-openapi-router-service: ApplicationsService
+  /appstore/purchase/{id}:
+    post:
+      operationId: appstorePurchaseIdPOST
+      parameters:
+      - description: Application store Id to purchase
+        explode: true
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchasedApplication'
+          x-content-type: application/json
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Purchase an application
+      tags:
+      - Applications
+      x-swagger-router-controller: Applications
+      x-openapi-router-controller: ApplicationsController
+      x-openapi-router-service: ApplicationsService
+  /appstore/purchased:
+    get:
+      operationId: appstorePurchasedGET
+      parameters:
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      - description: Type of returned data
+        explode: true
+        in: query
+        name: responseType
+        required: false
+        schema:
+          enum:
+          - summary
+          type: string
+      - description: Stringified array of filter objects
+        explode: true
+        in: query
+        name: filters
+        required: false
+        schema:
+          type: string
+        style: form
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/PurchasedApplication'
+                type: array
+          x-content-type: application/json
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get all purchased applications
+      tags:
+      - Applications
+      x-swagger-router-controller: Applications
+      x-openapi-router-controller: ApplicationsController
+      x-openapi-router-service: ApplicationsService
+  /appstore/purchased/{id}:
+    get:
+      operationId: appstorePurchasedIdGET
+      parameters:
+      - description: Purchased application id
+        explode: true
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchasedApplication'
+                x-content-type: application/json
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get purchased application
+      tags:
+      - Applications
+      x-swagger-router-controller: Applications
+      x-openapi-router-controller: ApplicationsController
+      x-openapi-router-service: ApplicationsService
+    put:
+      operationId: appstorePurchasedIdPUT
+      parameters:
+      - description: Purchased application id to update
+        explode: true
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchasedApplicationConfigurationRequest'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchasedApplication'
+          x-content-type: application/json
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Update application
+      tags:
+      - Applications
+      x-swagger-router-controller: Applications
+      x-openapi-router-controller: ApplicationsController
+      x-openapi-router-service: ApplicationsService
+    delete:
+      operationId: appstorePurchasedIdDELETE
+      parameters:
+      - description: Purchased application id to remove
+        explode: true
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "204":
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Remove application from an organization
+      tags:
+      - Applications
+      x-swagger-router-controller: Applications
+      x-openapi-router-controller: ApplicationsController
+      x-openapi-router-service: ApplicationsService
+  /appstore/purchased/{id}/status:
+    get:
+      operationId: appstorePurchasedIdStatusGet
+      parameters:
+      - description: Purchased application id to get status for
+        explode: true
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get application Status
+      tags:
+      - Applications
+      x-swagger-router-controller: Applications
+      x-openapi-router-controller: ApplicationsController
+      x-openapi-router-service: ApplicationsService
 components:
   responses:
     NotFoundError:
@@ -5945,6 +7876,12 @@ components:
             $ref: '#/components/schemas/Error'
       description: Unauthorized
   schemas:
+    RestServers:
+      example: [https://manage.flexiwan.com,https://org.flexiwan.com]
+      # properties:
+      items:
+        type: string
+      type: array
     Version:
       properties:
         version:
@@ -5982,6 +7919,7 @@ components:
       type: object
     MemberRequest:
       example:
+        userId: userId
         userJobTitle: userJobTitle
         userEntity: userEntity
         userLastName: userLastName
@@ -5991,6 +7929,8 @@ components:
         userPermissionTo: account
       properties:
         email:
+          type: string
+        userId:
           type: string
         userFirstName:
           type: string
@@ -6041,7 +7981,60 @@ components:
           type: string
         description:
           type: string
+        server:
+          type: string
       type: object
+    PurchasedApplicationConfigurationRequest:
+      type: object
+    Application:
+      properties:
+        _id:
+          maxLength: 24
+          minLength: 24
+          type: string
+        name:
+          type: string
+        creator:
+          type: string
+        cost:
+          type: string
+        description:
+          type: string
+        identifier:
+          type: string
+        versions:
+          items:
+            $ref: '#/components/schemas/ApplicationVersion'
+          type: array
+    ApplicationVersion:
+      properties:
+        version:
+          type: string
+        components:
+          type: object
+          properties:
+            agent:
+              type: object
+            manage:
+              type: object
+    PurchasedApplication:
+      example:
+        _id: _id
+        app: library object
+        org: organization object
+        installedVersion: 1.2.3.5
+        configuration: object
+      properties:
+        _id:
+          type: string
+        app:
+          type: string
+        org:
+          type: string
+        installedVersion:
+          type: string
+        configuration:
+          type: object
     AppIdentificationRules:
       example:
         ip: 127.0.0.1
@@ -6218,13 +8211,21 @@ components:
       example:
         name: name
         group: group
+        encryptionMethod: ikev2
       required:
         - name
         - group
+        - encryptionMethod
       properties:
         name:
           type: string
         group:
+          type: string
+        encryptionMethod:
+          enum:
+          - none
+          - psk
+          - ikev2
           type: string
       type: object
     Organization:
@@ -6233,6 +8234,7 @@ components:
         _id: _id
         account: account
         group: group
+        encryptionMethod: ikev2
       properties:
         _id:
           maxLength: 24
@@ -6244,6 +8246,57 @@ components:
           type: string
         account:
           type: string
+        encryptionMethod:
+          enum:
+          - none
+          - psk
+          - ikev2
+          type: string
+      type: object
+    OrganizationSummary:
+      example:
+        _id: _id
+        devices:
+          connected: 1
+          approved: 2
+          running: 1
+          warning: 0
+          total: 2
+        tunnels:
+          connected: 4
+          warning: 1
+          unknown: 1
+          total: 7
+        traffic:
+          - month: 1646085600000
+            bytes: 128114
+            deviceCount: 1
+      properties:
+        _id:
+          maxLength: 24
+          minLength: 24
+          type: string
+        devices:
+          type: object
+        tunnels:
+          type: object
+        traffic:
+          items:
+            $ref: '#/components/schemas/OrganizationTraffic'
+          type: array
+      type: object
+    OrganizationTraffic:
+      example:
+        month: 1646085600000
+        bytes: 128114
+        deviceCount: 1
+      properties:
+        month:
+          type: integer
+        bytes:
+          type: integer
+        deviceCount:
+          type: integer
       type: object
     ApplyJobsResponse:
       properties:
@@ -6263,6 +8316,10 @@ components:
         ids:
           items:
             type: integer
+          type: array
+        filters:
+          items:
+            $ref: '#/components/schemas/Filter'
           type: array
     NotificationRequest:
       properties:
@@ -6297,6 +8354,7 @@ components:
         title: Router state change
         time: "2019-12-19T12:10:01.667Z"
         device: test0
+        deviceId: 61055a03b4832c4a6c365179
         machineId: "123"
         details: Router state changed to "Not running"
       properties:
@@ -6316,11 +8374,20 @@ components:
         device:
           type: string
           nullable: true
+        deviceId:
+          type: string
+          nullable: true
         machineId:
           type: string
         details:
           type: string
       type: object
+    NotificationsDeleteRequest:
+      properties:
+        filters:
+          items:
+            $ref: '#/components/schemas/Filter'
+          type: array
     JobAttempt:
       example:
         max: 7
@@ -6377,10 +8444,12 @@ components:
           PublicPort: PublicPort
           NatType: NatType
           useStun: useStun
+          useFixedPublicPort: useFixedPublicPort
           monitorInternet : monitorInternet
           IPv4: IPv4
           gateway: gateway
           metric: 0
+          mtu: 1500
           type: WAN
           MAC: MAC
           dhcp: "no"
@@ -6390,8 +8459,12 @@ components:
           driver: driver
           IPv4Mask: "24"
           name: name
-          pciaddr: pciaddr
+          devId: devId
           _id: _id
+          deviceType: dpdk
+          dnsServers: [8.8.8.8, 8.8.4.4]
+          dnsDomains: [subdomain.maindomain]
+          useDhcpDnsServers: false
         - IPv6: IPv6
           PublicIP: PublicIP
           PublicPort: PublicPort
@@ -6401,6 +8474,7 @@ components:
           IPv4: IPv4
           type: WAN
           MAC: MAC
+          mtu: 1500
           dhcp: "no"
           routing: OSPF
           IPv6Mask: "64"
@@ -6408,8 +8482,30 @@ components:
           driver: driver
           IPv4Mask: "24"
           name: name
-          pciaddr: pciaddr
+          devId: devId
           _id: _id
+          deviceType: dpdk
+        - IPv6: IPv6
+          PublicIP: PublicIP
+          PublicPort: PublicPort
+          NatType: NatType
+          useStun: useStun
+          monitorInternet: monitorInternet
+          IPv4: IPv4
+          type: WAN
+          MAC: MAC
+          mtu: 1500
+          dhcp: "yes"
+          routing: OSPF
+          IPv6Mask: "64"
+          isAssigned: true
+          driver: cdc_mbim
+          IPv4Mask: "24"
+          name: name
+          devId: devId
+          _id: _id
+          deviceType: lte
+          useDhcpDnsServers: true
         org: org
         isConnected: true
         upgradeSchedule:
@@ -6438,10 +8534,23 @@ components:
         - destination: destination
           interface: interface
           gateway: gateway
+        deviceSpecificRulesEnabled: true
+        firewallRules:
+        - name: name
+          direction: direction
+          status: status
+          action: action
+        - name: name
+          direction: direction
+          status: status
+          action: action
         fromToken: fromToken
         account: account
         ipList: ipList
         dhcp: dhcp list
+        coords:
+        - 46.5
+        - 3.6
       properties:
         machineId:
           type: string
@@ -6477,6 +8586,10 @@ components:
           items:
             $ref: '#/components/schemas/DhcpRequest'
           type: array
+        coords:
+          items:
+            type: number
+          type: array
         upgradeSchedule:
           $ref: '#/components/schemas/UpgradeSchedule'
         labels:
@@ -6486,6 +8599,12 @@ components:
         interfaces:
           items:
             $ref: '#/components/schemas/Interface'
+          type: array
+        deviceSpecificRulesEnabled:
+          type: boolean
+        firewallRules:
+          items:
+            $ref: '#/components/schemas/FirewallRuleRequest'
           type: array
         versions:
           $ref: '#/components/schemas/DeviceVersion'
@@ -6498,12 +8617,14 @@ components:
           PublicPort: PublicPort
           NatType: NatType
           useStun: true
+          useFixedPublicPort: false
           monitorInternet: true
           internetAccess: 'yes'
           IPv4: IPv4
           type: WAN
           gateway: gateway
           metric: 0
+          mtu: 1500
           MAC: MAC
           dhcp: "no"
           routing: OSPF
@@ -6512,7 +8633,7 @@ components:
           driver: driver
           IPv4Mask: "24"
           name: name
-          pciaddr: pciaddr
+          devId: devId
           _id: _id
           pathlabels: path labels list
         - IPv6: IPv6
@@ -6520,12 +8641,14 @@ components:
           PublicPort: PublicPort
           NatType: NatType
           useStun: true
+          useFixedPublicPort: false
           monitorInternet: true
           internetAccess: 'no'
           IPv4: IPv4
           type: WAN
           gateway: gateway
           metric: 0
+          mtu: 1500
           MAC: MAC
           dhcp: "no"
           routing: OSPF
@@ -6534,7 +8657,7 @@ components:
           driver: driver
           IPv4Mask: "24"
           name: name
-          pciaddr: pciaddr
+          devId: devId
           _id: _id
           pathlabels: path labels list
         org: org
@@ -6561,6 +8684,9 @@ components:
         name: name
         _id: _id
         isApproved: true
+        applications:
+        - app: app
+          status: status
         staticroutes:
         - id: 1
           destination: 20.20.0.0
@@ -6570,10 +8696,23 @@ components:
           destination: 10.10.0.0
           gateway: 10.10.0.1
           interface: eth1
+        deviceSpecificRulesEnabled: true
+        firewallRules:
+        - description: description
+          direction: outbound
+          enabled: true
+          action: allow
+        - description: description
+          direction: inbound
+          enabled: false
+          action: deny
         fromToken: fromToken
         account: account
         ipList: ipList
         dhcp: dhcp list
+        coords:
+        - 40.4
+        - 5.7
         sync: device sync status
       properties:
         _id:
@@ -6614,6 +8753,10 @@ components:
           items:
             $ref: '#/components/schemas/Dhcp'
           type: array
+        coords:
+          items:
+            type: number
+          type: array
         upgradeSchedule:
           $ref: '#/components/schemas/UpgradeSchedule'
         labels:
@@ -6624,10 +8767,18 @@ components:
           items:
             $ref: '#/components/schemas/Interface'
           type: array
+        deviceSpecificRulesEnabled:
+          type: boolean
+        firewallRules:
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+          type: array
         versions:
           $ref: '#/components/schemas/DeviceVersion'
         sync:
           $ref: '#/components/schemas/DeviceSyncStatus'
+        pendingNotifications:
+          type: integer
       type: object
     UpgradeSchedule:
       example:
@@ -6659,6 +8810,7 @@ components:
         MAC: MAC
         gateway: gateway
         metric: 0
+        mtu: 1500
         dhcp: "no"
         routing: OSPF
         IPv6Mask: "64"
@@ -6666,15 +8818,18 @@ components:
         driver: driver
         IPv4Mask: "24"
         name: name
-        pciaddr: pciaddr
+        devId: devId
         _id: _id
         pathlabels: path labels list
+        dnsServers: [8.8.8.8, 8.8.4.4]
+        dnsDomains: [subdomain.maindomain]
+        isPublicAddressRateLimited: false
       properties:
         _id:
           maxLength: 24
           minLength: 24
           type: string
-        pciaddr:
+        devId:
           type: string
         driver:
           type: string
@@ -6695,6 +8850,8 @@ components:
           type: string
         useStun:
           type: boolean
+        useFixedPublicPort:
+          type: boolean
         monitorInternet:
           type: boolean
         internetAccess:
@@ -6707,6 +8864,8 @@ components:
           type: string
         metric:
           type: string
+        mtu:
+          type: integer
         isAssigned:
           type: boolean
         routing:
@@ -6732,6 +8891,47 @@ components:
           items:
             $ref: '#/components/schemas/PathLabel'
           type: array
+        configuration:
+          oneOf:
+            - $ref: '#/components/schemas/LteConfiguration'
+            - $ref: '#/components/schemas/WifiConfiguration'
+            - type: object
+              minProperties: 0
+              maxProperties: 0
+          type: object
+        dnsServers:
+          description: List of DNS address
+          items:
+            type: string
+            maxLength: 20
+          type: array
+        dnsDomains:
+          description: List of DNS search domains
+          items:
+            type: string
+          type: array
+        useDhcpDnsServers:
+          description: In case of DHCP interface, use the DNS info received from DHCP server
+          type: boolean
+        ospf:
+          type: object
+          properties:
+            keyId:
+              type: integer
+              nullable: true
+            key:
+              type: string
+            area:
+              oneOf:
+              - type: integer
+              - type: string
+                format: ipv4
+            cost:
+              type: integer
+              nullable: true
+        isPublicAddressRateLimited:
+          type: boolean
+          description: Specifies whether the IP or port address for this interface changes at a high rate
       type: object
     DeviceVersion:
       example:
@@ -6858,10 +9058,17 @@ components:
         username:
           type: string
       type: object
+    DeviceResponseStatus:
+      enum:
+      - timeout
+      - null
+      type: string
+      nullable: true
     DeviceConnectionStatus:
       enum:
       - connected
       - disconnected
+      - unknown
       type: string
     DeviceStatus:
       example:
@@ -6875,10 +9082,40 @@ components:
           $ref: '#/components/schemas/DeviceConnectionStatus'
         isApproved:
           type: boolean
+        lteStatus:
+          type: object
+        wifiStatus:
+          type: object
       required:
         - sync
         - connection
         - isApproved
+    OspfConfigs:
+      example:
+        helloInterval: 10
+        deadInterval: 40
+        routerId: A.B.C.D
+      properties:
+        helloInterval:
+          type: integer
+          description: The number of seconds for HelloInterval timer value
+        deadInterval:
+          type: integer
+          description: The number of seconds for RouterDeadInterval timer value used for Wait Timer and Inactivity Timer
+        routerId:
+          type: string
+          description: The Router ID of the router originating the LSA
+      type: object
+    CoordsConfigs:
+      example:
+        coords:
+        - 40.4
+        - 5.7
+      properties:
+        coords:
+          items:
+            type: number
+          type: array
     DeviceRouteInformation:
       example:
         osRoutes:
@@ -6898,7 +9135,9 @@ components:
         - metric: 6
         - metric: 6
       properties:
-        status:
+        error:
+          $ref: '#/components/schemas/DeviceResponseStatus'
+        deviceStatus:
           $ref: '#/components/schemas/DeviceConnectionStatus'
         osRoutes:
           items:
@@ -6913,18 +9152,15 @@ components:
       example:
         metric: 0
         destination: destination
-        flags: flags
+        protocol: static
         interface: interface
         gateway: gateway
-        mask: mask
       properties:
         metric:
-          type: integer
+          type: string
         destination:
           type: string
-        mask:
-          type: string
-        flags:
+        protocol:
           type: string
         interface:
           type: string
@@ -6983,7 +9219,9 @@ components:
           - {}
         status: connected
       properties:
-        status:
+        error:
+          $ref: '#/components/schemas/DeviceResponseStatus'
+        deviceStatus:
           $ref: '#/components/schemas/DeviceConnectionStatus'
         configuration:
           items:
@@ -7002,6 +9240,50 @@ components:
         params:
           type: object
       type: object
+    WifiConnectRequest:
+      example:
+        essid: Access point ssid
+        password: somepassword  
+        useDHCP: true    
+      properties:
+        essid: 
+          type: string
+        password:
+          type: string
+        useDHCP:
+          type: boolean
+      type: object
+    InterfaceOperationResponse:
+      example:
+        deviceStatus: connected
+      properties:
+        error:
+          $ref: '#/components/schemas/DeviceResponseStatus'
+        deviceStatus:
+          $ref: '#/components/schemas/DeviceConnectionStatus'
+      type: object
+    InterfaceStatus:
+      example:
+        status:
+          key: value
+        deviceStatus: connected
+      required:
+        - deviceStatus
+        - status
+      properties:
+        error:
+          $ref: '#/components/schemas/DeviceResponseStatus'
+        status:
+          oneOf:
+            - $ref: '#/components/schemas/LteStatus'
+            - $ref: '#/components/schemas/WifiStatus'
+            - type: object
+              minProperties: 0
+              maxProperties: 0
+          type: object
+        deviceStatus:
+          $ref: '#/components/schemas/DeviceConnectionStatus'
+      type: object
     DeviceLog:
       example:
         logs:
@@ -7009,7 +9291,9 @@ components:
         - logs
         status: connected
       properties:
-        status:
+        error:
+          $ref: '#/components/schemas/DeviceResponseStatus'
+        deviceStatus:
           $ref: '#/components/schemas/DeviceConnectionStatus'
         logs:
           items:
@@ -7023,7 +9307,9 @@ components:
         - logs
         status: connected
       properties:
-        status:
+        error:
+          $ref: '#/components/schemas/DeviceResponseStatus'
+        deviceStatus:
           $ref: '#/components/schemas/DeviceStatus'
         logs:
           items:
@@ -7050,8 +9336,12 @@ components:
         multilink:
           type: object
           $ref: '#/components/schemas/DevicePolicy'
+        firewall:
+          type: object
+          $ref: '#/components/schemas/DevicePolicy'
       required:
         - multilink
+        - firewall
     DevicePolicy:
       type: object
       properties:
@@ -7073,7 +9363,183 @@ components:
           - installed
           - uninstalling
           type: string
-
+    PeerDhGroup:
+      type: string
+      enum:
+        - none
+        - modp-768
+        - modp-1024
+        - modp-1536
+        - modp-2048
+        - modp-3072
+        - modp-4096
+        - modp-6144
+        - modp-8192
+        - ecp-256
+        - ecp-384
+        - ecp-521
+        - modp-1024-160
+        - modp-2048-224
+        - modp-2048-256
+        - ecp-192
+    PeerCryptoAlg:
+      type: string
+      enum:
+        - des-iv64
+        - des
+        - 3des
+        - rc5
+        - idea
+        - cast
+        - blowfish
+        - 3idea
+        - des-iv32
+        - null
+        - aes-cbc
+        - aes-ctr
+        - aes-gcm-16
+    PeerKeySize:
+      type: string
+      enum:
+        - '128'
+        - '256'
+    PeerProtocol:
+      type: string
+      enum:
+        - any
+        - icmp
+        - tcp
+        - udp
+    PeerIntegAlg:
+      type: string
+      enum:
+        - none
+        - md5-96
+        - sha1-96
+        - des-mac
+        - kpdk-md5
+        - aes-xcbc-96
+        - md5-128
+        - sha1-160
+        - cmac-96
+        - aes-128-gmac
+        - aes-192-gmac
+        - aes-256-gmac
+        - hmac-sha2-256-128
+        - hmac-sha2-384-192
+        - hmac-sha2-512-256
+    Peer:
+      example:
+        _id: _id
+        name: Cloud Provider Name
+        idType: fqdn
+        localId: a4bbd424b1
+        remoteId: 100.100.100.100
+        psk: 123456f5621c1a95997997c8cd123456
+        remoteIP: 100.100.100.100
+        urls: [monitoring.com]
+        ips: [1.1.1.1, 8.8.8.8]
+        ikeDhGroup: modp-2048
+        ikeCryptoAlg: aes-cbc
+        ikeKeySize: 256
+        ikeIntegAlg: hmac-sha2-256-128
+        espCryptoAlg: aes-cbc
+        espKeySize: 256
+        espIntegAlg: hmac-sha2-256-128
+        espDhGroup: ecp-256
+        sessionLifeTime: 3600
+        localIpRangeStart: 0.0.0.0
+        localIpRangeEnd: 255.255.255.255
+        localPortRangeStart: 0
+        localPortRangeEnd: 65535
+        localProtocol: any
+        remoteIpRangeStart: 0.0.0.0
+        remoteIpRangeEnd: 255.255.255.255
+        remotePortRangeStart: 0
+        remotePortRangeEnd: 65535
+        remoteProtocol: any
+      properties:
+        _id:
+          maxLength: 24
+          minLength: 24
+          type: string
+        name:
+          type: string
+        idType:
+          type: string
+          enum:
+            - fqdn
+            - ip4-addr
+        localId:
+          type: string
+        remoteId:
+          type: string
+        psk:
+          type: string
+        remoteIP:
+          type: string
+          format: ipv4
+        ips:
+          type: array
+          items:
+            type: string
+            format: ipv4
+        urls:
+          type: array
+          items:
+            type: string
+        ikeDhGroup:
+          $ref: '#/components/schemas/PeerDhGroup'
+        ikeCryptoAlg:
+          $ref: '#/components/schemas/PeerCryptoAlg'
+        ikeKeySize:
+          $ref: '#/components/schemas/PeerKeySize'
+        ikeIntegAlg:
+          $ref: '#/components/schemas/PeerIntegAlg'
+        espDhGroup:
+          $ref: '#/components/schemas/PeerDhGroup'
+        espCryptoAlg:
+          $ref: '#/components/schemas/PeerCryptoAlg'
+        espKeySize:
+          $ref: '#/components/schemas/PeerKeySize'
+        espIntegAlg:
+          $ref: '#/components/schemas/PeerIntegAlg'
+        sessionLifeTime:
+          type: string
+        localIpRangeStart:
+          type: string
+          format: ipv4
+        localIpRangeEnd:
+          type: string
+          format: ipv4
+        localPortRangeStart:
+          type: string
+        localPortRangeEnd:
+          type: string
+        localProtocol:
+          $ref: '#/components/schemas/PeerProtocol'
+        remoteIpRangeStart:
+          type: string
+          format: ipv4
+        remoteIpRangeEnd:
+          type: string
+          format: ipv4
+        remotePortRangeStart:
+          type: string
+        remotePortRangeEnd:
+          type: string
+        remoteProtocol:
+          $ref: '#/components/schemas/PeerProtocol'
+    PeersIdPUTResponse:
+      required:
+        - updatedPeer
+        - reconstructedTunnels
+      properties:
+        updatedPeer:
+          type: object
+          $ref: '#/components/schemas/Peer'
+        reconstructedTunnels:
+          type: integer
     Tunnel:
       example:
         tunnelStatusA: '{}'
@@ -7090,6 +9556,9 @@ components:
         __v: 6
         deviceBconf: true
         _id: _id
+        tunnelStatus: 'Connected'
+        isPending: false
+        pendingReason: ''
       properties:
         num:
           type: integer
@@ -7109,26 +9578,42 @@ components:
           type: object
         deviceB:
           type: object
+          nullable: true
         interfaceA:
           type: object
         interfaceB:
           type: object
+          nullable: true
         interfaceADetails:
           type: object
         interfaceBDetails:
           type: object
+          nullable: true
         tunnelStatusA:
           type: object
         tunnelStatusB:
           type: object
+          nullable: true
+        tunnelStatus:
+          enum:
+            - Connected
+            - Not Connected
+            - Pending
+            - N/A
+          type: string
+        isPending:
+          type: boolean
+        pendingReason:
+          type: string
       type: object
     StaticRouteRequest:
       example:
         _id: _id
         destination: destination
-        interface: interface
+        ifname: interface devId
         gateway: gateway
         metric: metric
+        redistributeViaOSPF: true
       properties:
         _id:
           maxLength: 24
@@ -7142,13 +9627,16 @@ components:
           description: Gateway to use
           maxLength: 24
           type: string
-        interface:
-          description: Interface name
-          maxLength: 24
+        ifname:
+          description: Interface devId
           type: string
         metric:
           description: Route metric
           type: string
+        redistributeViaOSPF:
+          description: Indicates whether the path is redistributed using OSPF. 
+            Note that the "true" value will return if in the OSPF Global Settings, the redistribution option is enabled for all static routes
+          type: boolean
       type: object
     StaticRoute:
       example:
@@ -7157,6 +9645,7 @@ components:
         gateway: gateway
         metric: metric
         status: "completed"
+        redistributeViaOSPF: true
       properties:
         _id:
           type: string
@@ -7178,6 +9667,10 @@ components:
         status:
           description: Route status
           type: string
+        redistributeViaOSPF:
+          description: Indicates whether the path is redistributed using OSPF.
+            Note that the "true" value will return if in the OSPF Global Settings, the redistribution option is enabled for all static routes
+          type: boolean
       type: object
     DhcpMacAssign:
       example:
@@ -7211,7 +9704,7 @@ components:
         macAssign: [{"host":"host1", "mac":"08:00:27:fd:00:00", "ipv4":"20.20.20.20"}]
       properties:
         interface:
-          description: Interface PCI Address
+          description: Interface bus Address
           maxLength: 24
           type: string
         rangeStart:
@@ -7253,7 +9746,7 @@ components:
           minLength: 24
           type: string
         interface:
-          description: Interface PCI Address
+          description: Interface bus Address
           maxLength: 24
           type: string
         rangeStart:
@@ -7370,6 +9863,41 @@ components:
           type: object
         meta:
           type: object
+    DeviceSendRequest:
+      example:
+        entity: "agent"
+        api: "exec_timeout"
+        params: {"cmd":"date","timeout":60}
+      type: object
+      properties:
+        entity:
+          type: string
+        api:
+          type: string
+        params:
+          oneOf:
+            - type: object
+            - type: string
+            - type: array
+    DeviceSendResponse:
+      example:
+        router-cfg-hash: "e5dbf5ee9541264307041dfae1f6abbe2b62179e"
+        message: {"output":"Mon Feb  8 10:22:11 UTC 2020\n", "returncode":0, "error":""}
+        ok: 1
+        entity: "osReply"
+      type: object
+      properties:
+        router-cfg-hash:
+          type: string
+        message:
+          oneOf:
+            - type: object
+            - type: string
+            - type: array
+        ok:
+          type: integer
+        entity:
+          type: string
     Invoice:
       properties:
         id:
@@ -7463,6 +9991,8 @@ components:
         _id: id
         name: name
         description: description
+        applyOnWan: false
+        overrideDefaultRoute: true
         rules: [rule 1, rule 2, ...]
       properties:
         _id:
@@ -7473,6 +10003,10 @@ components:
           type: string
         description:
           type: string
+        applyOnWan:
+          type: boolean
+        overrideDefaultRoute:
+          type: boolean
         rules:
           items:
             $ref: '#/components/schemas/MLRule'
@@ -7545,12 +10079,18 @@ components:
       example:
         name: name
         description: description
+        applyOnWan: false
+        overrideDefaultRoute: true
         rules: [rule 1, rule 2, ...]
       properties:
         name:
           type: string
         description:
           type: string
+        applyOnWan:
+          type: boolean
+        overrideDefaultRoute:
+          type: boolean
         rules:
           items:
             $ref: '#/components/schemas/MLRuleRequest'
@@ -7664,6 +10204,7 @@ components:
           enum:
           - priority
           - load-balancing
+          - link-quality
           type: string
       type: object
       required:
@@ -7679,6 +10220,7 @@ components:
           enum:
           - priority
           - load-balancing
+          - link-quality
           type: string
       type: object
       required:
@@ -7727,6 +10269,276 @@ components:
           - serviceClass
           - importance
           type: object
+    FirewallPolicy:
+      example:
+        _id: id
+        name: name
+        description: description
+        isDefault: false
+        rules: [rule 1, rule 2, ...]
+      properties:
+        _id:
+          maxLength: 24
+          minLength: 24
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        isDefault:
+          type: boolean
+        rules:
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+          type: array
+      required:
+      - _id
+      - name
+      - description
+      - rules
+      type: object
+    FirewallPolicyList:
+      example:
+        id: id
+        name: name
+      properties:
+        _id:
+          maxLength: 24
+          minLength: 24
+          type: string
+        name:
+          type: string
+      required:
+      - _id
+      - name
+    FirewallPolicyMetaData:
+      example:
+        _id: id
+        name: name
+        description: description
+        installCount: installCount
+      properties:
+        _id:
+          maxLength: 24
+          minLength: 24
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        installCount:
+          $ref: '#/components/schemas/PolicyInstallCount'
+          type: object
+      required:
+      - _id
+      - name
+      - description
+      - installCount
+      type: object
+    FirewallPolicyRequest:
+      example:
+        name: name
+        description: description
+        isDefault: false
+        rules: [rule 1, rule 2, ...]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        isDefault:
+          type: boolean
+        rules:
+          items:
+            $ref: '#/components/schemas/FirewallRuleRequest'
+          type: array
+      required:
+      - name
+      - rules
+      type: object
+    FirewallRule:
+      example:
+        _id: id
+        description: description
+        priority: priority
+        enabled: true
+        direction: inbound
+        inbound: edgeAccess
+        classification: classification
+        action: allow
+        interfaces: interfaces
+      properties:
+        _id:
+          maxLength: 24
+          minLength: 24
+          type: string
+        description:
+          maxLength: 100
+          type: string
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        enabled:
+          type: boolean
+        direction:
+          enum:
+          - inbound
+          - outbound
+          type: string
+        inbound:
+          enum:
+          - edgeAccess
+          - portForward
+          - nat1to1
+          type: string
+        classification:
+          schema:
+          $ref: '#/components/schemas/FirewallRuleClassification'
+        action:
+          enum:
+          - allow
+          - deny
+          type: string
+        internalIP:
+          type: string
+        internalPortStart:
+          type: string
+        interfaces:
+          items:
+            type: string
+          type: array
+      required:
+      - _id
+      - priority
+      - enabled
+      - direction
+      - classification
+      - action
+      type: object
+    FirewallRuleRequest:
+      example:
+        description: description
+        priority: priority
+        enabled: true
+        direction: inbound
+        inbound: edgeAccess
+        classification: classification
+        action: allow
+        interfaces: interfaces
+      properties:
+        description:
+          maxLength: 100
+          type: string
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        enabled:
+          type: boolean
+        direction:
+          enum:
+          - inbound
+          - outbound
+          type: string
+        inbound:
+          enum:
+          - edgeAccess
+          - portForward
+          - nat1to1
+          type: string
+        classification:
+          schema:
+          $ref: '#/components/schemas/FirewallRuleClassification'
+        action:
+          enum:
+          - allow
+          - deny
+          type: string
+        interfaces:
+          items:
+            type: string
+          type: array
+      required:
+      - priority
+      - enabled
+      - direction
+      - classification
+      - action
+      type: object
+    FirewallRuleClassification:
+      example:
+        source: source
+        destination: destination
+      properties:
+        source:
+          anyOf:
+          - $ref: '#/components/schemas/FirewallClassIpPort'
+          - $ref: '#/components/schemas/FirewallClassTrafficId'
+          - $ref: '#/components/schemas/FirewallClassTrafficTags'
+          type: object
+        destination:
+          anyOf:
+          - $ref: '#/components/schemas/FirewallClassIpProtoPort'
+          - $ref: '#/components/schemas/FirewallClassTrafficId'
+          - $ref: '#/components/schemas/FirewallClassTrafficTags'
+          type: object
+    FirewallClassIpPort:
+      properties:
+        ipPort:
+          properties:
+            ip:
+              type: string
+            ports:
+              type: string
+              pattern: "^$|^()([0-9]|[1-5]?[0-9]{2,4}|6[0-4][0-9]{3}|65[1-4][0-9]{2}|655[1-2][0-9]|6553[1-5])(-([0-9]|[1-5]?[0-9]{2,4}|6[0-4][0-9]{3}|65[1-4][0-9]{2}|655[1-2][0-9]|6553[1-5]))?$"
+          type: object
+    FirewallClassIpProtoPort:
+      properties:
+        ipProtoPort:
+          properties:
+            ip:
+              type: string
+            ports:
+              type: string
+              pattern: "^$|^()([0-9]|[1-5]?[0-9]{2,4}|6[0-4][0-9]{3}|65[1-4][0-9]{2}|655[1-2][0-9]|6553[1-5])(-([0-9]|[1-5]?[0-9]{2,4}|6[0-4][0-9]{3}|65[1-4][0-9]{2}|655[1-2][0-9]|6553[1-5]))?$"
+            protocols:
+              items:
+                $ref: '#/components/schemas/Protocol'
+              type: array
+            interface:
+              type: string
+          type: object
+    FirewallClassTrafficId:
+      properties:
+        trafficId:
+          type: string
+    FirewallClassTrafficTags:
+      properties:
+        trafficTags:
+          properties:
+            category:
+              type: string
+            serviceClass:
+              type: string
+            importance:
+              enum:
+              - ''
+              - high
+              - medium
+              - low
+              type: string
+          required:
+          - category
+          - serviceClass
+          - importance
+          type: object
+    Protocol:
+      enum:
+      - tcp
+      - udp
+      - icmp
+      type: string
     Error:
       properties:
         code:
@@ -7744,6 +10556,312 @@ components:
       required:
       - code
       - message
+      type: object
+    InterfaceOperationReq:
+      type: object
+      oneOf:
+        - type: object
+          required:
+          - op
+          properties:
+            op:
+              type: string
+              enum:
+                - reset
+        - type: object
+          required:
+          - op
+          - params
+          properties:
+              op:
+                type: string
+                enum:
+                  - pin
+              params:
+                type: object
+                required:
+                  - currentPin
+                  - enable
+                  - newPin
+                  - puk
+                properties:
+                  currentPin:
+                    type: string
+                    pattern: ^(\d{4}|\d{8}|)$
+                    description: PIN (Personal identification number) Code. 4 or 8 digits
+                  enable:
+                    type: boolean
+                  newPin:
+                    type: string
+                    pattern: ^(\d{4}|\d{8}|)$
+                    description: PIN (Personal identification number) Code. 4 or 8 digits
+                  puk:
+                    type: string
+                    pattern: ^(\d{8}|)$
+                    description: PUK (Personal unblocking key) Code. 8 digits
+    WifiClient:
+      type: object
+      required:
+      - mac
+      - signal
+      - ip
+      properties:
+        mac:
+          type: string
+        signal:
+          type: string
+        ip:
+          type: string
+          description: WiFi client IP
+    WifiStatus:
+      type: object
+      required:
+      - clients
+      - accessPointStatus
+      properties:
+        clients:
+          items:
+            $ref: '#/components/schemas/WifiClient'
+          type: array
+        accessPointStatus:
+          type: boolean
+    LteStatus:
+      required:
+      - signals
+      - connectivity
+      - packetServiceState
+      - hardwareInfo
+      - systemInfo
+      - simStatus
+      - defaultSettings
+      - phoneNumber
+      - pinState
+      - connectionState
+      - registrationNetworkState
+      properties:
+        signals:
+          type: object
+          properties:
+            rssi:
+              type: string
+            rsrp:
+              type: string
+            rsrq:
+              type: string
+            sinr:
+              type: string
+            snr:
+              type: string
+            text:
+              type: string
+              enum: [Marginal, Very low, Low, Good, Very Good, Excellent]
+              description: Based on RSSI value (-50 -> Excellent, -60 -> Very Good, -70 -> Godd, -80 -> Low, -85 -> Very Low, -95 -> Marginal)
+        connectivity:
+          type: boolean
+        packetServiceState:
+          type: object
+          properties:
+            uplinkSpeed:
+              type: string
+            downlinkSpeed:
+              type: string
+        hardwareInfo:
+          type: object
+          properties:
+            vendor:
+              type: string
+            model:
+              type: string
+            imei:
+              type: string
+        systemInfo:
+          type: object
+          properties:
+            cellId:
+              type: string
+            operatorName:
+              type: string
+            mcc:
+              type: string
+            mnc:
+              type: string
+        simStatus:
+          type: string
+        defaultSettings:
+          type: object
+          properties:
+            apn:
+              type: string
+            userName:
+              type: string
+            password:
+              type: string
+            auth:
+              type: string
+        phoneNumber:
+          type: string
+        pinState:
+          type: object
+          properties:
+            pin1Status:
+              type: string
+            pin1Retries:
+              type: string
+            puk1Retries:
+              type: string
+        connectionState:
+          type: string
+        registrationNetworkState:
+          type: object
+          properties:
+            registerState:
+              type: string
+            networkError:
+              type: string
+    LteConfiguration:
+      required:
+        - apn
+        - enable
+      properties:
+        apn:
+          type: string
+        enable:
+          type: boolean
+        password:
+          type: string
+        user:
+          type: string
+      type: object
+    WifiBand:
+      type: object
+      required:
+        - enable
+        - bandwidth
+        - encryption
+        - securityMode
+        - hideSsid
+        - ssid
+        - password
+        - region
+      properties:
+        enable:
+          type: boolean
+        bandwidth:
+          type: string
+          enum: ['20']
+        encryption:
+          type: string
+          enum: [aes-ccmp]
+        securityMode:
+          type: string
+          enum: [wpa2-psk, wpa-psk, open, '']
+        hideSsid:
+          type: boolean
+        ssid:
+          type: string
+          maxLength: 32
+        password:
+          oneOf:
+            - type: string
+              enum: ['']
+            - type: string
+              minLength: 8
+              maxLength: 63
+        region:
+          type: string
+          minLength: 2
+          maxLength: 2
+          pattern: ^([A-Z]{2})$
+          description: Country Code (ISO/IEC 3166-1)
+    WifiBand2.4GHz:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/WifiBand'
+        - type: object
+          required:
+            - channel
+            - operationMode
+          properties:
+            channel:
+              type: string
+              pattern: ^([0-9]|1[0-3])$
+              description: 'Between 0-13'
+            operationMode:
+              type: string
+              enum: [g, n, '']
+    WifiBand5GHz:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/WifiBand'
+        - type: object
+          required:
+            - channel
+            - operationMode
+          properties:
+            channel:
+              type: string
+              enum: ['0', '36', '40', '44', '48', '149', '153', '157', '161', '165']
+              # pattern: ^(3[6-9]|[4-9][0-9]|17[0-3]|1[0-6][0-9])$
+              description: 'valid channel number for 5GHz'
+            operationMode:
+              type: string
+              enum: [a, ac, n, '']
+    WifiConfiguration:
+      type: object
+      oneOf:
+        - type: object
+          minProperties: 1
+          maxProperties: 1
+          required:
+            - 5GHz
+          properties:
+            5GHz:
+              $ref: '#/components/schemas/WifiBand5GHz'
+        - type: object
+          minProperties: 1
+          maxProperties: 1
+          required:
+            - 2.4GHz
+          properties:
+            2.4GHz:
+              $ref: '#/components/schemas/WifiBand2.4GHz'
+        - type: object
+          minProperties: 2
+          maxProperties: 2
+          required:
+            - 2.4GHz
+            - 5GHz
+          properties:
+            2.4GHz:
+              $ref: '#/components/schemas/WifiBand2.4GHz'
+            5GHz:
+              $ref: '#/components/schemas/WifiBand5GHz'
+    DevicesDeleteRequest:
+      properties:
+        ids:
+          items:
+            type: string
+          type: array
+        filters:
+          items:
+            $ref: '#/components/schemas/Filter'
+          type: array
+    Filter:
+      example:
+        key: name
+        op: ==
+        val: example
+      properties:
+        key:
+          type: string
+        op:
+          type: string
+        val:
+          type: string
+      required:
+      - key
+      - op
+      - val
       type: object
   securitySchemes:
     apiKey:

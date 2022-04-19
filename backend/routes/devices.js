@@ -31,7 +31,7 @@ const dispatcher = require('../deviceLogic/dispatcher');
 const { validateDevice } = require('../deviceLogic/validators');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 const DevSwUpdater = require('../deviceLogic/DevSwVersionUpdateManager');
-const Joi = require('@hapi/joi');
+const Joi = require('joi');
 
 const flexibilling = require('../flexibilling');
 
@@ -90,10 +90,16 @@ const checkUpdReq = (qtype, req) => new Promise(function (resolve, reject) {
               const deviceCount = await devices.countDocuments({
                 account: mres[0].account
               }).session(session);
+
+              const deviceOrgCount = await devices.countDocuments({
+                account: mres[0].account, org: req.user.defaultOrg._id
+              }).session(session);
               // Unregister a device (by adding -1)
               await flexibilling.registerDevice({
                 account: mres[0].account,
+                org: req.user.defaultOrg._id,
                 count: deviceCount,
+                orgCount: deviceOrgCount,
                 increment: -1
               }, session);
               resolve({ ok: 1, session });
@@ -290,7 +296,7 @@ devicesRouter.route('/upgdSched')
         return next(createError(404, 'Some devices were not found'));
       }
 
-      const set = { $set: { upgradeSchedule: { time: req.body.date, jobQueued: false } } };
+      const set = { $set: { upgradeSchedule: { time: req.body.date } } };
       const options = { upsert: false, useFindAndModify: false };
       await devices.updateMany(query, set, options);
     } catch (err) {
@@ -305,7 +311,7 @@ devicesRouter.route('/:deviceId/upgdSched')
   .post(cors.corsWithOptions, async (req, res, next) => {
     try {
       const query = { _id: req.params.deviceId };
-      const set = { $set: { upgradeSchedule: { time: req.body.date, jobQueued: false } } };
+      const set = { $set: { upgradeSchedule: { time: req.body.date } } };
       const options = { upsert: false, useFindAndModify: false };
       const res = await devices.updateOne(query, set, options);
       if (res.n === 0) return next(createError(404));
@@ -397,7 +403,8 @@ devicesRouter.route('/:deviceId/configuration')
       const deviceConf = await connections.deviceSendMessage(
         null,
         device[0].machineId,
-        { entity: 'agent', message: 'get-router-config' }
+        { entity: 'agent', message: 'get-device-config' },
+        15000
       );
 
       if (!deviceConf.ok) {
@@ -425,7 +432,8 @@ const verifyLogsRequest = (req, res, next) => {
     lines: Joi.number().integer().max(10000),
     filter: Joi.string().valid('all', 'fwagent')
   });
-  const result = Joi.validate(req.query, schema);
+  // const result = Joi.validate(req.query, schema);
+  const result = schema.validate(req.query);
   if (result.error) {
     return next(createError(400, result.error.details[0].message));
   }
@@ -460,7 +468,8 @@ devicesRouter.route('/:deviceId/logs')
               lines: req.query.lines || '100',
               filter: req.query.filter || 'all'
             }
-          }
+          },
+          15000
         );
 
         if (!deviceLogs.ok) {
@@ -502,7 +511,8 @@ devicesRouter.route('/:deviceId/routes')
       const deviceOsRoutes = await connections.deviceSendMessage(
         null,
         device[0].machineId,
-        { entity: 'agent', message: 'get-device-os-routes' }
+        { entity: 'agent', message: 'get-device-os-routes' },
+        15000
       );
 
       if (!deviceOsRoutes.ok) {

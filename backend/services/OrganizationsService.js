@@ -17,6 +17,7 @@
 
 const Service = require('./Service');
 
+const mongoose = require('mongoose');
 const Accounts = require('../models/accounts');
 const Devices = require('../models/devices');
 const Users = require('../models/users');
@@ -27,6 +28,7 @@ const Tokens = require('../models/tokens');
 const AccessTokens = require('../models/accesstokens');
 const MultiLinkPolicies = require('../models/mlpolicies');
 const PathLabels = require('../models/pathlabels');
+const { deviceAggregateStats } = require('../models/analytics/deviceStats');
 const { membership } = require('../models/membership');
 const Connections = require('../websocket/Connections')();
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
@@ -48,7 +50,8 @@ class OrganizationsService {
       'name',
       '_id',
       'account',
-      'group'
+      'group',
+      'encryptionMethod'
     ]);
     retOrg._id = retOrg._id.toString();
     retOrg.account = retOrg.account.toString();
@@ -65,7 +68,7 @@ class OrganizationsService {
    **/
   static async organizationsGET ({ offset, limit }, { user }) {
     try {
-      const orgs = await getUserOrganizations(user);
+      const orgs = await getUserOrganizations(user, offset, limit);
       const result = Object.keys(orgs).map((key) => {
         return OrganizationsService.selectOrganizationParams(orgs[key]);
       });
@@ -75,7 +78,8 @@ class OrganizationsService {
           _id: element._id.toString(),
           name: element.name,
           account: element.account ? element.account.toString() : '',
-          group: element.group
+          group: element.group,
+          encryptionMethod: element.encryptionMethod
         };
       });
 
@@ -122,7 +126,8 @@ class OrganizationsService {
           _id: updUser.defaultOrg._id.toString(),
           name: updUser.defaultOrg.name,
           account: updUser.defaultOrg.account ? updUser.defaultOrg.account.toString() : '',
-          group: updUser.defaultOrg.group
+          group: updUser.defaultOrg.group,
+          encryptionMethod: updUser.defaultOrg.encryptionMethod
         };
         return Service.successResponse(result, 201);
       }
@@ -161,75 +166,81 @@ class OrganizationsService {
    * no response value expected for this operation
    **/
   static async organizationsIdDELETE ({ id }, { user }, response) {
-    let session;
+    let orgDevices;
+    let deviceCount;
+    let deviceOrgCount;
 
     try {
-      session = await mongoConns.getMainDB().startSession();
-      await session.startTransaction();
+      await mongoConns.mainDBwithTransaction(async (session) => {
+        // Find and remove organization from account
+        // Only allow to delete current default org,
+        // this is required to make sure the API permissions
+        // are set properly for updating this organization
+        const orgList = await getAccessTokenOrgList(user, undefined, false);
+        if (!orgList.includes(id)) {
+          throw new Error('Please select an organization to delete it');
+        }
 
-      // Find and remove organization from account
-      // Only allow to delete current default org, this is required to make sure the API permissions
-      // are set properly for updating this organization
-      const orgList = await getAccessTokenOrgList(user, undefined, false);
-      if (!orgList.includes(id)) {
-        throw new Error('Please select an organization to delete it');
-      }
+        const account = await Accounts.findOneAndUpdate(
+          { _id: user.defaultAccount },
+          { $pull: { organizations: id } },
+          { upsert: false, new: true, session }
+        );
 
-      const account = await Accounts.findOneAndUpdate(
-        { _id: user.defaultAccount },
-        { $pull: { organizations: id } },
-        { upsert: false, new: true, session }
-      );
+        if (!account) {
+          throw new Error('Cannot delete organization');
+        }
 
-      if (!account) {
-        throw new Error('Cannot delete organization');
-      }
+        // Since the selected org is deleted, need to select another organization available
+        user.defaultOrg = null;
+        await orgUpdateFromNull({ user }, response);
 
-      // Since the selected org is deleted, need to select another organization available
-      user.defaultOrg = null;
-      await orgUpdateFromNull({ user }, response);
+        // Remove organization
+        await Organizations.findOneAndRemove(
+          { _id: id, account: user.defaultAccount },
+          { session: session });
 
-      // Remove organization
-      await Organizations.findOneAndRemove(
-        { _id: id, account: user.defaultAccount },
-        { session: session });
+        // Remove all memberships that belong to the organization, but keep group even if empty
+        await membership.deleteMany({ organization: id }, { session: session });
 
-      // Remove all memberships that belong to the organization, but keep group even if empty
-      await membership.deleteMany({ organization: id }, { session: session });
+        // Remove organization inventory (devices, tokens, tunnelIds, tunnels, etc.)
+        await Tunnels.deleteMany({ org: id }, { session: session });
+        await TunnelIds.deleteMany({ org: id }, { session: session });
+        await Tokens.deleteMany({ org: id }, { session: session });
+        await AccessTokens.deleteMany({ organization: id }, { session: session });
+        await MultiLinkPolicies.deleteMany({ org: id }, { session: session });
+        await PathLabels.deleteMany({ org: id }, { session: session });
 
-      // Remove organization inventory (devices, tokens, tunnelIds, tunnels, etc.)
-      await Tunnels.deleteMany({ org: id }, { session: session });
-      await TunnelIds.deleteMany({ org: id }, { session: session });
-      await Tokens.deleteMany({ org: id }, { session: session });
-      await AccessTokens.deleteMany({ organization: id }, { session: session });
-      await MultiLinkPolicies.deleteMany({ org: id }, { session: session });
-      await PathLabels.deleteMany({ org: id }, { session: session });
+        // Find all devices for organization
+        orgDevices = await Devices.devices.find({ org: id },
+          { machineId: 1, _id: 0 },
+          { session: session });
 
-      // Find all devices for organization
-      const orgDevices = await Devices.devices.find({ org: id },
-        { machineId: 1, _id: 0 },
-        { session: session });
+        // Get the account total device count
+        deviceCount = await Devices.devices.countDocuments({ account: user.defaultAccount._id })
+          .session(session);
 
-      // Get the account total device count
-      const deviceCount = await Devices.devices.countDocuments({ account: user.defaultAccount._id })
-        .session(session);
+        deviceOrgCount = await Devices.devices.countDocuments(
+          { account: user.defaultAccount._id, org: id }
+        ).session(session);
 
-      // Delete all devices
-      await Devices.devices.deleteMany({ org: id }, { session: session });
-      // Unregister a device (by removing the removed org number)
-      await Flexibilling.registerDevice({
-        account: user.defaultAccount._id,
-        count: deviceCount,
-        increment: -orgDevices.length
-      }, session);
+        // Delete all devices
+        await Devices.devices.deleteMany({ org: id }, { session: session });
+        // Unregister a device (by removing the removed org number)
+        await Flexibilling.registerDevice({
+          account: user.defaultAccount._id,
+          org: id,
+          count: deviceCount,
+          orgCount: deviceOrgCount,
+          increment: -orgDevices.length
+        }, session);
+      });
 
-      // Disconnect all devices
+      // If successful, Disconnect all devices
       orgDevices.forEach((device) => Connections.deviceDisconnect(device.machineId));
 
-      await session.commitTransaction();
       return Service.successResponse(null, 204);
     } catch (e) {
-      if (session) session.abortTransaction();
       logger.error('Error deleting organization', { params: { reason: e.message } });
 
       return Service.rejectResponse(
@@ -252,10 +263,10 @@ class OrganizationsService {
       // are set properly for updating this organization
       const orgList = await getAccessTokenOrgList(user, undefined, false);
       if (orgList.includes(id)) {
-        const { name, group } = organizationRequest;
+        const { name, group, encryptionMethod } = organizationRequest;
         const resultOrg = await Organizations.findOneAndUpdate(
           { _id: id },
-          { $set: { name, group } },
+          { $set: { name, group, encryptionMethod } },
           { upsert: false, multi: false, new: true, runValidators: true }
         );
         // Update token
@@ -265,6 +276,182 @@ class OrganizationsService {
       } else {
         throw new Error('Please select an organization to update it');
       }
+    } catch (e) {
+      return Service.rejectResponse(
+        e.message || 'Internal Server Error',
+        e.status || 500
+      );
+    }
+  }
+
+  /**
+   * Get organization summary
+   *
+   * org String Numeric ID of the Organization to get
+   * returns Organization summary
+   **/
+  static async organizationsSummaryGET ({ org }, { user }) {
+    try {
+      const orgList = await getAccessTokenOrgList(user, org, true);
+
+      const devicesPipeline = [
+        // org match
+        { $match: { org: mongoose.Types.ObjectId(orgList[0]) } },
+        {
+          $group: {
+            _id: null,
+            // Connected devices
+            connected: { $sum: { $cond: [{ $eq: ['$isConnected', true] }, 1, 0] } },
+            // Approved devices
+            approved: { $sum: { $cond: [{ $eq: ['$isApproved', true] }, 1, 0] } },
+            // Running devices - connected and running
+            running: {
+              $sum: {
+                $cond: [{
+                  $and: [
+                    { $eq: ['$isConnected', true] },
+                    { $eq: ['$status', 'running'] }]
+                }, 1, 0]
+              }
+            },
+            // Devices with warning
+            warning: {
+              $sum: {
+                $cond: [{
+                  $and: [
+                  // Device should be connected
+                    { $eq: ['$isConnected', true] },
+                    {
+                      $or: [{
+                      // One of the interfaces internet access != yes (size > 0)
+                        $gt: [{
+                          $size: {
+                            $filter: {
+                              input: '$interfaces',
+                              as: 'intf',
+                              cond: {
+                                $and: [
+                                  { $ne: ['$$intf.internetAccess', 'yes'] },
+                                  { $eq: ['$$intf.monitorInternet', true] },
+                                  { $eq: ['$$intf.type', 'WAN'] }]
+                              }
+                            }
+                          }
+                        }, 0]
+                      },
+                      {
+                      // or one of the static routes is pending (size > 0)
+                        $gt: [{
+                          $size: {
+                            $filter: {
+                              input: '$staticroutes',
+                              as: 'sr',
+                              cond: { $eq: ['$$sr.isPending', true] }
+                            }
+                          }
+                        }, 0]
+                      }]
+                    }]
+                }, 1, 0]
+              }
+            },
+            // Total devices
+            total: { $sum: 1 }
+          }
+        }
+      ];
+
+      const tunnelsPipeline = [
+        // org match and active
+        { $match: { org: mongoose.Types.ObjectId(orgList[0]), isActive: true } },
+        // Populate device A and B
+        {
+          $lookup: {
+            from: 'devices',
+            let: { idA: '$deviceA', idB: '$deviceB' },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $or: [{ $eq: ['$_id', '$$idA'] }, { $eq: ['$_id', '$$idB'] }] },
+                      { $eq: ['$isConnected', false] }]
+                  }
+                }
+              },
+              { $project: { _id: 0, isConnected: 1 } }],
+            as: 'devices'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            // Connected tunnels
+            tunConnected: {
+              $sum: {
+                $cond: [
+                  { $and: [{ $eq: ['$status', 'up'] }, { $eq: ['$devices', []] }] }, 1, 0]
+              }
+            },
+            // Tunnels with warning
+            tunWarning: { $sum: { $cond: [{ $eq: ['$isPending', true] }, 1, 0] } },
+            // Tunnels unknown - devices not connected
+            tunUnknown: { $sum: { $cond: [{ $ne: ['$devices', []] }, 1, 0] } },
+            // Total tunnels
+            tunTotal: { $sum: 1 }
+          }
+        }
+      ];
+
+      const bytesPipeline = [
+        { $match: { month: { $gte: 1632762341553 } } },
+        { $project: { month: 1, ['stats.orgs.' + orgList[0]]: 1 } },
+        { $project: { month: 1, orgs: { $objectToArray: '$stats.orgs' } } },
+        { $unwind: '$orgs' },
+        { $project: { month: 1, org: '$orgs.k', devices: { $objectToArray: '$orgs.v.devices' } } },
+        { $unwind: '$devices' },
+        { $project: { month: 1, org: 1, account: 1, bytes: '$devices.v.bytes' } },
+        {
+          $group: {
+            _id: { month: '$month' },
+            devices_bytes: { $sum: '$bytes' },
+            devices_count: { $push: '$bytes' }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            org: '$_id.org',
+            month: '$_id.month',
+            bytes: '$devices_bytes',
+            deviceCount: { $size: '$devices_count' }
+          }
+        },
+        { $sort: { month: -1 } }
+      ];
+
+      const devicesRes = await Devices.devices.aggregate(devicesPipeline).allowDiskUse(true);
+      const { connected, approved, running, warning, total } = devicesRes.length > 0
+        ? devicesRes[0]
+        : { connected: 0, approved: 0, running: 0, warning: 0, total: 0 };
+      const tunnelsRes = await Tunnels.aggregate(tunnelsPipeline).allowDiskUse(true);
+      const { tunConnected, tunWarning, tunUnknown, tunTotal } = tunnelsRes.length > 0
+        ? tunnelsRes[0]
+        : { tunConnected: 0, tunWarning: 0, tunUnknown: 0, tunTotal: 0 };
+      const bytesRes = await deviceAggregateStats.aggregate(bytesPipeline).allowDiskUse(true);
+
+      const response = {
+        devices: { connected, approved, running, warning, total },
+        tunnels: {
+          connected: tunConnected,
+          warning: tunWarning,
+          unknown: tunUnknown,
+          total: tunTotal
+        },
+        traffic: bytesRes
+      };
+
+      return Service.successResponse(response);
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',

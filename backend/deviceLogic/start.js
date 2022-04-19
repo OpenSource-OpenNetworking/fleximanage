@@ -19,7 +19,7 @@
 const configs = require('../configs')();
 const deviceStatus = require('../periodic/deviceStatus')();
 const { validateDevice } = require('./validators');
-const { getAllOrganizationLanSubnets, getDefaultGateway } = require('../utils/deviceUtils');
+const { getAllOrganizationSubnets } = require('../utils/orgUtils');
 const tunnelsModel = require('../models/tunnels');
 const deviceQueues = require('../utils/deviceQueue')(
   configs.get('kuePrefix'),
@@ -27,7 +27,6 @@ const deviceQueues = require('../utils/deviceQueue')(
 );
 const mongoose = require('mongoose');
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
-const { getMajorVersion } = require('../versioning');
 const { buildInterfaces } = require('./interfaces');
 
 /**
@@ -38,106 +37,88 @@ const { buildInterfaces } = require('./interfaces');
  * @param  {Object}   data      Additional data used by caller
  * @return {None}
  */
-const apply = async (device, user, data) => {
-  logger.info('Starting device:', {
-    params: { machineId: device[0].machineId, user: user, data: data }
-  });
+const apply = async (devices, user, data) => {
+  const { username } = user;
+  const { org } = data;
+  const opDevices = await Promise.all(devices.map(d => d
+    .populate('policies.firewall.policy', '_id name rules')
+    .populate('interfaces.pathlabels', '_id name description color type')
+    .execPopulate()
+  ));
 
-  let organizationLanSubnets = [];
+  const errors = [];
+  let orgSubnets = [];
   if (configs.get('forbidLanSubnetOverlaps', 'boolean')) {
-    organizationLanSubnets = await getAllOrganizationLanSubnets(device[0].org);
+    orgSubnets = await getAllOrganizationSubnets(mongoose.Types.ObjectId(org));
   }
+  const applyPromises = [];
+  for (const device of opDevices) {
+    const { machineId } = device;
+    logger.info('Starting device:', { params: { machineId, user, data } });
 
-  const deviceValidator = validateDevice(device[0], true, organizationLanSubnets);
-
-  if (!deviceValidator.valid) {
-    logger.warn('Start command validation failed',
-      {
-        params: { device: device[0], err: deviceValidator.err }
-      });
-    throw new Error(deviceValidator.err);
-  }
-
-  deviceStatus.setDeviceStatsField(device[0].machineId, 'state', 'pending');
-  const majorAgentVersion = getMajorVersion(device[0].versions.agent);
-  const startParams = {};
-  let ifnum = 0;
-  const defaultGateway = getDefaultGateway(device[0]);
-
-  if (majorAgentVersion === 0) { // version 0.X.X
-    for (let idx = 0; idx < device[0].interfaces.length; idx++) {
-      const intf = device[0].interfaces[idx];
-      const ifParams = {};
-      if (intf.isAssigned === true) {
-        ifnum++;
-        ifParams.pci = intf.pciaddr;
-        ifParams.dhcp = intf.dhcp && intf.type === 'WAN' ? intf.dhcp : 'no';
-        ifParams.addr = intf.IPv4 ? `${intf.IPv4}/${intf.IPv4Mask}` : '';
-        if (intf.routing === 'OSPF') ifParams.routing = 'ospf';
-        startParams['iface' + (ifnum)] = ifParams;
+    const { valid, err } = validateDevice(device.toObject(), true, orgSubnets);
+    if (!valid) {
+      logger.warn('Start command validation failed', { params: { device, err } });
+      if (!errors.includes(err)) {
+        errors.push(err);
       }
-    }
-    startParams['default-route'] = defaultGateway || '';
-  } else if (majorAgentVersion >= 1) { // version 1.X.X+
-    const deviceInterfaces = buildInterfaces(device[0].interfaces);
-    // Send route for backward compatibility (agent version < 1.2.15)
-    const routes = [];
-    if (defaultGateway && majorAgentVersion < 2) {
-      routes.push({
-        addr: 'default',
-        via: defaultGateway
-      });
+      continue;
     }
 
-    startParams.interfaces = deviceInterfaces;
-    if (routes.length > 0) {
-      startParams.routes = routes;
-    }
-  }
+    // Set the device state to "pending". Device state will
+    // be updated again when the device sends periodic message
+    deviceStatus.setDeviceState(machineId, 'pending');
+    const startParams = {};
+    startParams.interfaces = buildInterfaces(device.interfaces.toObject(), device.ospf.toObject());
 
-  if (majorAgentVersion < 2) {
-    // Start router command might change IP address of the
-    // interface connected to the MGMT. Tell the agent to
-    // reconnect to the MGMT after processing this command.
-    startParams.reconnect = true;
-  }
-
-  const tasks = [];
-  const userName = user.username;
-  const org = data.org;
-  const { machineId } = device[0];
-
-  tasks.push({ entity: 'agent', message: 'start-router', params: startParams });
-
-  try {
-    const job = await deviceQueues
+    const tasks = [{ entity: 'agent', message: 'start-router', params: startParams }];
+    applyPromises.push(deviceQueues
       .addJob(
         machineId,
-        userName,
+        username,
         org,
         // Data
-        { title: 'Start device ' + device[0].hostname, tasks: tasks },
+        { title: 'Start device ' + device.hostname, tasks: tasks },
         // Response data
         {
           method: 'start',
           data: {
-            device: device[0]._id,
-            org: org,
-            shouldUpdateTunnel: majorAgentVersion === 0
+            device: device._id,
+            org: org
           }
         },
         // Metadata
-        { priority: 'medium', attempts: 1, removeOnComplete: false },
+        { priority: 'normal', attempts: 1, removeOnComplete: false },
         // Complete callback
         null
-      );
-
-    logger.info('Start device job queued', { job: job });
-    return { ids: [job.id], status: 'completed', message: '' };
-  } catch (err) {
-    logger.error('Start device job failed', { params: { machineId, error: err.message } });
-    throw (new Error(err.message || 'Internal server error'));
+      )
+    );
   }
+  const promisesStatus = await Promise.allSettled(applyPromises);
+  const { fulfilled, reasons } = promisesStatus.reduce(({ fulfilled, reasons }, elem) => {
+    if (elem.status === 'fulfilled') {
+      const job = elem.value;
+      logger.info('Start device job queued', {
+        params: {
+          jobId: job.id,
+          machineId: job.type
+        }
+      });
+      fulfilled.push(job.id);
+    } else {
+      if (!reasons.includes(elem.reason.message)) {
+        reasons.push(elem.reason.message);
+      }
+    };
+    return { fulfilled, reasons };
+  }, { fulfilled: [], reasons: errors });
+  const status = fulfilled.length < opDevices.length
+    ? 'partially completed' : 'completed';
+  const message = fulfilled.length < opDevices.length
+    ? `Warning: ${fulfilled.length} of ${opDevices.length} start device jobs added.` +
+      ` Some devices have following errors: ${reasons.join('. ')}`
+    : `Start device job${opDevices.length > 1 ? 's' : ''} added successfully`;
+  return { ids: fulfilled, status, message };
 };
 
 /**
@@ -148,7 +129,6 @@ const apply = async (device, user, data) => {
  * @return {void}
  */
 const complete = (jobId, res) => {
-  logger.info('Start Machine complete', { params: { result: res, jobId: jobId } });
   if (!res || !res.device || !res.org) {
     logger.warn('Got an invalid job result', { params: { result: res, jobId: jobId } });
     return;

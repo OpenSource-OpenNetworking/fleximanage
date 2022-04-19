@@ -1,6 +1,6 @@
 // flexiWAN SD-WAN software - flexiEdge, flexiManage.
 // For more information go to https://flexiwan.com
-// Copyright (C) 2019  flexiWAN Ltd.
+// Copyright (C) 2021  flexiWAN Ltd.
 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as
@@ -25,7 +25,8 @@
 const kue = require('kue');
 const configs = require('../configs')();
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
-
+const { passFilters } = require('../utils/filterUtils');
+const CHUNK_SIZE = 1000; // Chunk of jobs handled at once
 class JobError extends Error {
   constructor (...args) {
     const [message, job] = args;
@@ -52,7 +53,6 @@ class DeviceQueues {
     this.removeJobs = this.removeJobs.bind(this);
     this.removeJobIdsByOrg = this.removeJobIdsByOrg.bind(this);
     this.getLastJob = this.getLastJob.bind(this);
-    this.getQueueJobsByState = this.getQueueJobsByState.bind(this);
     this.getOPendingJobsCount = this.getOPendingJobsCount.bind(this);
     this.registerJobRemoveCallback = this.registerJobRemoveCallback.bind(this);
     this.unregisterJobRemoveCallback = this.unregisterJobRemoveCallback.bind(this);
@@ -135,6 +135,9 @@ class DeviceQueues {
       paused: false,
       concurrency: 1
     };
+
+    // Increase event listeners limit - https://github.com/Automattic/kue/issues/1189
+    this.queue.setMaxListeners(this.queue.getMaxListeners() + queueInfo.concurrency);
 
     this.queue.process(deviceId, queueInfo.concurrency, async (job, ctx, done) => {
       queueInfo.context = ctx;
@@ -253,7 +256,7 @@ class DeviceQueues {
      * @return {void}
      */
   pauseQueue (deviceId) {
-    logger.info('Pausing queue request',
+    logger.debug('Pausing queue request',
       { params: { deviceId: deviceId, queue: this.deviceQueues[deviceId] } });
     return new Promise((resolve, reject) => {
       if (!this.deviceQueues[deviceId]) {
@@ -262,7 +265,7 @@ class DeviceQueues {
         );
       }
       if (this.deviceQueues[deviceId].paused) {
-        logger.info('Queue already paused, succeeded',
+        logger.debug('Queue already paused, succeeded',
           { params: { deviceId: deviceId, queue: this.deviceQueues[deviceId] } });
         return resolve(); // Already paused
       }
@@ -278,7 +281,7 @@ class DeviceQueues {
         }
       });
 
-      logger.info('Queue paused, succeeded',
+      logger.debug('Queue paused, succeeded',
         { params: { deviceId: deviceId }, queue: this.deviceQueues[deviceId] });
       this.deviceQueues[deviceId].paused = true;
       return resolve();
@@ -291,7 +294,7 @@ class DeviceQueues {
      * @return {void}
      */
   resumeQueue (deviceId) {
-    logger.info('Resuming device queue',
+    logger.debug('Resuming device queue',
       { params: { deviceId: deviceId }, queue: this.deviceQueues[deviceId] });
     if (!this.deviceQueues[deviceId]) {
       throw new Error('DeviceQueues: Trying to resume an undefined queue, deviceID=' + deviceId);
@@ -305,23 +308,87 @@ class DeviceQueues {
   }
 
   /**
+     * Set Immediate Promise to let other functions to operate during heavy tasks
+     * @param  None
+     * @return Promise
+     */
+  setImmediatePromise () {
+    return new Promise((resolve) => {
+      setImmediate(() => resolve());
+    });
+  }
+
+  /**
      * Iterates over jobs of specific state
-     * @param  {string}   state    queue state ('complete', 'failed',
+     * @param  {string}   state    queue state ('all', 'complete', 'failed',
      *                             'inactive', 'delayed', 'active')
      * @param  {Callback} callback callback to be called per job
+     * @param  {string}   deviceId the deviceId (UUID) to filter by
+     * @param  {integer}  from     index to start looking from (could be negative)
+     * @param  {integer}  to       index to end looking from (could be negative)
+     * @param  {string}   dir      order to return data 'asc' or 'desc'
+     * @param  {integer}  limit    limit the number of processed jobs, -1 for no limit
+     *                             the callback should return 'true' for processed job
      * @return {void}
      */
-  iterateJobs (state, callback) {
+  iterateJobs (state, callback, deviceId = null, from = 0, to = -1, dir = 'asc', limit = -1) {
     return new Promise((resolve, reject) => {
-      kue.Job.rangeByState(state, 0, -1, 'asc', async function (err, jobs) {
-        if (err) {
+      let done = 0;
+
+      // Define single batch Iteration
+      const singleBatchIteration = (batchFrom, batchTo) => {
+        return new Promise((resolve, reject) => {
+          const handleFunc = (err, jobs) => {
+            if (err) {
+              return reject(
+                new Error('DeviceQueues: Iteration error, state=' + state + ', err=' + err)
+              );
+            }
+            for (const job of jobs) {
+              if (limit > 0 && done >= limit) break;
+              if (callback(job)) done += 1;
+            };
+            resolve();
+          };
+          if (state === 'all') {
+            kue.Job.range(batchFrom, batchTo, dir, handleFunc);
+          } else if (deviceId) {
+            kue.Job.rangeByType(deviceId, state, batchFrom, batchTo, dir, handleFunc);
+          } else {
+            kue.Job.rangeByState(state, batchFrom, batchTo, dir, handleFunc);
+          }
+        });
+      };
+
+      this.getCount(state, deviceId)
+        .then(async (count) => {
+          if (from < 0) from = (count > -from) ? (count + from) : 0;
+          if (to < 0) to = (count > -to) ? (count + to) : 0;
+          let loopFrom = from;
+          let loopDelta = CHUNK_SIZE;
+          if (dir === 'desc') {
+            loopFrom = to - CHUNK_SIZE;
+            loopDelta = -CHUNK_SIZE;
+          }
+          for (
+            let chunkFrom = loopFrom;
+            (chunkFrom + CHUNK_SIZE >= from && chunkFrom <= to);
+            chunkFrom += loopDelta
+          ) {
+            if (limit > 0 && done >= limit) break;
+            await singleBatchIteration(
+              Math.max(chunkFrom, from),
+              Math.min(chunkFrom + CHUNK_SIZE, to)
+            );
+            await this.setImmediatePromise();
+          };
+          resolve();
+        })
+        .catch((err) => {
           return reject(
-            new Error('DeviceQueues: Iteration error, state=' + state + ', err=' + err)
+            new Error('DeviceQueues: Get count error, state=' + state + ', err=' + err)
           );
-        }
-        jobs.forEach((job) => callback(job));
-        return resolve();
-      });
+        });
     });
   }
 
@@ -329,35 +396,65 @@ class DeviceQueues {
      * Iterates over jobs of specific state and organization
      * The current implementation get all jobs and filter the org specific ones
      * This implementation doesn't scale for a large system
-     * TBD: For a large deployment, two improvements could be done:
-     *   a) Manage a separate redis queue holding the jobs for a org,
-     *      the job can be added when adding the job in kue, and
-     *      delete it using the periodic kue management
-     *   b) Get partial jobs and not all, when org get more,
-     *      get more messages from the queue
      * @param  {string}   org      organization to iterate jobs for
-     * @param  {string}   state    queue state ('complete', 'failed',
+     * @param  {string}   state    queue state ('all', 'complete', 'failed',
      *                             'inactive', 'delayed', 'active')
      * @param  {Callback} callback callback to be called per job
+     *                             the callback should return 'true' for processed job
+     * @param  {integer}  from     index to start looking from (could be negative)
+     * @param  {integer}  to       index to end looking from (could be negative)
+     * @param  {string}   dir      order to return data 'asc' or 'desc'
+     * @param  {integer}  skip     org jobs to skip before starting to iterate
+     * @param  {integer}  limit    limit the number of processed jobs, -1 for no limit
+     * @param  {array}    filters  an array of filters objects [{ key, op, val}]
+     *                             example [{key:'state',op:'!=',val:'failed'}, ...]
      * @return {void}
      */
-  iterateJobsByOrg (org, state, callback) {
+  iterateJobsByOrg (org, state, callback, from = 0, to = -1, dir = 'asc',
+    skip = 0, limit = -1, filters) {
     return new Promise((resolve, reject) => {
-      try {
-        kue.Job.rangeByState(state, 0, -1, 'asc', function (err, jobs) {
-          if (err) {
-            return reject(
-              new Error('DeviceQueues: Iteration error, state=' + state + ', err=' + err)
-            );
-          }
-          jobs.forEach(async (job) => {
-            if (job.data.metadata.org === org) callback(job);
-          });
-          return resolve();
-        });
-      } catch (err) {
-        return reject(err);
+      let skipped = 0;
+      let deviceId = null;
+      if (Array.isArray(filters)) {
+        // 'and' condition is applied to all filters
+        // if there are more than 1 eq filters with the same key/value
+        // then no need to iterate jobs, the result will be empty
+        const eqFilters = filters.filter(f => f.op === '==').reduce((r, f) => {
+          if (!r[f.key]) r[f.key] = {};
+          r[f.key][f.val.toString()] = true;
+          return r;
+        }, {});
+        if (Object.values(eqFilters).some(f => Object.keys(f).length > 1)) {
+          resolve();
+          return;
+        }
+        // if there is only one state or device in filters array
+        // then special iterate functions will be called
+        const stateFilters = filters.filter(f => f.op === '==' && f.key === 'state');
+        const deviceFilters = filters.filter(f => f.op === '==' && f.key === 'type');
+        if (stateFilters.length === 1) state = stateFilters[0].val;
+        if (deviceFilters.length === 1) deviceId = deviceFilters[0].val;
       }
+
+      const orgCallback = (orgJob) => {
+        // need to prepare the job the same way it is returned in the service
+        const jobObj = { ...orgJob, _id: orgJob.id, state: orgJob._state };
+        if (orgJob.data.metadata.org === org && (!filters || passFilters(jobObj, filters))) {
+          if (skipped < skip) skipped += 1;
+          else {
+            if (callback(orgJob)) return true; // job done
+          }
+        }
+        return false;
+      };
+
+      this.iterateJobs(state, orgCallback, deviceId, from, to, dir, limit)
+        .then(() => {
+          return resolve();
+        })
+        .catch((err) => {
+          return reject(err);
+        });
     });
   }
 
@@ -424,21 +521,25 @@ class DeviceQueues {
   }
 
   /**
-   * Gets all jobs of a specific status and range in
-   * the queue of the device specified by "deviceId"
-   * @param  {string} deviceId device UUID
-   * @param  {string}  state   job state (complete/failed/etc.)
-   * @param  {number}  from    start index
-   * @param  {number}  to      stop index
-   * @return {Promise}         a list of job ids with the requested state
+   * Removes all jobs matching the filters array according
+   * to an organizations id.
+   * @param  {string} org     organization id
+   * @param  {Array}  filters an array of filters matching the jobs to be removed
    */
-  getQueueJobsByState (deviceId, state, from = 0, to = -1) {
-    return new Promise((resolve, reject) => {
-      kue.Job.rangeByType(deviceId, state, from, to, 'asc', (err, ids) => {
-        if (err) return resolve([]);
-        resolve(ids);
+  async removeJobsByOrgAndFilters (org, filters) {
+    try {
+      await this.iterateJobsByOrg(org, 'all', async (job) => {
+        const removedJob = await job.remove(err => { if (err) throw err; });
+        const { method } = removedJob.data.response;
+        this.callRemoveRegisteredCallback(method, removedJob);
+        return true;
+      }, 0, -1, 'asc', 0, -1, filters);
+    } catch (err) {
+      logger.warn('Encountered an error while removing jobs', {
+        params: { org: org, filters: filters, err: err.message }
       });
-    });
+      throw err;
+    }
   }
 
   /**
@@ -448,15 +549,16 @@ class DeviceQueues {
    * @return {Promise}         a list of job ids of pending jobs
    */
   async getOPendingJobsCount (deviceId) {
-    let pendingJobs = [];
+    let count = 0;
     for (const state of [
       'inactive',
       'active'
     ]) {
-      const jobIds = await this.getQueueJobsByState(deviceId, state);
-      pendingJobs = pendingJobs.concat(jobIds);
+      await this.iterateJobs(state, (job) => {
+        count += 1;
+      }, deviceId, 0, -1, 'asc');
     }
-    return pendingJobs.length;
+    return count;
   }
 
   /**
@@ -467,13 +569,13 @@ class DeviceQueues {
    * @return {Promise}         last queued job
    */
   async getLastJob (deviceId, state) {
-    let allJobs = [];
+    const allJobs = [];
     const states = (state) ? [state] : ['complete', 'failed', 'inactive', 'delayed', 'active'];
     for (const _state of states) {
-      // We call getQueueJobsByState() with 'from' and 'to'
-      // set to -1 to get only the last job in the queue
-      const jobIds = await this.getQueueJobsByState(deviceId, _state, -1, -1);
-      allJobs = allJobs.concat(jobIds);
+      // Iterate last job per state and push to allJobs
+      await this.iterateJobs(_state, (job) => {
+        allJobs.push(job);
+      }, deviceId, -1, -1, 'asc');
     }
 
     // Find the job with the highest ID
@@ -482,16 +584,25 @@ class DeviceQueues {
 
   /**
      * Gets the number of jobs for current state
-     * @param  {string} state queue state ('complete', 'failed', 'inactive', 'delayed', 'active')
+     * @param  {string} state    queue state ('all', 'complete', 'failed',
+     *                           'inactive', 'delayed', 'active')
+     * @param  {string} deviceId device machine id (optional)
      * @return {number}       Number of jobs
      */
-  async getCount (state) {
+  async getCount (state, deviceId = null) {
     return new Promise((resolve, reject) => {
-      this.queue[state + 'Count']((err, total) => {
+      const handleFunc = (err, total) => {
         if (err) {
           return reject(new Error('DeviceQueues: getCount error, state=' + state + ', err=' + err));
         } else return resolve(total);
-      });
+      };
+      if (state === 'all') {
+        this.queue.client.zcard(this.queue.client.getKey('jobs'), handleFunc);
+      } else if (!deviceId) {
+        this.queue[state + 'Count'](handleFunc);
+      } else {
+        this.queue[state + 'Count'](deviceId, handleFunc);
+      }
     });
   }
 

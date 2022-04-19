@@ -16,7 +16,6 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 const Service = require('./Service');
-const configs = require('../configs')();
 const {
   appIdentifications,
   importedAppIdentifications,
@@ -25,12 +24,77 @@ const {
   getAppIdentificationUpdateAt
 } = require('../models/appIdentifications');
 const { devices } = require('../models/devices');
+const firewallPoliciesModel = require('../models/firewallPolicies');
+const multiLinkPoliciesModel = require('../models/mlpolicies');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
 var mongoose = require('mongoose');
 const find = require('lodash/find');
 const remove = require('lodash/remove');
+const IPCidr = require('ip-cidr');
+const { validateIPv4WithMask, validatePortRange } = require('../models/validators');
 
 class AppIdentificationsService {
+  /**
+   * Validate the App Identification request
+   * @param {Object} appIdentificationRequest - the App Identification Request object
+   * @throw error, if not valid
+   */
+  static validateAppIdentification (appIdentificationRequest) {
+    const { name, category, serviceClass, importance, rules } = appIdentificationRequest;
+    if (!name) {
+      throw new Error('\'name\' is required');
+    }
+    if (!name.startsWith('custom:')) {
+      throw new Error('\'name\' must start with \'custom:\'');
+    }
+    if (!/^[a-z0-9-_:]{2,30}$/i.test(name)) {
+      throw new Error('Invalid \'name\' format');
+    }
+    if (!category) {
+      throw new Error('\'category\' is required');
+    }
+    if (!/^[a-z0-9-_ .!#%():@[\]]{2,30}$/i.test(category)) {
+      throw new Error('Invalid \'category\' format');
+    }
+    if (!serviceClass) {
+      throw new Error('\'serviceClass\' is required');
+    }
+    if (!/^[a-z0-9-_ .!#%():@[\]]{2,30}$/i.test(serviceClass)) {
+      throw new Error('Invalid \'serviceClass\' format');
+    }
+    if (!importance) {
+      throw new Error('\'importance\' is required');
+    }
+    if (!['high', 'medium', 'low'].includes(importance)) {
+      throw new Error(
+        '\'importance\' should be equal to one of the allowed values: \'high\', \'medium\', \'low\''
+      );
+    }
+    if (!Array.isArray(rules)) {
+      throw new Error('\'rules\' must be an array');
+    }
+    rules.forEach(rule => {
+      if (!rule.ip && !rule.ports) {
+        throw new Error('\'ip\' or \'ports\' must be specified');
+      }
+      if (rule.ports) {
+        if (!validatePortRange(rule.ports)) {
+          throw new Error(`[${rule.ports}] - 'ports' should be a valid ports range`);
+        }
+      }
+      if (rule.ip) {
+        if (!validateIPv4WithMask(rule.ip)) {
+          throw new Error(`[${rule.ip}] - 'ip' should be a valid IPv4 address with mask`);
+        };
+        const [, mask] = rule.ip.split('/');
+        const ipCidr = new IPCidr(rule.ip);
+        if (ipCidr.start() + '/' + mask !== rule.ip) {
+          throw new Error(`[${rule.ip}] - invalid prefix for given mask`);
+        }
+      }
+    });
+  }
+
   static async appIdentificationsGET ({ limit, org, offset }, { user }) {
     try {
       const orgList = await getAccessTokenOrgList(user, org, true);
@@ -91,6 +155,9 @@ class AppIdentificationsService {
       // identifications collection, then locate and update the entry within the
       // appIdentifications array
       const orgList = await getAccessTokenOrgList(user, org, true);
+
+      AppIdentificationsService.validateAppIdentification(appIdentification);
+
       const appIdentsRes =
         await appIdentifications.findOne({ 'meta.org': { $in: orgList } });
 
@@ -128,7 +195,7 @@ class AppIdentificationsService {
    * @returns
    * @memberof AppIdentificationsService
    */
-  static async appIdentificationsPOST ({ org, appIdentification }, { user }, response) {
+  static async appIdentificationsPOST ({ org, appIdentification }, { user, server }, response) {
     try {
       const orgList = await getAccessTokenOrgList(user, org, true);
       let appIdentsRes =
@@ -143,7 +210,7 @@ class AppIdentificationsService {
           appIdentifications: []
         };
       }
-
+      AppIdentificationsService.validateAppIdentification(appIdentification);
       // Object id will be assigned to both _id and id fields in order to maintain schema
       // consistency across collections of imported  and custom app identifications.
       // Whenever imported collection is being updated from remote uri, it has the
@@ -162,7 +229,8 @@ class AppIdentificationsService {
       };
       await appIdentifications.findOneAndUpdate(
         { 'meta.org': { $in: orgList } }, appIdentsRes, options);
-      const location = `${configs.get('restServerUrl')}/api/appidentifications/custom/${
+
+      const location = `${server}/api/appidentifications/custom/${
           objectId.toString()}`;
       response.setHeader('Location', location);
       return Service.successResponse(newAppIdent, 201);
@@ -324,6 +392,34 @@ class AppIdentificationsService {
         return Service.rejectResponse('Requested object was not found', 404);
       }
 
+      const firewallPoliciesUsed = await firewallPoliciesModel.find({
+        $or: [
+          { 'rules.classification.source.trafficId': id },
+          { 'rules.classification.destination.trafficId': id }
+        ]
+      }, { name: 1 });
+      const multiLinkPoliciesUsed = await multiLinkPoliciesModel.find({
+        'rules.classification.application.appId': id
+      }, { name: 1 });
+      const devicesUsed = await devices.find({
+        $or: [
+          { 'firewall.rules.classification.source.trafficId': id },
+          { 'firewall.rules.classification.destination.trafficId': id }
+        ]
+      }, { name: 1 });
+
+      if (firewallPoliciesUsed.length || multiLinkPoliciesUsed.length || devicesUsed.length) {
+        let usedBy = !firewallPoliciesUsed.length ? ''
+          : `Firewall policies (${firewallPoliciesUsed.map(_ => _.name).join(',')}) `;
+        usedBy += !multiLinkPoliciesUsed.length ? ''
+          : `ML policies (${multiLinkPoliciesUsed.map(_ => _.name).join(',')}) `;
+        usedBy += !devicesUsed.length ? ''
+          : `Devices (${devicesUsed.map(_ => _.name).join(',')}) `;
+
+        return Service.rejectResponse(
+          'Failed to delete app identification. It is used by : ' + usedBy, 500
+        );
+      }
       appIdentsRes.appIdentifications =
         appIdentsRes.appIdentifications.filter(item => item.id !== id);
       const updateResult =

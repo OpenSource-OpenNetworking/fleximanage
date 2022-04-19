@@ -23,18 +23,26 @@ const deviceQueues = require('../utils/deviceQueue')(
 );
 const deviceStatus = require('../periodic/deviceStatus')();
 const { devices } = require('../models/devices');
-const policySyncHandler = require('./mlpolicy').sync;
-const policyCompleteHandler = require('./mlpolicy').completeSync;
+const mlPolicySyncHandler = require('./mlpolicy').sync;
+const mlPolicyCompleteHandler = require('./mlpolicy').completeSync;
+const firewallPolicySyncHandler = require('./firewallPolicy').sync;
+const firewallPolicyCompleteHandler = require('./firewallPolicy').completeSync;
 const deviceConfSyncHandler = require('./modifyDevice').sync;
 const deviceConfCompleteHandler = require('./modifyDevice').completeSync;
 const tunnelsSyncHandler = require('./tunnels').sync;
 const tunnelsCompleteHandler = require('./tunnels').completeSync;
+const applicationsSyncHandler = require('./application').sync;
+const applicationsCompleteHandler = require('./application').completeSync;
 const appIdentificationSyncHandler = require('./appIdentification').sync;
 const appIdentificationCompleteHandler = require('./appIdentification').completeSync;
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
 const stringify = require('json-stable-stringify');
 const SHA1 = require('crypto-js/sha1');
-const { getMajorVersion } = require('../versioning');
+const activatePendingTunnelsOfDevice = require('./events')
+  .activatePendingTunnelsOfDevice;
+const publicAddrInfoLimiter = require('./publicAddressLimiter');
+const { reconfigErrorsLimiter } = require('../limiters/reconfigErrors');
+// const { publicPortLimiter } = require('../limiters/publicPort');
 
 // Create a object of all sync handlers
 const syncHandlers = {
@@ -46,13 +54,21 @@ const syncHandlers = {
     syncHandler: tunnelsSyncHandler,
     completeHandler: tunnelsCompleteHandler
   },
-  policies: {
-    syncHandler: policySyncHandler,
-    completeHandler: policyCompleteHandler
+  mlPolicies: {
+    syncHandler: mlPolicySyncHandler,
+    completeHandler: mlPolicyCompleteHandler
+  },
+  firewallPolicies: {
+    syncHandler: firewallPolicySyncHandler,
+    completeHandler: firewallPolicyCompleteHandler
   },
   appIdentification: {
     syncHandler: appIdentificationSyncHandler,
     completeHandler: appIdentificationCompleteHandler
+  },
+  applications: {
+    syncHandler: applicationsSyncHandler,
+    completeHandler: applicationsCompleteHandler
   }
 };
 
@@ -95,19 +111,11 @@ const toMessageContents = (message) => {
  */
 const setSyncStateOnJobQueue = async (machineId, message) => {
   // Calculate the new configuration hash
-  const { sync, versions } = await devices.findOne(
+  const { sync } = await devices.findOne(
     { machineId: machineId },
     { 'sync.hash': 1, 'sync.state': 1, versions: 1 }
   )
     .lean();
-
-  const majorAgentVersion = getMajorVersion(versions.agent);
-  if (majorAgentVersion < 2) {
-    logger.debug('No update sync status on job queue for this device', {
-      params: { machineId, agentVersion: versions.agent }
-    });
-    return;
-  }
 
   const { hash } = sync || {};
   if (hash === null || hash === undefined) {
@@ -193,17 +201,11 @@ const queueFullSyncJob = async (device, hash, org) => {
   // Queue full sync job
   // Add current hash to message so the device can
   // use it to check if it is already synced
-  const { machineId, hostname, deviceId, versions } = device;
+  const { machineId, hostname, deviceId } = device;
 
   const params = {
     requests: []
   };
-
-  const majorAgentVersion = getMajorVersion(versions.agent);
-  if (majorAgentVersion < 3) {
-    // include hash for compatibility, not needed for version 3 and above
-    params['router-cfg-hash'] = hash;
-  }
 
   // Create sync message tasks
   const tasks = [{ entity: 'agent', message: 'sync-device', params }];
@@ -253,7 +255,7 @@ const queueFullSyncJob = async (device, hash, org) => {
       }
     },
     // Metadata
-    { priority: 'low', attempts: 1, removeOnComplete: false },
+    { priority: 'normal', attempts: 1, removeOnComplete: false },
     // Complete callback
     null
   );
@@ -279,10 +281,6 @@ const queueFullSyncJob = async (device, hash, org) => {
  * @return {void}
  */
 const complete = async (jobId, res) => {
-  logger.info('Sync device job complete', {
-    params: { result: res, jobId: jobId }
-  });
-
   const { handlers, machineId } = res;
 
   // Reset hash value for full-sync messages
@@ -337,13 +335,9 @@ const updateSyncStatusBasedOnJobResult = async (org, deviceId, machineId, isJobS
     )
       .lean();
 
-    const majorAgentVersion = getMajorVersion(versions.agent);
-    if (majorAgentVersion >= 2) {
-      logger.debug('No job update sync status for this device', {
-        params: { machineId, agentVersion: versions.agent }
-      });
-      return;
-    }
+    logger.debug('No job update sync status for this device', {
+      params: { machineId, agentVersion: versions.agent }
+    });
 
     // only devices version <2 will have the unknown status. This is
     // needed for backward compatibility.
@@ -375,20 +369,19 @@ const updateSyncStatusBasedOnJobResult = async (org, deviceId, machineId, isJobS
 const updateSyncStatus = async (org, deviceId, machineId, deviceHash) => {
   try {
     // Get current device sync status
-    const { sync, hostname, versions } = await devices.findOne(
+    const device = await devices.findOne(
       { org, _id: deviceId },
       { sync: 1, hostname: 1, versions: 1 }
     )
       .lean();
 
-    const majorAgentVersion = getMajorVersion(versions.agent);
-    if (majorAgentVersion < 2) {
-      logger.debug('No periodic update sync status for this device', {
-        params: { machineId, agentVersion: majorAgentVersion }
+    if (!device) {
+      logger.error('Sync state update failed, device not found', {
+        params: { deviceId }
       });
       return;
     }
-
+    const { sync, hostname, versions } = device;
     // Calculate the new sync state based on the hash
     // value received from the agent and the current state
     const { state, hash, autoSync, trials } = sync;
@@ -441,20 +434,23 @@ const updateSyncStatus = async (org, deviceId, machineId, deviceHash) => {
 const apply = async (device, user, data) => {
   const { _id, machineId, hostname, org, versions } = device[0];
 
-  if (getMajorVersion(versions.agent) < 2) {
-    return;
-  }
-
   // Reset auto sync in database
-  await devices.findOneAndUpdate(
+  const updDevice = await devices.findOneAndUpdate(
     { org, _id },
     {
       'sync.state': 'syncing',
       'sync.autoSync': 'on',
       'sync.trials': 0
     },
-    { sync: 1 }
-  );
+    { sync: 1, new: true }
+  ).lean();
+
+  // release existing limiters if the device is blocked
+  await reconfigErrorsLimiter.release(_id.toString());
+  const released = await releasePublicAddrLimiterBlockage(device[0]);
+  if (released) {
+    await activatePendingTunnelsOfDevice(updDevice);
+  }
 
   // Get device current configuration hash
   const { sync } = await devices.findOne(
@@ -480,6 +476,23 @@ const apply = async (device, user, data) => {
     status: 'completed',
     message: ''
   };
+};
+
+const releasePublicAddrLimiterBlockage = async (device) => {
+  let blockagesReleased = false;
+
+  const wanIfcs = device.interfaces.filter(i => i.type === 'WAN');
+  const deviceId = device._id.toString();
+
+  for (const ifc of wanIfcs) {
+    const ifcId = ifc._id.toString();
+    const isReleased = await publicAddrInfoLimiter.release(`${deviceId}:${ifcId}`);
+    if (isReleased) {
+      blockagesReleased = true;
+    }
+  }
+
+  return blockagesReleased;
 };
 
 // Register a method that updates sync state

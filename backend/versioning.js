@@ -14,10 +14,7 @@
 
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-const createError = require('http-errors');
 const configs = require('./configs')();
-const logger = require('./logging/logging')({ module: module.filename, type: 'req' });
 const mgmtVersion = configs.get('agentApiVersion');
 
 /**
@@ -26,6 +23,14 @@ const mgmtVersion = configs.get('agentApiVersion');
  */
 const getMajorVersion = (versionString) => {
   return parseInt(versionString.split('.')[0], 10);
+};
+
+/**
+ * Get the minor version Y from a string in semVer format X.Y.Z
+ * @param {String} versionString
+ */
+const getMinorVersion = (versionString) => {
+  return parseInt(versionString.split('.')[1], 10);
 };
 
 const mgmtMajorVersion = getMajorVersion(mgmtVersion);
@@ -43,9 +48,9 @@ const isVppVersion = (version) => {
 const isAgentVersionCompatible = (agentVersion) => {
   const majorNum = parseInt(agentVersion.split('.')[0], 10);
 
-  return isNaN(majorNum)
-    ? false
-    : (majorNum === mgmtMajorVersion || majorNum === mgmtMajorVersion - 1);
+  if (isNaN(majorNum) || majorNum > mgmtMajorVersion) return 1; // Version not valid or higher
+  if (majorNum < mgmtMajorVersion - 1) return -1; // version lower
+  return 0; // version compatible
 };
 
 const routerVersionsCompatible = (ver1, ver2) => {
@@ -66,44 +71,44 @@ const verifyAgentVersion = (version) => {
     };
   }
 
-  if (!isAgentVersionCompatible(version)) {
-    return {
-      valid: false,
-      statusCode: 400,
-      err: `Incompatible versions: management version: ${mgmtVersion} agent version: ${version}`
-    };
-  }
-  return {
-    valid: true,
-    statusCode: 200,
-    err: ''
-  };
-};
+  const higher = isAgentVersionCompatible(version);
 
-// Express middleware for /register API
-const checkDeviceVersion = (req, res, next) => {
-  const agentVer = req.body.fwagent_version;
-  const { valid, statusCode, err } = verifyAgentVersion(agentVer);
-  if (!valid) {
-    logger.warn('Device version validation failed', {
-      params: {
-        agentVersion: agentVer,
-        reason: err,
-        machineId: req.body.machine_id
-      },
-      req: req
-    });
-    return next(createError(statusCode, err));
+  switch (higher) {
+    case 0:
+      return {
+        valid: true,
+        statusCode: 200,
+        err: ''
+      };
+    case 1:
+      return {
+        valid: false,
+        statusCode: 400,
+        err: `Incompatible version: agent version: ${
+          version
+        } too high, management version: ${
+          mgmtVersion
+        }`
+      };
+    case -1:
+      return {
+        valid: false,
+        statusCode: 403,
+        err: `Incompatible version: agent version: ${
+          version
+        } too low, management version: ${
+          mgmtVersion
+        }`
+      };
   }
-  next();
 };
 
 module.exports = {
   getMajorVersion: getMajorVersion,
+  getMinorVersion: getMinorVersion,
   isAgentVersionCompatible: isAgentVersionCompatible,
   isSemVer: isSemVer,
   isVppVersion: isVppVersion,
   verifyAgentVersion: verifyAgentVersion,
-  checkDeviceVersion: checkDeviceVersion,
   routerVersionsCompatible: routerVersionsCompatible
 };

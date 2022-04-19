@@ -4,3 +4,6 @@
 [submodule "backend/billing"]
 	path = backend/billing
 	url = git@gitlab.com:flexiwangroup/flexibilling.git
+[submodule "vpnportal"]
+	path = vpnportal
+	url = git@gitlab.com:flexiwangroup/flexivpnportal.git

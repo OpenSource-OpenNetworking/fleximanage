@@ -16,16 +16,24 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 const configs = require('../configs')();
-const Joi = require('@hapi/joi');
+const Joi = require('joi');
 const Devices = require('./Devices');
 const modifyDeviceDispatcher = require('../deviceLogic/modifyDevice');
+const DeviceEvents = require('../deviceLogic/events');
 const createError = require('http-errors');
+const orgModel = require('../models/organizations');
 const { devices } = require('../models/devices');
 const Accounts = require('../models/accounts');
 const tunnelsModel = require('../models/tunnels');
 const logger = require('../logging/logging')({ module: module.filename, type: 'websocket' });
 const notificationsMgr = require('../notifications/notifications')();
-const { verifyAgentVersion, isSemVer, isVppVersion } = require('../versioning');
+const { verifyAgentVersion, isSemVer, isVppVersion, getMajorVersion } = require('../versioning');
+const { getRenewBeforeExpireTime, queueCreateIKEv2Jobs } = require('../deviceLogic/IKEv2');
+const { TypedError, ErrorTypes } = require('../utils/errors');
+const roleSelector = require('../utils/roleSelector')(configs.get('redisUrl'));
+const { reconfigErrorsLimiter } = require('../limiters/reconfigErrors');
+const getRandom = require('../utils/random-key');
+
 class Connections {
   constructor () {
     this.createConnection = this.createConnection.bind(this);
@@ -241,7 +249,9 @@ class Connections {
                 org: resp[0].org.toString(),
                 deviceObj: resp[0]._id,
                 machineId: resp[0].machineId,
-                ready: false
+                version: resp[0].versions.agent,
+                ready: false,
+                running: devInfo ? devInfo.running : null
               });
               return done(true);
             } else {
@@ -258,13 +268,24 @@ class Connections {
         }
       )
       .catch(err => {
-        logger.warn('Device connection failed', {
-          params: {
-            deviceId: connectionURL.pathname,
-            err: err.message,
-            status: err.status
-          }
-        });
+        // Log unapproved devices in debug level only
+        if (err.status !== 403) {
+          logger.warn('Device connection failed', {
+            params: {
+              deviceId: connectionURL.pathname,
+              err: err.message,
+              status: err.status
+            }
+          });
+        } else {
+          logger.debug('Device connection failed', {
+            params: {
+              deviceId: connectionURL.pathname,
+              err: err.message,
+              status: err.status
+            }
+          });
+        }
         return done(false, err.status);
       });
   }
@@ -286,10 +307,10 @@ class Connections {
     const msgQ = this.msgQueue;
 
     // Initialize to alive connection, with 3 retries
-    socket.isAlive = 3;
+    socket.isAlive = 7;
     socket.on('pong', function heartbeat () {
       // Pong received, reset retries
-      socket.isAlive = 3;
+      socket.isAlive = 7;
     });
 
     socket.on('message', function incoming (message) {
@@ -341,7 +362,7 @@ class Connections {
     // device version, network information, tunnel keys, etc.)
     // Only after getting the device's response and updating
     // the information, the device can be considered ready.
-    this.sendDeviceInfoMsg(device, info.deviceObj);
+    this.sendDeviceInfoMsg(device, info.deviceObj, true);
   }
 
   /**
@@ -359,6 +380,7 @@ class Connections {
       $and: [
         { $or: [{ deviceA: deviceId }, { deviceB: deviceId }] },
         { isActive: true },
+        { encryptionMethod: 'psk' },
         {
           $or: [
             { tunnelKeys: { $exists: false } },
@@ -377,7 +399,7 @@ class Connections {
    * @param  {Array} tunnels An array of tunnels information
    * @return {void}
    */
-  async updateTunnelKeys (tunnels) {
+  async updateTunnelKeys (org, tunnels) {
     // Update all tunnels with the keys sent by the device
     const tunnelsOps = [];
     for (const tunnel of tunnels) {
@@ -385,7 +407,7 @@ class Connections {
       tunnelsOps.push({
         updateOne:
           {
-            filter: { num: id },
+            filter: { org, num: id },
             update: { $set: { tunnelKeys: { key1, key2, key3, key4 } } },
             upsert: false
           }
@@ -406,7 +428,8 @@ class Connections {
     const machineId = origDevice.machineId;
     const prevDeviceInfo = this.devices.getDeviceInfo(machineId);
     // Check if reconfig was changed
-    if (deviceInfo.message.reconfig && prevDeviceInfo.reconfig !== deviceInfo.message.reconfig) {
+    if ((prevDeviceInfo === undefined) || (deviceInfo.message.reconfig &&
+      prevDeviceInfo.reconfig !== deviceInfo.message.reconfig)) {
       const needReconfig = origDevice.interfaces && deviceInfo.message.network.interfaces &&
         deviceInfo.message.network.interfaces.length > 0;
 
@@ -418,9 +441,11 @@ class Connections {
         if (origDevice.pendingDevModification) {
           throw new Error('Failed to apply new config, only one device change is allowed');
         }
+
+        const incomingInterfaces = deviceInfo.message.network.interfaces;
+
         const interfaces = origDevice.interfaces.map(i => {
-          const updatedConfig = deviceInfo.message.network.interfaces
-            .find(u => u.pciaddr === i.pciaddr);
+          const updatedConfig = incomingInterfaces.find(u => u.devId === i.devId);
           if (!updatedConfig) {
             logger.warn('Missing interface configuration in the get-device-info message', {
               params: {
@@ -432,28 +457,6 @@ class Connections {
             return i;
           }
 
-          if (updatedConfig.internetAccess !== undefined &&
-            i.monitorInternet && updatedConfig.internetAccess !== i.internetAccess) {
-            const newInterfaceState = updatedConfig.internetAccess ? 'online' : 'offline';
-            const details = `Interface ${i.name} state changed to "${newInterfaceState}"`;
-            logger.info(details, {
-              params: {
-                machineId,
-                updatedConfig
-              }
-            });
-            notificationsMgr.sendNotifications([
-              {
-                org: origDevice.org,
-                title: 'Interface connection change',
-                time: new Date(),
-                device: origDevice._id,
-                machineId,
-                details
-              }
-            ]);
-          };
-
           const updInterface = {
             ...i.toJSON(),
             PublicIP: updatedConfig.public_ip && i.useStun
@@ -462,14 +465,18 @@ class Connections {
               ? updatedConfig.public_port : i.PublicPort,
             NatType: updatedConfig.nat_type || i.NatType,
             internetAccess: updatedConfig.internetAccess === undefined ? ''
-              : updatedConfig.internetAccess ? 'yes' : 'no'
+              : updatedConfig.internetAccess ? 'yes' : 'no',
+            hasIpOnDevice: updatedConfig.IPv4 !== ''
           };
 
-          if (!i.isAssigned) {
+          if (!i.isAssigned || i.deviceType === 'pppoe') {
             updInterface.metric = updatedConfig.metric;
+            if (updatedConfig.mtu) {
+              updInterface.mtu = updatedConfig.mtu;
+            }
           };
 
-          if (i.dhcp === 'yes' || !i.isAssigned) {
+          if (i.dhcp === 'yes' || !i.isAssigned || i.deviceType === 'pppoe') {
             updInterface.IPv4 = updatedConfig.IPv4;
             updInterface.IPv4Mask = updatedConfig.IPv4Mask;
             updInterface.IPv6 = updatedConfig.IPv6;
@@ -480,28 +487,80 @@ class Connections {
           return updInterface;
         });
 
-        // Update interfaces in DB
-        const updDevice = await devices.findOneAndUpdate(
-          { machineId },
-          { $set: { interfaces } },
-          { new: true, runValidators: true }
-        ).populate('interfaces.pathlabels', '_id type');
+        const deviceId = origDevice._id.toString();
 
-        // Update the reconfig hash before applying to prevent infinite loop
-        this.devices.updateDeviceInfo(machineId, 'reconfig', deviceInfo.message.reconfig);
+        try {
+          // Update interfaces in DB
+          await devices.findOneAndUpdate(
+            { machineId },
+            { $set: { interfaces } },
+            { runValidators: true }
+          );
 
-        // Apply the new config and rebuild tunnels if need
-        logger.info('Applying new configuration from the device', {
-          params: {
-            reconfig: deviceInfo.message.reconfig,
-            machineId
+          // We create a new instance of events class
+          // to know changedDevice and changedTunnels
+          let events = new DeviceEvents();
+
+          const plainJsDevice = origDevice.toObject({ minimize: false });
+
+          // add current device to changed devices in order to run modify process for it
+          await events.addChangedDevice(origDevice._id, origDevice);
+
+          await events.checkIfToTriggerEvent(plainJsDevice, interfaces);
+
+          // Update the reconfig hash before applying to prevent infinite loop
+          this.devices.updateDeviceInfo(machineId, 'reconfig', deviceInfo.message.reconfig);
+          this.devices.updateDeviceInfo(machineId, 'version', deviceInfo.message.device);
+
+          // Apply the new config and rebuild tunnels if need
+          logger.info('Applying new configuration from the device', {
+            params: {
+              reconfig: deviceInfo.message.reconfig,
+              machineId
+            }
+          });
+
+          // add tunnels jobs before modify
+          await events.sendTunnelsCreateJobs();
+
+          // modify jobs
+          const modifyDevices = await events.prepareModifyDispatcherParameters();
+          for (const modified in modifyDevices) {
+            await modifyDeviceDispatcher.apply(
+              [modifyDevices[modified].orig],
+              { username: 'system' },
+              {
+                org: modifyDevices[modified].orig.org.toString(),
+                newDevice: modifyDevices[modified].updated
+              }
+            );
           }
-        });
-        await modifyDeviceDispatcher.apply(
-          [origDevice],
-          { username: 'system' },
-          { newDevice: updDevice, org: origDevice.org.toString() }
-        );
+
+          // remove tunnels jobs after modify
+          await events.sendTunnelsRemoveJobs();
+
+          // remove the variable from the memory.
+          events = null;
+        } catch (err) {
+          // if there are many errors in a row, we block the get-device-info loop
+          const { allowed, blockedNow } = await reconfigErrorsLimiter.use(deviceId);
+          if (!allowed && blockedNow) {
+            logger.error('Reconfig errors rate-limit exceeded', { params: { deviceId } });
+
+            await notificationsMgr.sendNotifications([{
+              org: origDevice.org,
+              title: 'Unsuccessful self-healing operations',
+              time: new Date(),
+              device: deviceId,
+              machineId: machineId,
+              details: 'Unsuccessful updating device data. Please contact flexiWAN support'
+            }]);
+          }
+
+          logger.error('Failed to apply new configuration from device', {
+            params: { device: machineId, err: err.message }
+          });
+        }
       }
     }
   }
@@ -515,65 +574,53 @@ class Connections {
    * @param  {string} deviceId the device mongodb id
    * @return {void}
    */
-  async sendDeviceInfoMsg (machineId, deviceId) {
+  async sendDeviceInfoMsg (machineId, deviceId, isNewConnection = false) {
     const validateDevInfoMessage = msg => {
-      const devInfoMsgObj = Joi.extend(joi => ({
-        base: joi.object().keys({
-          device: joi
-            .string()
-            .regex(/^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/)
+      const devInfoSchema = Joi.object().keys({
+        device: Joi
+          .string()
+          .pattern(/^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/)
+          .required(),
+        components: Joi.object({
+          agent: Joi.object()
+            .keys({ version: Joi.string().required() })
             .required(),
-          components: Joi.object({
-            agent: Joi.object()
-              .keys({ version: Joi.string().required() })
-              .required(),
-            router: Joi.object()
-              .keys({ version: Joi.string().required() })
-              .required(),
-            vpp: Joi.object()
-              .keys({ version: Joi.string().required() })
-              .required(),
-            frr: Joi.object()
-              .keys({ version: Joi.string().required() })
-              .required()
-          }),
-          network: joi.object().optional(),
-          tunnels: joi.array().optional(),
-          reconfig: joi.string().allow('').optional()
+          router: Joi.object()
+            .keys({ version: Joi.string().required() })
+            .required(),
+          vpp: Joi.object()
+            .keys({ version: Joi.string().required() })
+            .required(),
+          frr: Joi.object()
+            .keys({ version: Joi.string().required() })
+            .required(),
+          edgeui: Joi.object()
+            .keys({ version: Joi.string().required() })
+            .optional()
         }),
-        name: 'versions',
-        language: {
-          err: 'invalid {{component}} version ({{version}})'
-        },
-        rules: [
-          {
-            name: 'format',
-            validate (params, value, state, options) {
-              for (const [component, info] of Object.entries(
-                value.components
-              )) {
-                const ver = info.version;
-                if (!(isSemVer(ver) || isVppVersion(ver))) {
-                  return this.createError(
-                    'versions.err',
-                    { component: component, version: ver },
-                    state,
-                    options
-                  );
-                }
-              }
-              return true;
-            }
+        stats: Joi.object().optional(),
+        network: Joi.object().optional(),
+        tunnels: Joi.array().optional(),
+        reconfig: Joi.string().allow('').optional(),
+        ikev2: Joi.object({
+          certificateExpiration: Joi.string().allow('').optional(),
+          error: Joi.string().allow('').optional()
+        }).allow({}).optional()
+      }).custom((obj, helpers) => {
+        for (const [component, info] of Object.entries(
+          obj.components
+        )) {
+          const ver = info.version;
+          if (!(isSemVer(ver) || isVppVersion(ver))) {
+            return helpers.message(`invalid ${component} version ${ver}`);
           }
-        ]
-      }));
-      const devInfoSchema = devInfoMsgObj.versions().format();
-      const result = Joi.validate(msg, devInfoSchema);
+        }
+        return obj;
+      });
+
+      const result = devInfoSchema.validate(msg);
       if (result.error) {
-        return {
-          valid: false,
-          err: `${result.error.name}: ${result.error.details[0].message}`
-        };
+        return { valid: false, err: result.error.details[0].message };
       }
 
       return { valid: true, err: '' };
@@ -589,11 +636,12 @@ class Connections {
         null,
         machineId,
         message,
+        undefined,
         '',
         validateDevInfoMessage
       );
 
-      logger.info('Device info message sent', { params: { deviceId: deviceId } });
+      logger.debug('Device info message sent', { params: { deviceId: deviceId } });
       if (!deviceInfo.ok) {
         throw new Error(`device reply: ${deviceInfo.message}`);
       }
@@ -609,11 +657,57 @@ class Connections {
         { _id: deviceId },
         { $set: { versions: versions } },
         { new: true, runValidators: true }
-      ).populate('interfaces.pathlabels', '_id type');
+      ).populate('interfaces.pathlabels', '_id name type');
+
+      if (!origDevice) {
+        logger.warn('Device not found in DB', {
+          params: { device: machineId }
+        });
+        this.deviceDisconnect(machineId);
+        return;
+      }
+
+      const { expireTime, jobQueued } = origDevice.IKEv2;
+
+      const { encryptionMethod } = await orgModel.findOne({ _id: origDevice.org });
+      const { ikev2 } = deviceInfo.message;
+      let needNewIKEv2Certificate = false;
+      if (encryptionMethod === 'ikev2' && getMajorVersion(deviceInfo.message.device) >= 4) {
+        if (!ikev2) {
+          needNewIKEv2Certificate = true;
+        } else if (ikev2.error) {
+          logger.warn('IKEv2 certificate error on device', {
+            params: { deviceId, err: ikev2.error }
+          });
+          needNewIKEv2Certificate = true;
+        } else {
+          const dbExpireTime = expireTime ? expireTime.getTime() : 0;
+          const devExpireTime = (new Date(ikev2.certificateExpiration)).getTime();
+          // check if expiration is different on agent and management
+          // or certificate is about to expire
+          if (devExpireTime !== dbExpireTime || dbExpireTime < getRenewBeforeExpireTime()) {
+            needNewIKEv2Certificate = true;
+          } else {
+            this.devices.updateDeviceInfo(machineId, 'certificateExpiration', dbExpireTime);
+          }
+        }
+      }
+
+      if (needNewIKEv2Certificate && !jobQueued) {
+        queueCreateIKEv2Jobs(
+          [origDevice],
+          'system',
+          origDevice.org
+        ).then(jobResults => {
+          logger.info('Create a new IKEv2 certificate device job queued', {
+            params: { job: jobResults[0] }
+          });
+        });
+      }
 
       const { tunnels } = deviceInfo.message;
-      if (tunnels) {
-        await this.updateTunnelKeys(tunnels);
+      if (Array.isArray(tunnels) && tunnels.length > 0) {
+        await this.updateTunnelKeys(origDevice.org, tunnels);
       }
 
       // Check if config was modified on the device
@@ -623,8 +717,13 @@ class Connections {
         params: { deviceId: deviceId, message: deviceInfo }
       });
 
-      this.devices.updateDeviceInfo(machineId, 'ready', true);
-      this.callRegisteredCallbacks(this.connectCallbacks, machineId);
+      if (isNewConnection) {
+        // This part should only be done on a new connection
+        this.devices.updateDeviceInfo(machineId, 'ready', true);
+        this.callRegisteredCallbacks(this.connectCallbacks, machineId);
+        // Set websocket traffic handler role for this instance
+        roleSelector.selectorSetActive('websocketHandler');
+      }
     } catch (err) {
       logger.error('Failed to receive info from device', {
         params: { device: machineId, err: err.message }
@@ -687,6 +786,33 @@ class Connections {
   }
 
   /**
+   * Gets all organizations ids with updated connection status
+   * @return {Array} array of org ids
+   */
+  getConnectionStatusOrgs () {
+    return this.devices.getConnectionStatusOrgs();
+  }
+
+  /**
+   * Gets all devices with updated connection status
+   * @param  {string} org the org id
+   * @return {Object} an object of devices ids of the org grouped by status
+   * or undefined if no updated statuses
+   */
+  getConnectionStatusByOrg (org) {
+    return this.devices.getConnectionStatusByOrg(org);
+  }
+
+  /**
+   * Deletes devices connection status for the org.
+   * @param  {string} org the org id
+   * @return {void}
+   */
+  clearConnectionStatusByOrg (org) {
+    return this.devices.clearConnectionStatusByOrg(org);
+  }
+
+  /**
    * Returns the device info by device ID
    * @param  {string} deviceID device machine id
    * @return {Object}          contains socket, org, deviceObj
@@ -696,45 +822,59 @@ class Connections {
   }
 
   /**
+   * Set device state by device ID
+   * @param  {string} deviceID device machine id
+   * @return void
+   */
+  setDeviceState (deviceID, state) {
+    this.devices.updateDeviceInfo(deviceID, 'running', state);
+  }
+
+  /**
    * If org has value, it verifies that the device belongs to that org.
    * This is in order to make sure a user doesn't send messages to a
    * device that doesn't belong to him If org = null, it ignores the
    * org verification.
    * @param  {string}   org               organization that owns the device
    * @param  {string}   device            device machine id
-   * @param  {Object}   msg               message to be sent to the device
-   * @param  {String}   jobid             sends the job ID to the agent, if job is created
-   * @param  {Callback} responseValidator a validator for validating the device response
+   * @param  {object}   msg               message to be sent to the device
+   * @param  {number}   timeout           The number of seconds to wait for an answer
+   * @param  {string}   jobid             sends the job ID to the agent, if job is created
+   * @param  {function} responseValidator a validator for validating the device response
    * @return {Promise}                    A promise the message has been sent
    */
   deviceSendMessage (
     org,
     device,
     msg,
+    timeout = configs.get('jobTimeout', 'number'),
     jobid = '',
     responseValidator = () => {
       return { valid: true, err: '' };
     }
   ) {
-    var info = this.devices.getDeviceInfo(device);
-    var seq = this.msgSeq++;
-    var msgQ = this.msgQueue;
-    var p = new Promise(function (resolve, reject) {
+    const info = this.devices.getDeviceInfo(device);
+    const seq = this.msgSeq++;
+
+    const key = `${seq}:${getRandom(8)}`;
+
+    const msgQ = this.msgQueue;
+    const p = new Promise(function (resolve, reject) {
       if (info.socket && (org == null || info.org === org)) {
         // Increment seq and update queue with resolve function for this promise,
         // set timeout to clear when no response received
-        var tohandle = setTimeout(() => {
-          reject(new Error('Error: Send Timeout'));
+        const tohandle = setTimeout(() => {
+          reject(new TypedError(ErrorTypes.TIMEOUT, 'Error: Send Timeout'));
           // delete queue for this seq
-          delete msgQ[seq];
-        }, configs.get('jobTimeout', 'number'));
-        msgQ[seq] = {
+          delete msgQ[key];
+        }, timeout);
+        msgQ[key] = {
           resolver: resolve,
           rejecter: reject,
           tohandle: tohandle,
           validator: responseValidator
         };
-        info.socket.send(JSON.stringify({ seq: seq, msg: msg, jobid: jobid }));
+        info.socket.send(JSON.stringify({ seq: key, msg: msg, jobid: jobid }));
       } else reject(new Error('Send General Error'));
     });
     return p;
