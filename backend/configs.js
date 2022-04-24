@@ -286,6 +286,7 @@ const configEnv = {
     logLevel: 'info',
     logUserName: true,
     corsWhiteList: ['https://manage.flexiwan.com:443', 'http://manage.flexiwan.com:80'],
+    flexiVpnServer: 'https://vpn.flexiwan.com:443',
     vpnBaseUrl: 'https://vpn.flexiwan.com'
   },
   // Override for appqa01 environment
