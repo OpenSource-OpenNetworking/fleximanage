@@ -128,14 +128,14 @@ class StatusesInDb {
           const status = devicesStatuses[deviceId];
           if (!devicesByState[status]) devicesByState[status] = [];
           devicesByState[status].push(mongoose.Types.ObjectId(deviceId));
-          for (const state in devicesByState) {
-            updateDiffs.push({
-              updateMany: {
-                filter: { _id: { $in: devicesByState[state] } },
-                update: { $set: { status: state === 'pending' ? '' : state } }
-              }
-            });
-          }
+        }
+        for (const state in devicesByState) {
+          updateDiffs.push({
+            updateMany: {
+              filter: { _id: { $in: devicesByState[state] } },
+              update: { $set: { status: state === 'pending' ? '' : state } }
+            }
+          });
         }
       }
     }
@@ -171,7 +171,7 @@ class StatusesInDb {
       updateFull.push({
         updateMany: {
           filter: { $and: [{ _id: { $in: connectedDevices } }, { isConnected: false }] },
-          update: { $set: { isConnected: true, status: '' } }
+          update: { $set: { isConnected: true } }
         }
       });
       updateFull.push({

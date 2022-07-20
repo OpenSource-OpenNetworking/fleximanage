@@ -43,7 +43,7 @@ class Devices {
      */
   setDeviceInfo (deviceID, info) {
     this.devices[deviceID] = info;
-    this.setConnectionStatusByOrg(deviceID, false);
+    this.setConnectionStatusByOrg(deviceID, info && info.ready === true);
   }
 
   /**
