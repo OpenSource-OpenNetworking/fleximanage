@@ -165,7 +165,7 @@ class StatusesInDb {
     });
     if (connectedDevices.length !== connectedInDbCount) {
       logger.info('Different counts of connected devices in memory and DB, syncing statuses', {
-        params: { dbCount: connectedInDbCount, memCount: connectedDevices.count }
+        params: { dbCount: connectedInDbCount, memCount: connectedDevices.length }
       });
       const updateFull = [];
       updateFull.push({
