@@ -179,7 +179,7 @@ class DeviceStatus {
      */
   periodicPollOneDevice (deviceID) {
     connections.deviceSendMessage(null, deviceID,
-      { entity: 'agent', message: 'get-device-stats' }, undefined, '', this.validateDevStatsMessage)
+      { entity: 'agent', message: 'get-device-stats' }, 1000, '', this.validateDevStatsMessage)
       .then(async (msg) => {
         if (msg != null) {
           if (msg.ok === 1) {
