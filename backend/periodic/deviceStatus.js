@@ -440,8 +440,8 @@ class DeviceStatus {
         machineId: machineId,
         details: `Router state changed to "${newState === 'running' ? 'Running' : 'Not running'}"`
       });
-      this.setDevicesStatusByOrg(org, deviceObj, newState);
     }
+    this.setDevicesStatusByOrg(org, deviceObj, newState);
     this.setDeviceStatsField(machineId, 'state', newState);
   }
 
