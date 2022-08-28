@@ -1823,6 +1823,10 @@ class DevicesService {
         // don't  allow to change "versions" and "cpuInfo"
         deviceToValidate.versions = origDevice.versions;
         deviceToValidate.cpuInfo = getCpuInfo(origDevice.cpuInfo);
+        // allow change power saving for agent versions >= 6
+        if (getMajorVersion(origDevice.versions.agent) >= 6) {
+          deviceToValidate.cpuInfo.powerSaving = deviceRequest.cpuInfo.powerSaving;
+        }
         deviceRequest.cpuInfo = deviceToValidate.cpuInfo;
 
         const { valid, err } = validateDevice(deviceToValidate, isRunning, orgSubnets, orgBgp);
