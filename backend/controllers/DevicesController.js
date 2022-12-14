@@ -171,6 +171,10 @@ class DevicesController {
     await Controller.handleRequest(request, response, this.service.devicesIdSendPOST);
   };
 
+  async devicesIdProxyGet (request, response) {
+    await Controller.handleRequest(request, response, this.service.devicesIdProxyGet);
+  }
+
   async devicesIdRoutingOSPFGET (request, response) {
     await Controller.handleRequest(request, response, this.service.devicesIdRoutingOSPFGET);
   };

@@ -34,6 +34,7 @@ const createError = require('http-errors');
 const passport = require('passport');
 const auth = require('./authenticate');
 const { connectRouter } = require('./routes/connect');
+const proxyRouter = require('./routes/proxy');
 const morgan = require('morgan');
 const logger = require('./logging/logging')({ module: module.filename, type: 'req' });
 const { reqLogger, errLogger } = require('./logging/request-logging');
@@ -201,6 +202,7 @@ class ExpressServer {
     // no authentication
     this.app.use('/api/connect', connectRouter);
     this.app.use('/api/users', require('./routes/users'));
+    this.app.use('/api/proxy', proxyRouter);
 
     // add API documentation
     this.app.use('/api-docs', swaggerUI.serve, swaggerUI.setup(this.schema));

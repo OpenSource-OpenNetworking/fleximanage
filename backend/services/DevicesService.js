@@ -3193,6 +3193,62 @@ class DevicesService {
   }
 
   /**
+   * Send proxy url to device
+   *
+   * id   String Numeric ID of the Device
+   * org  String Organization to be filtered by
+   * q    URL for proxy request
+   * returns Command Output Result
+   **/
+  static async devicesIdProxyGet ({ id, org, q }, { user }, response) {
+    // TBD: Change later to get authorized key from the device
+    try {
+      if (!q) {
+        throw new Error('Query URL must be included');
+      }
+      const orgList = await getAccessTokenOrgList(user, org, false);
+      const deviceObject = await devices.findOne({
+        _id: mongoose.Types.ObjectId(id),
+        org: { $in: orgList }
+      });
+      if (!deviceObject) {
+        return Service.rejectResponse('Device not found', 404);
+      }
+      if (!deviceObject.isApproved) {
+        throw new Error('Device must be first approved');
+      }
+      if (!connections.isConnected(deviceObject.machineId)) {
+        return Service.successResponse({
+          error: null,
+          deviceStatus: 'disconnected'
+        });
+      }
+
+      const request = {
+        entity: 'agent',
+        message: 'proxy',
+        params: {
+          url: q,
+          type: 'GET',
+          headers: [],
+          body: null
+        }
+      };
+
+      const result = await connections.deviceSendMessage(
+        null,
+        deviceObject.machineId,
+        request,
+        100000 // 100 sec
+      );
+
+      return Service.successResponse(result.message, 200);
+    } catch (e) {
+      return DevicesService.handleRequestError(e, { deviceStatus: 'connected' });
+    }
+  }
+
+  /**
    * Get OSPF configuration
    *
    * id String Numeric ID of the Device
