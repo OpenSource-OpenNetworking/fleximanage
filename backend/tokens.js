@@ -34,6 +34,9 @@ exports.getToken = async function ({ user }, override = {}, shouldExpire = true)
     });
   }
 
+  // if not specifics in "override", use it from previous jwt if exists
+  const mfaVerified = user.isLoggedInWithMfa ?? false;
+
   return jwt.sign(
     {
       _id: user._id,
@@ -45,6 +48,7 @@ exports.getToken = async function ({ user }, override = {}, shouldExpire = true)
         ? user.defaultAccount.name
         : null,
       perms: perms,
+      mfaVerified,
       ...override
     },
     configs.get('userTokenSecretKey'),
@@ -77,4 +81,16 @@ exports.getRefreshToken = async ({ user }, override = {}) => {
 
 exports.verifyToken = (token) => {
   return jwt.verify(token, configs.get('userTokenSecretKey'));
+};
+
+exports.getLoginProcessToken = async (user) => {
+  return jwt.sign(
+    {
+      type: 'login',
+      userId: user._id,
+      mfaEnabled: user?.mfa?.enabled ?? false
+    },
+    configs.get('userTokenSecretKey'),
+    { expiresIn: 180 } // 3 minutes to complete login process
+  );
 };

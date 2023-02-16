@@ -73,7 +73,7 @@ const configEnv = {
     // Biling config site - this is used as the billing site name in ChargeBee
     billingConfigSite: 'flexiwan-test',
     // ChargeBee default plan for a new customer
-    billingDefaultPlan: 'enterprise',
+    billingDefaultPlan: 'enterprise-standard',
     // Wheter to enable billing
     useFlexiBilling: false,
     // API key for ChargeBee Billing config site. Not used when useFlexiBilling is false
@@ -117,7 +117,7 @@ const configEnv = {
     // Client static root directory
     clientStaticDir: 'public',
     // Mgmt-Agent protocol version
-    agentApiVersion: '5.0.0',
+    agentApiVersion: '6.0.0',
     // Mgmt log files
     logFilePath: './logs/app.log',
     reqLogFilePath: './logs/req.log',
@@ -181,11 +181,23 @@ const configEnv = {
     // Tunnel MTU in bytes. Now provisioned globally per server. Specify number to set specific MTU.
     // Use 0 to set the MTU based on the WAN interface MTU - tunnel header size
     globalTunnelMtu: 1500,
+    // Default tunnel ospf cost, this value will be used if no value specified in the advanced tunnel config
+    defaultTunnelOspfCost: 100,
+    // TCP clamping header size, this value will be reduced from the MTU when calculating the mss clamping size
+    tcpClampingHeaderSize: 40,
     // flexiVpn server portal url
-    flexiVpnServer: 'https://localvpn.flexiwan.com:4443',
+    flexiVpnServer: ['https://localvpn.flexiwan.com:4443'], // can be string or list
     // After successful vpn client authentication, the OpenVPN server will generate tmp token valid for the below number of seconds.
     // On the following renegotiations, the OpenVPN client will pass this token instead of the users password
     vpnTmpTokenTime: 43200,
+    // Ticketing system username
+    ticketingSystemUsername: '',
+    // Ticketing system token
+    ticketingSystemToken: '',
+    // Ticketing system url
+    ticketingSystemUrl: '',
+    // Ticketing system account ID to view
+    ticketingSystemAccountId: '',
     /****************************************************/
     /*         Client Fields                            */
     /****************************************************/
@@ -202,13 +214,15 @@ const configEnv = {
     // UI URL for feedback
     feedbackUrl: '',
     // If to show device limit alert banner
-    showDeviceLimitAlert: true,
+    showDeviceLimitAlert: false,
     // Whether to remove branding, e.g. powered by...
     removeBranding: false,
     // URL for account qualification
     qualifiedAccountsURL: 'https://www.flexiwan.com',
     // VPN portal URL
-    vpnBaseUrl: 'https://localvpn.flexiwan.com:8000'
+    vpnBaseUrl: ['https://localvpn.flexiwan.com:8000'],
+    // Post registration redirect URL
+    registerRedirectUrl: ''
   },
   // Override for development environment, default environment if not specified
   development: {
@@ -221,7 +235,7 @@ const configEnv = {
   },
   testing: {
     // Mgmt-Agent protocol version for testing purposes
-    agentApiVersion: '5.0.0',
+    agentApiVersion: '6.0.0',
     // Kue prefix
     kuePrefix: 'testq',
     logLevel: 'debug'
@@ -244,7 +258,7 @@ const configEnv = {
     logLevel: 'info',
     logUserName: true,
     corsWhiteList: ['https://app.flexiwan.com:443', 'http://app.flexiwan.com:80'],
-    vpnBaseUrl: 'https://vpn.flexiwan.com'
+    vpnBaseUrl: ['https://vpn.flexiwan.com']
   },
   hosted: {
     // modify next params for hosted server
@@ -286,7 +300,7 @@ const configEnv = {
     logLevel: 'info',
     logUserName: true,
     corsWhiteList: ['https://manage.flexiwan.com:443', 'http://manage.flexiwan.com:80'],
-    vpnBaseUrl: 'https://vpn.flexiwan.com'
+    vpnBaseUrl: ['https://vpn.flexiwan.com']
   },
   // Override for appqa01 environment
   appqa01: {
@@ -310,8 +324,8 @@ const configEnv = {
     logLevel: 'debug',
     logUserName: true,
     corsWhiteList: ['https://appqa01.flexiwan.com:443', 'http://appqa01.flexiwan.com:80'],
-    flexiVpnServer: 'https://vpnqa01.flexiwan.com:443',
-    vpnBaseUrl: 'https://vpnqa01.flexiwan.com'
+    flexiVpnServer: 'https://vpnqa01.flexiwan.com:443', // can be string or list
+    vpnBaseUrl: ['https://vpnqa01.flexiwan.com']
   },
   // Override for appqa02 environment
   appqa02: {
@@ -335,8 +349,8 @@ const configEnv = {
     logLevel: 'debug',
     logUserName: true,
     corsWhiteList: ['https://appqa02.flexiwan.com:443', 'http://appqa02.flexiwan.com:80'],
-    flexiVpnServer: 'https://vpnqa02.flexiwan.com:443',
-    vpnBaseUrl: 'https://vpnqa02.flexiwan.com'
+    flexiVpnServer: 'https://vpnqa02.flexiwan.com:443', // can be string or list
+    vpnBaseUrl: ['https://vpnqa02.flexiwan.com']
   }
 };
 
@@ -350,7 +364,11 @@ class Configs {
     Object.keys(combinedConfig).forEach(k => {
       // get upper case snake case variable
       const uSnakeCase = k.split(/(?=[A-Z])/).join('_').toUpperCase();
-      combinedConfig[k] = process.env[uSnakeCase] || combinedConfig[k];
+
+      // allow env variable to be empty string and override the combinedConfig
+      if (process.env[uSnakeCase] !== undefined && process.env[uSnakeCase] !== null) {
+        combinedConfig[k] = process.env[uSnakeCase];
+      }
     });
 
     // Override with predefined special environment variables
@@ -384,6 +402,9 @@ class Configs {
     }
 
     this.config_values = combinedConfig;
+
+    this.config_values.nodeVersion = process.version;
+
     console.log('Configuration used:\n' + JSON.stringify(this.config_values, null, 2));
   }
 
@@ -427,9 +448,25 @@ class Configs {
   // Add fields that needs to be known by the client
   // Pay attention not to expose confidential fields
   // When adding a new variable add also in client/public/index.html
-  getClientConfig () {
+  getClientConfig (req) {
+    const servers = this.get('restServerUrl', 'list');
+    const vpnServers = this.get('vpnBaseUrl', 'list');
+
+    let baseUrl = servers[0];
+    let vpnBaseUrl = vpnServers[0];
+
+    if (req.hostname) {
+      const usedServer = servers.findIndex(s => s.includes(req.hostname));
+      if (usedServer > -1) {
+        baseUrl = servers[usedServer];
+        if (vpnServers[usedServer]) {
+          vpnBaseUrl = vpnServers[usedServer];
+        }
+      }
+    }
+
     return {
-      baseUrl: this.get('restServerUrl', 'list')[0] + '/api/',
+      baseUrl: baseUrl + '/api/',
       companyName: this.get('companyName'),
       allowUsersRegistration: this.get('allowUsersRegistration', 'boolean'),
       contactUsUrl: this.get('contactUsUrl'),
@@ -440,7 +477,8 @@ class Configs {
       showDeviceLimitAlert: this.get('showDeviceLimitAlert', 'boolean'),
       removeBranding: this.get('removeBranding', 'boolean'),
       qualifiedAccountsURL: this.get('qualifiedAccountsURL'),
-      vpnBaseUrl: this.get('vpnBaseUrl') + '/'
+      vpnBaseUrl: vpnBaseUrl + '/',
+      registerRedirectUrl: this.get('registerRedirectUrl')
     };
   }
 }

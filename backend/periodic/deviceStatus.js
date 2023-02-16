@@ -239,7 +239,7 @@ class DeviceStatus {
               const isBlocked = await reconfigErrorsLimiter.isBlocked(deviceId);
               if (!isBlocked) {
                 // Call get-device-info and reconfig
-                connections.sendDeviceInfoMsg(deviceID, deviceInfo.deviceObj);
+                connections.sendDeviceInfoMsg(deviceID, deviceInfo.deviceObj, deviceInfo.org);
               } else {
                 logger.warn('Failed to send get-device-info due to reconfig errors limiter', {
                   params: { deviceID, reconfig, needNewIKEv2Certificate },
@@ -464,6 +464,10 @@ class DeviceStatus {
     }
     const time = new Date().getTime();
     Object.assign(this.status[machineId].lteStatus[devId], { ...lteStatus, time });
+  }
+
+  getDeviceLteStatus (machineId, devId) {
+    return this.status?.[machineId]?.lteStatus?.[devId] ?? {};
   }
 
   /**

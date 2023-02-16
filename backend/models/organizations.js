@@ -18,6 +18,7 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const mongoConns = require('../mongoConns.js')();
+const validators = require('./validators');
 
 /**
  * Organizations Database Schema
@@ -29,6 +30,16 @@ const OrgSchema = new Schema({
     required: true,
     match: [/^[a-z0-9- ]{1,50}$/i, 'Name should contain English characters, digits or spaces'],
     maxlength: [50, 'Name length must be at most 50']
+  },
+  // organization description
+  description: {
+    type: String,
+    maxlength: [50, 'Name length must be at most 50'],
+    validate: {
+      validator: validators.validateDescription,
+      message: 'Organization description format is invalid'
+    },
+    default: ''
   },
   // group name
   group: {

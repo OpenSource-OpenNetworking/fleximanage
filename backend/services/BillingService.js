@@ -27,7 +27,7 @@ class BillingService {
    * limit Integer The numbers of items to return (optional)
    * returns List
    **/
-  static async invoicesGET ({ offset, limit }, { user }) {
+  static async invoicesGET ({ offsetPos, limit }, { user }) {
     try {
       const customerId = user.defaultAccount.billingCustomerId;
 
@@ -36,9 +36,13 @@ class BillingService {
         return Service.rejectResponse('Account does not have link to billing system', 500);
       }
 
-      const invoices = await flexibilling.retrieveInvoices({ customer_id: customerId });
+      const invoices = await flexibilling.retrieveInvoices({
+        customer_id: customerId,
+        offset: offsetPos,
+        limit: limit
+      });
 
-      const _invoices = invoices.map(value => {
+      const _invoices = invoices.list.map(value => {
         return {
           id: value.invoice.id,
           type: 'card',
@@ -67,6 +71,7 @@ class BillingService {
 
       return Service.successResponse({
         invoices: _invoices,
+        ...invoices.next_offset && { nextOffset: invoices.next_offset },
         summary: filteredSummary,
         subscription: status
       });
@@ -83,10 +88,10 @@ class BillingService {
    *
    * no response value expected for this operation
    **/
-  static async couponsPOST ({ couponsRequest }, { user }) {
+  static async couponsPOST ({ couponRequest }, { user }) {
     try {
       const customerId = user.defaultAccount.billingCustomerId;
-      const code = couponsRequest.name;
+      const code = couponRequest.name;
 
       const result = await flexibilling.applyCoupon({ customer_id: customerId, code });
 

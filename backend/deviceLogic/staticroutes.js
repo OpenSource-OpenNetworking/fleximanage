@@ -55,7 +55,7 @@ const apply = async (device, user, data) => {
     };
 
     if (data.ifname) {
-      params.devId = data.ifname;
+      params.dev_id = data.ifname;
     }
 
     if (data.metric) {

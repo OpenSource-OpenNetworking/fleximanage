@@ -22,6 +22,7 @@ const logger = require('../logging/logging')({
   module: module.filename,
   type: 'req'
 });
+const { validateFirewallRules } = require('../deviceLogic/validators');
 
 const IApplication = require('./applicationsInterface');
 
@@ -176,6 +177,13 @@ class ApplicationLogic extends IApplication {
       return val;
     };
 
+    const orgAppIds = new Set();
+    const orgApps = await applicationsModel.find({ org: device.org }, '_id').lean();
+    orgApps.forEach(a => {
+      const id = a._id.toString();
+      orgAppIds.add(id);
+    });
+
     const query = {};
 
     const version = app.appStoreApp.versions.find(v => {
@@ -187,10 +195,18 @@ class ApplicationLogic extends IApplication {
     if ('firewallRules' in version.installWith) {
       const requestedRules = version.installWith.firewallRules;
 
-      // take out the related firewall rules
-      const updatedFirewallRules = device.firewall.rules.filter(r => {
-        if (!r.reference) return true; // keep non-referenced rules
-        return r.reference.toString() !== app._id.toString();
+      const existingRules = {}; // map of existing application rules based on on referenceNumber
+      const updatedFirewallRules = []; // array of all rules except of application related rules
+
+      device.firewall.rules.forEach(r => {
+        if (r.system && r.reference && r.reference.toString() === app._id.toString()) {
+          existingRules[r.referenceNumber] = r;
+        } else if (r.system && r.reference && !orgAppIds.has(r.reference.toString())) {
+          // if there is a firewall rule with reference that don't exists for any reason
+          // filter it out.
+        } else {
+          updatedFirewallRules.push(r.toObject()); // reference to application
+        }
       });
 
       // in add operation - add the needed firewall rules
@@ -205,12 +221,14 @@ class ApplicationLogic extends IApplication {
         }
 
         for (const rule of requestedRules) {
-          updatedFirewallRules.push({
+          const newRule = {
             system: true,
             reference: app._id,
             referenceModel: 'applications',
+            referenceNumber: rule.appRuleNum,
             description: _getVal(rule.description),
             priority: initialPriority,
+            enabled: true,
             direction: _getVal(rule.direction),
             interfaces: _getVal(rule.interfaces),
             inbound: _getVal(rule.inbound),
@@ -222,8 +240,14 @@ class ApplicationLogic extends IApplication {
                 }
               }
             }
-          });
+          };
 
+          // rule exists
+          if (existingRules[rule.appRuleNum]) {
+            newRule.enabled = existingRules[rule.appRuleNum].enabled;
+          }
+
+          updatedFirewallRules.push(newRule);
           initialPriority--;
         }
       }
@@ -234,18 +258,41 @@ class ApplicationLogic extends IApplication {
     return query;
   };
 
+  async validateInstalledDevicesWithNewConfig (configurationRequest, app, installedDevices) {
+    // simulate the new config on the app
+    const newApp = {
+      ...app,
+      configuration: { ...configurationRequest }
+    };
+
+    for (const device of installedDevices) {
+      const { valid, err } = await this.validateApplicationFirewallRules(newApp, device, 'config');
+      if (!valid) {
+        return { valid, err };
+      }
+    }
+
+    return { valid: true, err: '' };
+  }
   /// ////////////////////////////////////////////////////////////////////// ///
   /// From here, we overriding the IApplication method and we adding         ///
   /// an "identifier" params to each function.                               ///
   /// You can find the application descriptions in the IApplication class    ///
   /// ////////////////////////////////////////////////////////////////////// ///
 
-  async validateConfiguration (identifier, configurationRequest, app, account) {
+  async validateConfiguration (identifier, configurationRequest, app, account, installedDevices) {
     const defaultRet = { valid: true, err: '' };
-    return this.call(
+    const { valid, err } = await this.call(
       identifier, 'validateConfiguration',
       defaultRet, configurationRequest, app, account);
-  };
+
+    if (!valid) {
+      return { valid, err };
+    }
+
+    return await this.validateInstalledDevicesWithNewConfig(
+      configurationRequest, app, installedDevices);
+  }
 
   async selectConfigurationParams (identifier, configuration) {
     return this.call(identifier, 'selectConfigurationParams', configuration, configuration);
@@ -312,9 +359,44 @@ class ApplicationLogic extends IApplication {
     return this.call(identifier, 'validateUninstallRequest', defaultRet, app, deviceList);
   };
 
-  async validateInstallRequest (identifier, application) {
+  async validateApplicationFirewallRules (application, device, op) {
+    // get device firewall rules + global firewall rules
+    const query = await this.getAppInstallWithAsQuery(application, device, op);
+    const deviceSpecific = query && query['firewall.rules'] ? query['firewall.rules'] : [];
+
+    const globalRules = device.policies?.firewall?.policy &&
+      device.policies?.firewall?.status.startsWith('install')
+      ? device.policies.firewall.policy.rules.toObject()
+      : [];
+
+    // validate new rules
+    const { valid, err } = validateFirewallRules([...deviceSpecific, ...globalRules]);
+    if (!valid) {
+      let prefix = '';
+      if (op === 'install') {
+        prefix = 'Failed to install application firewall rule: ';
+      } else if (op === 'config') {
+        prefix = 'Failed to configure application firewall rule: ';
+      }
+
+      return { valid, err: prefix + err };
+    }
+
+    return { valid: true, err: '' };
+  }
+
+  async validateInstallRequest (identifier, application, device) {
+    // check that device firewall rules + installed global rules
+    // will not be overlapped with the application rules
+    const { valid, err } = await this.validateApplicationFirewallRules(
+      application, device, 'install');
+
+    if (!valid) {
+      return { valid, err };
+    }
+
     const defaultRet = { valid: true, err: '' };
-    return this.call(identifier, 'validateInstallRequest', defaultRet, application);
+    return this.call(identifier, 'validateInstallRequest', defaultRet, application, device);
   }
 
   /**

@@ -31,7 +31,7 @@ const logger = require('../logging/logging')({ module: module.filename, type: 'r
 const url = require('url');
 // billing support
 const flexibilling = require('../flexibilling');
-const { mapLteNames } = require('../utils/deviceUtils');
+const { mapLteNames, getCpuInfo } = require('../utils/deviceUtils');
 const geoip = require('geoip-lite');
 
 const connectRouter = express.Router();
@@ -72,7 +72,7 @@ const checkDeviceVersion = async (req, res, next) => {
     });
     const swUpdater = DevSwUpdater.getSwVerUpdaterInstance();
     const { versions } = await swUpdater.getLatestSwVersions();
-    console.log('versions=' + versions);
+    // console.log('versions=' + versions);
     res.setHeader('latestVersion', versions.device); // set last device version
     return next(createError(statusCode, err));
   }
@@ -154,13 +154,15 @@ connectRouter.route('/register')
               const lowestMetric = defaultIntf && defaultIntf.metric
                 ? defaultIntf.metric : '0';
 
-              let autoAssignedMetric = 100;
-              ifs.forEach((intf) => {
+              let highestMetric = 0;
+              const setAutoMetricIndexes = new Set();
+              ifs.forEach((intf, idx) => {
                 intf.isAssigned = false;
                 intf.useStun = true;
                 intf.useFixedPublicPort = false;
+                intf.linkStatus = intf.link;
                 intf.internetAccess = intf.internetAccess === undefined ? ''
-                  : intf.internetAccess ? 'yes' : 'no';
+                  : intf.linkStatus !== 'down' && intf.internetAccess ? 'yes' : 'no';
                 intf.mtu = !isNaN(intf.mtu) ? +intf.mtu : 1500;
                 if (!defaultIntf && intf.name === req.body.default_dev) {
                   // old version agent
@@ -176,11 +178,10 @@ connectRouter.route('/register')
                   intf.dhcp = intf.dhcp || 'no';
                   if (intf.deviceType === 'lte') {
                     intf.deviceParams = mapLteNames(intf.deviceParams);
-                    // LTE devices are not enabled at registration stage so they can't have a metric
-                    intf.metric = '';
+                    intf.metric = null;
                   } else {
                     intf.metric = (!intf.metric && intf.gateway === req.body.default_route)
-                      ? '0' : intf.metric || (autoAssignedMetric++).toString();
+                      ? '0' : intf.metric || null;
                   }
                   intf.PublicIP = intf.public_ip || (intf.metric === lowestMetric ? sourceIP : '');
                   intf.PublicPort = intf.public_port || '';
@@ -188,13 +189,30 @@ connectRouter.route('/register')
                   if (intf.deviceType === 'pppoe') {
                     intf.dhcp = 'yes';
                   }
+
+                  // to calculate auto metrics, store the highest configured metric
+                  // and the interfaces that we need to add an auto metric.
+                  if (intf.metric) {
+                    highestMetric = Math.max(highestMetric, parseInt(intf.metric));
+                  } else {
+                    setAutoMetricIndexes.add(idx);
+                  }
                 } else {
                   intf.type = 'LAN';
-                  intf.dhcp = 'no';
+                  // set LAN as DHCP only if it's DHCP in Linux and has IP address.
+                  // Otherwise set it to static on registration.
+                  intf.dhcp = intf.dhcp === 'yes' && intf.IPv4 !== '' ? 'yes' : 'no';
                   intf.routing = 'OSPF';
                   intf.gateway = '';
                   intf.metric = '';
                 }
+              });
+
+              // set auto metrics for interfaces without a metric.
+              // This loop done at the end to avoid metric duplication
+              setAutoMetricIndexes.forEach(i => {
+                highestMetric += 100;
+                ifs[i].metric = highestMetric;
               });
 
               // Prepare device versions array
@@ -203,6 +221,10 @@ connectRouter.route('/register')
                 router: req.body.router_version || '',
                 device: req.body.device_version || ''
               };
+
+              const requestCpuInfo = req.body.cpuInfo
+                ?.replaceAll('\'', '"').replaceAll('False', 'false').replaceAll('True', 'true');
+              const cpuInfo = getCpuInfo(requestCpuInfo ? JSON.parse(requestCpuInfo) : null);
 
               // Check that account didn't cross its device limit
               const account = decoded.account;
@@ -254,6 +276,7 @@ connectRouter.route('/register')
                     isApproved: false,
                     isConnected: false,
                     coords: ll,
+                    cpuInfo: cpuInfo,
                     versions: versions
                   }], { session: session })
                     .then(async (result) => {

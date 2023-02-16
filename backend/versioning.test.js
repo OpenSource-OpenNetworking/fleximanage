@@ -31,10 +31,10 @@ const httpMocks = require('node-mocks-http');
 describe('isAgentVersionCompatible', () => {
   // Different variations of compatible versions. Majors are equal.
   it.each([
-    '4.0.0',
-    '4.1.0',
-    '4.0.1',
-    '4.1.1'
+    '6.0.0',
+    '6.1.0',
+    '6.0.1',
+    '6.1.1'
   ])(
     'Should return 0 if MGMT and agent major version are equal (agent version=%s)',
     (version) => {
@@ -45,10 +45,10 @@ describe('isAgentVersionCompatible', () => {
   // Different variations of compatible versions.
   // MGMT version is greater than agent version by 1
   it.each([
-    '3.0.0',
-    '3.1.0',
-    '3.0.1',
-    '3.1.1'
+    '4.0.0',
+    '4.1.0',
+    '4.0.1',
+    '4.1.1'
   ])(
     'Should return 0 if MGMT major version is greater by 1 ' +
         'than agent major version (agent version=%s)',
@@ -60,10 +60,10 @@ describe('isAgentVersionCompatible', () => {
   // Different variations of incompatible versions.
   // MGMT version is greater than agent version by more than 1
   it.each([
-    '1.0.0',
-    '1.1.0',
-    '1.0.1',
-    '1.1.1'
+    '4.0.0',
+    '4.1.0',
+    '4.0.1',
+    '4.1.1'
   ])(
     'Should return -1 if MGMT major version is greater by more than 1 ' +
         'than agent major version (agent version=%s)',
@@ -75,10 +75,10 @@ describe('isAgentVersionCompatible', () => {
   // Different variations of incompatible versions.
   // MGMT is older than agent version
   it.each([
-    '5.0.0',
-    '5.1.0',
-    '5.0.1',
-    '5.1.1'
+    '6.0.0',
+    '6.1.0',
+    '6.0.1',
+    '6.1.1'
   ])(
     'Should return 1 if MGMT major version is older than agent major version (agent version=%s)',
     (version) => {
@@ -89,10 +89,10 @@ describe('isAgentVersionCompatible', () => {
   // Different variations of incompatible versions.
   // MGMT is older than agent version
   it.each([
-    '6.0.0',
-    '6.1.0',
-    '6.0.1',
-    '6.1.1'
+    '7.0.0',
+    '7.1.0',
+    '7.0.1',
+    '7.1.1'
   ])(
     'Should return 1 if MGMT major version is older than agent major version (agent version=%s)',
     (version) => {
@@ -203,17 +203,17 @@ describe('verifyAgentVersion', () => {
     expect(result).toMatchObject({
       valid: false,
       statusCode: 403,
-      err: 'Incompatible version: agent version: 1.1.0 too low, management version: 5.0.0'
+      err: 'Incompatible version: agent version: 1.1.0 too low, management version: 6.0.0'
     });
   });
 });
 
 it('Should return failure object if agent version is higher', () => {
-  const result = verifyAgentVersion('6.1.0');
+  const result = verifyAgentVersion('7.1.0');
   expect(result).toMatchObject({
     valid: false,
     statusCode: 400,
-    err: 'Incompatible version: agent version: 6.1.0 too high, management version: 5.0.0'
+    err: 'Incompatible version: agent version: 7.1.0 too high, management version: 6.0.0'
   });
 });
 

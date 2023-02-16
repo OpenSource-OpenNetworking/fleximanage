@@ -64,6 +64,7 @@ const Permissions = new Schema({
   pathlabels: { type: Number, min: [0, 'Permission too low'], max: [15, 'Permission too high'] },
   mlpolicies: { type: Number, min: [0, 'Permission too low'], max: [15, 'Permission too high'] },
   applications: { type: Number, min: [0, 'Permission too low'], max: [15, 'Permission too high'] },
+  qospolicies: { type: Number, min: [0, 'Permission too low'], max: [15, 'Permission too high'] },
   firewallpolicies: {
     type: Number, min: [0, 'Permission too low'], max: [15, 'Permission too high']
   }
@@ -87,6 +88,7 @@ const preDefinedPermissions = {
     pathlabels: setPermission(0, 0, 0, 0),
     mlpolicies: setPermission(0, 0, 0, 0),
     applications: setPermission(0, 0, 0, 0),
+    qospolicies: setPermission(0, 0, 0, 0),
     firewallpolicies: setPermission(0, 0, 0, 0)
   },
   account_owner: {
@@ -105,6 +107,7 @@ const preDefinedPermissions = {
     pathlabels: setPermission(1, 1, 1, 1),
     mlpolicies: setPermission(1, 1, 1, 1),
     applications: setPermission(1, 1, 1, 1),
+    qospolicies: setPermission(1, 1, 1, 1),
     firewallpolicies: setPermission(1, 1, 1, 1)
   },
   account_manager: {
@@ -123,6 +126,7 @@ const preDefinedPermissions = {
     pathlabels: setPermission(1, 1, 1, managerDelPermission()),
     mlpolicies: setPermission(1, 1, 1, managerDelPermission()),
     applications: setPermission(1, 1, 1, managerDelPermission()),
+    qospolicies: setPermission(1, 1, 1, managerDelPermission()),
     firewallpolicies: setPermission(1, 1, 1, managerDelPermission())
   },
   account_viewer: {
@@ -141,6 +145,7 @@ const preDefinedPermissions = {
     pathlabels: setPermission(1, 0, 0, 0),
     mlpolicies: setPermission(1, 0, 0, 0),
     applications: setPermission(1, 0, 0, 0),
+    qospolicies: setPermission(1, 0, 0, 0),
     firewallpolicies: setPermission(1, 0, 0, 0)
   },
   group_manager: {
@@ -159,6 +164,7 @@ const preDefinedPermissions = {
     pathlabels: setPermission(1, 1, 1, managerDelPermission()),
     mlpolicies: setPermission(1, 1, 1, managerDelPermission()),
     applications: setPermission(1, 1, 1, 1),
+    qospolicies: setPermission(1, 1, 1, managerDelPermission()),
     firewallpolicies: setPermission(1, 1, 1, managerDelPermission())
   },
   group_viewer: {
@@ -177,6 +183,7 @@ const preDefinedPermissions = {
     pathlabels: setPermission(1, 0, 0, 0),
     mlpolicies: setPermission(1, 0, 0, 0),
     applications: setPermission(1, 0, 0, 0),
+    qospolicies: setPermission(1, 0, 0, 0),
     firewallpolicies: setPermission(1, 0, 0, 0)
   },
   organization_manager: {
@@ -195,6 +202,7 @@ const preDefinedPermissions = {
     pathlabels: setPermission(1, 1, 1, managerDelPermission()),
     mlpolicies: setPermission(1, 1, 1, managerDelPermission()),
     applications: setPermission(1, 1, 1, 1),
+    qospolicies: setPermission(1, 1, 1, managerDelPermission()),
     firewallpolicies: setPermission(1, 1, 1, managerDelPermission())
   },
   organization_viewer: {
@@ -213,6 +221,7 @@ const preDefinedPermissions = {
     pathlabels: setPermission(1, 0, 0, 0),
     mlpolicies: setPermission(1, 0, 0, 0),
     applications: setPermission(1, 0, 0, 0),
+    qospolicies: setPermission(1, 0, 0, 0),
     firewallpolicies: setPermission(1, 0, 0, 0)
   }
 };

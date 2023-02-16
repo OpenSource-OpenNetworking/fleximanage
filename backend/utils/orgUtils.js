@@ -85,8 +85,17 @@ const getAllOrganizationSubnets = async orgId => {
   return [...lanSubnets, ...tunnelSubnets, ...applicationSubnets];
 };
 
+const getAllOrganizationBGPDevices = async orgId => {
+  const bgpDevices = await devices.aggregate([
+    { $match: { org: orgId, 'bgp.enable': true } },
+    { $project: { name: 1, bgp: 1 } }
+  ]);
+  return bgpDevices;
+};
+
 // Default exports
 module.exports = {
   getAllOrganizationLanSubnets,
-  getAllOrganizationSubnets
+  getAllOrganizationSubnets,
+  getAllOrganizationBGPDevices
 };

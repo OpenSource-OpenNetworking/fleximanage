@@ -4766,6 +4766,60 @@ paths:
       x-swagger-router-controller: Members
       x-openapi-router-controller: MembersController
       x-openapi-router-service: MembersService
+  /members/{id}/resetMfa:
+    get:
+      operationId: membersIdResetMfaGET
+      parameters:
+      - description: Numeric ID of the Member to reset for
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "204":
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - bearerAuth: []
+      - apiKey: []
+      summary: Reset Member Two-Factor authentication
+      tags:
+      - Members
+      x-swagger-router-controller: Members
+      x-openapi-router-controller: MembersController
+      x-openapi-router-service: MembersService
   /members/options/{type}:
     get:
       operationId: membersOptionsTypeGET
@@ -5482,15 +5536,13 @@ paths:
     get:
       operationId: invoicesGET
       parameters:
-      - description: The number of items to skip before starting to collect the result
-          set
+      - description: The next items to collect next, should be the offset received on previous iteration
         explode: true
         in: query
-        name: offset
+        name: offsetPos
         required: false
         schema:
-          type: integer
-        style: form
+          type: string
       - description: The numbers of items to return
         explode: true
         in: query
@@ -5879,7 +5931,7 @@ paths:
           type: string
       responses:
         "204":
-          description: Successfull operation
+          description: Successful operation
         "401":
           content:
             application/json:
@@ -7465,6 +7517,571 @@ paths:
       x-swagger-router-controller: FirewallPolicies
       x-openapi-router-controller: FirewallPoliciesController
       x-openapi-router-service: FirewallPoliciesService
+  /qosPolicies:
+    get:
+      operationId: qosPoliciesGET
+      parameters:
+      - description: The number of items to skip before starting to collect the result
+          set
+        explode: true
+        in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+        style: form
+      - description: The numbers of items to return
+        explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+        style: form
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/QOSPolicy'
+                type: array
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get all QOS policies
+      tags:
+      - QOS Policies
+      x-swagger-router-controller: QOSPolicies
+      x-openapi-router-controller: QOSPoliciesController
+      x-openapi-router-service: QOSPoliciesService
+    post:
+      operationId: qosPoliciesPOST
+      parameters:
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QosPolicyRequest'
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QOSPolicy'
+          description: QOS policy created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Add a new QOS policy
+      tags:
+      - QOS Policies
+      x-swagger-router-controller: QOSPolicies
+      x-openapi-router-controller: QOSPoliciesController
+      x-openapi-router-service: QOSPoliciesService
+  /qosPolicies/{id}:
+    get:
+      operationId: qosPoliciesIdGET
+      parameters:
+      - description: Numeric ID of the QOS policy to retrieve
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QOSPolicy'
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get a QOS policy by id
+      tags:
+      - QOS Policies
+      x-swagger-router-controller: QOSPolicies
+      x-openapi-router-controller: QOSPoliciesController
+      x-openapi-router-service: QOSPoliciesService
+    put:
+      operationId: qosPoliciesIdPUT
+      parameters:
+      - description: Numeric ID of the QOS policy to modify
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QosPolicyRequest'
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QOSPolicy'
+          description: A new QOS Policy created
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QOSPolicy'
+          description: The QOS Policy was modified
+        "400":
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Modify a QOS policy
+      tags:
+      - QOS Policies
+      x-swagger-router-controller: QOSPolicies
+      x-openapi-router-controller: QOSPoliciesController
+      x-openapi-router-service: QOSPoliciesService
+    delete:
+      operationId: qosPoliciesIdDELETE
+      parameters:
+      - description: Numeric ID of the QOS policy to delete
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "204":
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Delete a QOS policy
+      tags:
+      - QOS Policies
+      x-swagger-router-controller: QOSPolicies
+      x-openapi-router-controller: QOSPoliciesController
+      x-openapi-router-service: QOSPoliciesService
+  /qosPolicies/list:
+    get:
+      operationId: qosPoliciesListGET
+      parameters:
+      - description: The number of items to skip before starting to collect the result
+          set
+        explode: true
+        in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+        style: form
+      - description: The numbers of items to return
+        explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+        style: form
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/QOSPolicyList'
+                type: array
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get all QOS policies names and IDs only
+      tags:
+      - QOS Policies
+      x-swagger-router-controller: QOSPolicies
+      x-openapi-router-controller: QOSPoliciesController
+      x-openapi-router-service: QOSPoliciesService
+  /qosPolicies/meta:
+    get:
+      operationId: qosPoliciesMetaGET
+      parameters:
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/QOSPolicyMetaData'
+                type: array
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get all QOS metadata
+      tags:
+      - QOS Policies
+      x-swagger-router-controller: QOSPolicies
+      x-openapi-router-controller: QOSPoliciesController
+      x-openapi-router-service: QOSPoliciesService
+  /qosTrafficMap:
+    get:
+      operationId: qosTrafficMapGET
+      parameters:
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QOSTrafficMap'
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get QOS traffic map
+      tags:
+      - QOS Policies
+      x-swagger-router-controller: QOSPolicies
+      x-openapi-router-controller: QOSPoliciesController
+      x-openapi-router-service: QOSPoliciesService
+    put:
+      operationId: qosTrafficMapPUT
+      parameters:
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QosTrafficMapRequest'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QOSTrafficMap'
+          description: The QOS traffic map updated
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Update QOS traffic map
+      tags:
+      - QOS Policies
+      x-swagger-router-controller: QOSPolicies
+      x-openapi-router-controller: QOSPoliciesController
+      x-openapi-router-service: QOSPoliciesService
   /appstore:
     get:
       operationId: appstoreGET
@@ -7815,6 +8432,10 @@ paths:
         style: simple
       responses:
         "200":
+          content:
+            application/json:
+              schema:
+                type: object
           description: Successful operation
         "401":
           content:
@@ -8162,12 +8783,15 @@ components:
       type: object
     Account:
       example:
+        _id: _id
+        name: name
         country: country
         companyType: companyType
         companyDesc: companyDesc
         enableNotifications: true
-        name: name
-        _id: _id
+        isSubscriptionValid: true
+        trial_end: 1676591999
+        forceMfa: false
       properties:
         _id:
           maxLength: 24
@@ -8175,41 +8799,54 @@ components:
           type: string
         name:
           type: string
+        country:
+          maxLength: 2
+          type: string
         companyType:
           type: string
         companyDesc:
-          type: string
-        country:
-          maxLength: 2
           type: string
         enableNotifications:
           default: true
           type: boolean
+        isSubscriptionValid:
+          default: true
+          type: boolean
+        trial_end:
+          type: integer
+        forceMfa:
+          default: false
+          type: boolean
       type: object
     AccountRequest:
       example:
+        name: name
         country: country
         companyType: companyType
         companyDesc: companyDesc
         enableNotifications: true
-        name: name
+        forceMfa: false
       properties:
         name:
+          type: string
+        country:
+          maxLength: 2
           type: string
         companyType:
           type: string
         companyDesc:
           type: string
-        country:
-          maxLength: 2
-          type: string
         enableNotifications:
           default: true
+          type: boolean
+        forceMfa:
+          default: false
           type: boolean
       type: object
     OrganizationRequest:
       example:
         name: name
+        description: description
         group: group
         encryptionMethod: ikev2
       required:
@@ -8218,6 +8855,8 @@ components:
         - encryptionMethod
       properties:
         name:
+          type: string
+        description:
           type: string
         group:
           type: string
@@ -8231,6 +8870,7 @@ components:
     Organization:
       example:
         name: name
+        description: description
         _id: _id
         account: account
         group: group
@@ -8241,6 +8881,8 @@ components:
           minLength: 24
           type: string
         name:
+          type: string
+        description:
           type: string
         group:
           type: string
@@ -8426,7 +9068,7 @@ components:
         priority:
           type: integer
         error:
-          type: string
+          type: object
         progress:
           type: string
         state:
@@ -8465,6 +9107,10 @@ components:
           dnsServers: [8.8.8.8, 8.8.4.4]
           dnsDomains: [subdomain.maindomain]
           useDhcpDnsServers: false
+          bandwidthMbps:
+            tx: 100
+            rx: 100
+          qosPolicy: null
         - IPv6: IPv6
           PublicIP: PublicIP
           PublicPort: PublicPort
@@ -8485,6 +9131,10 @@ components:
           devId: devId
           _id: _id
           deviceType: dpdk
+          bandwidthMbps:
+            tx: 4.5
+            rx: 10
+          qosPolicy: null
         - IPv6: IPv6
           PublicIP: PublicIP
           PublicPort: PublicPort
@@ -8551,6 +9201,29 @@ components:
         coords:
         - 46.5
         - 3.6
+        routingFilters:
+        - defaultAction: deny
+          name: routingFilterName
+          description: description for the filter
+          rules:
+          - network: 192.168.55.0/24
+          - network: 192.168.66.0/24
+        bgp:
+          enable: true
+          holdInterval: 90
+          keepaliveInterval: 30,
+          localASN: 65001
+          routerId: 192.168.1.124
+          redistributeOspf: true
+          neighbors:
+          - password: ''
+            ip: 192.168.1.250
+            remoteASN: 65002
+            inboundFilter: routingFilterName
+            outboundFilter: routingFilterName
+        cpuInfo:
+          powerSaving: true
+          vppCores: 3
       properties:
         machineId:
           type: string
@@ -8590,6 +9263,12 @@ components:
           items:
             type: number
           type: array
+        bgp:
+          $ref: '#/components/schemas/BgpConfigs'
+        routingFilters:
+          items:
+            $ref: '#/components/schemas/RoutingFilter'
+          type: array
         upgradeSchedule:
           $ref: '#/components/schemas/UpgradeSchedule'
         labels:
@@ -8608,6 +9287,8 @@ components:
           type: array
         versions:
           $ref: '#/components/schemas/DeviceVersion'
+        cpuInfo:
+          $ref: '#/components/schemas/DeviceCpuInfo'
       type: object
     Device:
       example:
@@ -8620,6 +9301,7 @@ components:
           useFixedPublicPort: false
           monitorInternet: true
           internetAccess: 'yes'
+          linkStatus: 'up'
           IPv4: IPv4
           type: WAN
           gateway: gateway
@@ -8644,6 +9326,7 @@ components:
           useFixedPublicPort: false
           monitorInternet: true
           internetAccess: 'no'
+          linkStatus: 'down'
           IPv4: IPv4
           type: WAN
           gateway: gateway
@@ -8714,6 +9397,8 @@ components:
         - 40.4
         - 5.7
         sync: device sync status
+        routingFilters:
+        - routingFilter
       properties:
         _id:
           maxLength: 24
@@ -8753,6 +9438,10 @@ components:
           items:
             $ref: '#/components/schemas/Dhcp'
           type: array
+        routingFilters:
+          items:
+            $ref: '#/components/schemas/RoutingFilter'
+          type: array
         coords:
           items:
             type: number
@@ -8775,6 +9464,8 @@ components:
           type: array
         versions:
           $ref: '#/components/schemas/DeviceVersion'
+        cpuInfo:
+          $ref: '#/components/schemas/DeviceCpuInfo'
         sync:
           $ref: '#/components/schemas/DeviceSyncStatus'
         pendingNotifications:
@@ -8805,6 +9496,7 @@ components:
         useStun: useStun
         monitorInternet: true
         internetAccess: 'yes'
+        linkStatus: 'up'
         IPv4: IPv4
         type: WAN
         MAC: MAC
@@ -8824,6 +9516,10 @@ components:
         dnsServers: [8.8.8.8, 8.8.4.4]
         dnsDomains: [subdomain.maindomain]
         isPublicAddressRateLimited: false
+        bandwidthMbps:
+          tx: 100
+          rx: 100
+        qosPolicy: null
       properties:
         _id:
           maxLength: 24
@@ -8860,6 +9556,12 @@ components:
           - yes
           - no
           type: string
+        linkStatus:
+          enum:
+          - ''
+          - up
+          - down
+          type: string
         gateway:
           type: string
         metric:
@@ -8871,6 +9573,8 @@ components:
         routing:
           enum:
           - OSPF
+          - BGP
+          - OSPF,BGP
           - NONE
           type: string
         type:
@@ -8932,6 +9636,16 @@ components:
         isPublicAddressRateLimited:
           type: boolean
           description: Specifies whether the IP or port address for this interface changes at a high rate
+        bandwidthMbps:
+          type: object
+          properties:
+            tx:
+              type: number
+            rx:
+              type: number
+        qosPolicy:
+          type: string
+          nullable: true
       type: object
     DeviceVersion:
       example:
@@ -8986,6 +9700,28 @@ components:
         - state
         - autoSync
         - trials
+    DeviceCpuInfo:
+      example:
+        hwCores: 2
+        grubCores: 2
+        vppCores: 1
+        powerSaving: false
+      properties:
+        hwCores:
+          type: number
+          minimum: 1
+          maximum: 65535
+        grubCores:
+          type: number
+          minimum: 1
+          maximum: 65535
+        vppCores:
+          type: number
+          minimum: 1
+          maximum: 65535
+        powerSaving:
+          type: boolean
+      type: object
     Role:
       enum:
       - owner
@@ -9090,11 +9826,98 @@ components:
         - sync
         - connection
         - isApproved
+    RoutingFilter:
+      example:
+        $ref: '#/components/examples/RoutingFilterExample'
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        defaultAction:
+          type: string
+          enum:
+          - deny
+          - allow
+        rules:
+          items:
+            $ref: '#/components/schemas/RoutingFilterRule'
+          type: array
+      type: object
+    RoutingFilterRule:
+      example:
+        $ref: '#/components/examples/RoutingFilterRuleExample'
+      properties:
+        network:
+          type: string
+          maxLength: 24
+      type: object
+    BgpConfigs:
+      example:
+        enable: true
+        localASN: 45235
+        keepaliveInterval: 30
+        holdInterval: 90
+        routerId: A.B.C.D
+        redistributeOspf: true
+        neighbors:
+        - ip: 1.1.1.1/24
+          remoteASN: 6
+        - ip: 2.2.2.2/24
+          remoteASN: 22435
+          password: abcdefg
+      properties:
+        enable:
+          type: boolean
+        localASN:
+          type: string
+          description: The AS number is an identifier for the autonomous system
+        keepaliveInterval:
+          type: string
+          description: The number of seconds for keepalive timer
+        holdInterval:
+          type: string
+          description: The number of seconds for hold time
+        routerId:
+          type: string
+          description: The Router ID of the router
+        redistributeOspf:
+          type: boolean
+          description: If to redistribute to BGP routes that learned by OSPF
+        neighbors:
+          items:
+            $ref: '#/components/schemas/BgpNeighbor'
+          type: array
+      type: object
+    BgpNeighbor:
+      example:
+        ip: 8.8.8.8/32
+        remoteASN: 25
+        password: abcde
+      properties:
+        ip:
+          type: string
+          maxLength: 24
+          description: Ip and Mask of the neighbor interface
+        remoteASN:
+          type: string
+          description: The AS number of the remote neighbor
+        password:
+          type: string
+          description: A MD5 password to be used with the tcp socket that is being used to connect to the remote peer
+        inboundFilter:
+          type: string
+          description: A routing filter name to apply on the incoming routes from BGP peer
+        outboundFilter:
+          type: string
+          description: A routing filter name to apply on the expose routes to the BGP peer
+      type: object
     OspfConfigs:
       example:
         helloInterval: 10
         deadInterval: 40
         routerId: A.B.C.D
+        redistributeBgp: true
       properties:
         helloInterval:
           type: integer
@@ -9105,6 +9928,9 @@ components:
         routerId:
           type: string
           description: The Router ID of the router originating the LSA
+        redistributeBgp:
+          type: boolean
+          description: If to redistribute to OSPF routes that learned by BGP
       type: object
     CoordsConfigs:
       example:
@@ -9339,9 +10165,13 @@ components:
         firewall:
           type: object
           $ref: '#/components/schemas/DevicePolicy'
+        qos:
+          type: object
+          $ref: '#/components/schemas/DevicePolicy'
       required:
         - multilink
         - firewall
+        - qos
     DevicePolicy:
       type: object
       properties:
@@ -10533,6 +11363,109 @@ components:
           - serviceClass
           - importance
           type: object
+    QOSPolicy:
+      example:
+        _id: id
+        name: name
+        description: description
+        advanced: false
+        outbound: outbound
+        inbound: inbound
+      properties:
+        _id:
+          maxLength: 24
+          minLength: 24
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        advanced:
+          type: boolean
+        outbound:
+          nullable: true
+          type: object
+        inbound:
+          nullable: true
+          type: object
+      required:
+      - _id
+      - name
+      type: object
+    QOSPolicyList:
+      example:
+        id: id
+        name: name
+      properties:
+        _id:
+          maxLength: 24
+          minLength: 24
+          type: string
+        name:
+          type: string
+      required:
+      - _id
+      - name
+    QOSPolicyMetaData:
+      example:
+        _id: id
+        name: name
+        description: description
+        installCount: installCount
+      properties:
+        _id:
+          maxLength: 24
+          minLength: 24
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        installCount:
+          $ref: '#/components/schemas/PolicyInstallCount'
+          type: object
+      required:
+      - _id
+      - name
+      - description
+      - installCount
+      type: object
+    QosPolicyRequest:
+      example:
+        name: name
+        description: description
+        advanced: false
+        outbound: outbound
+        inbound: inbound
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        advanced:
+          type: boolean
+        outbound:
+          type: object
+        inbound:
+          type: object
+      required:
+      - name
+      - rules
+      type: object
+    QOSTrafficMap:
+      example:
+        oam:
+          high: realtime
+        signaling:
+          medium: best-effort
+      type: object
+    QosTrafficMapRequest:
+      example:
+        oam:
+          high: realtime
+        signaling:
+          medium: best-effort
+      type: object
     Protocol:
       enum:
       - tcp
@@ -10872,3 +11805,15 @@ components:
       bearerFormat: JWT
       scheme: bearer
       type: http
+  examples:
+    RoutingFilterExample:
+      value:
+        name: list name
+        description: list description
+        rules:
+        - $ref: '#/components/examples/RoutingFilterRuleExample'
+    RoutingFilterRuleExample:
+      value:
+        network: 100.200.30.1/24
+
+

@@ -105,10 +105,11 @@ class IApplication {
   /**
    * Validate uninstall request.
    *
-   * @param  {object}   app application object
+   * @param  {object}   application application object
+   * @param  {object}   device device object
    * @return {{valid: boolean, err: string}}  test result + error if message is invalid
   */
-  async validateInstallRequest (application) {
+  async validateInstallRequest (application, device) {
     return { valid: true, err: '' };
   }
 

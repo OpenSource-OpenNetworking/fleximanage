@@ -357,16 +357,28 @@ class ApplicationsService {
       // send jobs to device that installed or installing this app
       const opDevices = await devices.find({
         org: { $in: orgList },
-        'applications.app': id,
-        $or: [
-          { 'applications.status': 'installed' },
-          { 'applications.status': 'installing' }
-        ]
+        'applications.app': id
       });
 
-      if (opDevices.length) {
-        await dispatcher.apply(
-          opDevices, 'application', user, { org: orgList[0], meta: { op: 'uninstall', id: id } }
+      for (const device of opDevices) {
+        const installedApp = device.applications.find(a => a.app.toString() === id);
+
+        // send remove-jobs for needed devices
+        if (installedApp.status === 'installed' || installedApp.status === 'installing') {
+          await dispatcher.apply(
+            [device], 'application', user, { org: orgList[0], meta: { op: 'uninstall', id: id } }
+          );
+        }
+
+        // remove all application stuff from the device
+        const installWithQuery = await appsLogic.getAppInstallWithAsQuery(app, device, 'uninstall');
+        await devices.updateOne(
+          { _id: device._id },
+          {
+            $set: { ...installWithQuery },
+            $pull: { applications: { app: app._id } }
+          },
+          { upsert: false }
         );
       }
 
@@ -420,8 +432,14 @@ class ApplicationsService {
       configurationRequest = await appsLogic.pickAllowedFieldsOnly(
         identifier, configurationRequest, app);
 
+      const installedDevices = await devices.find({
+        org: { $in: orgList },
+        'applications.app': id,
+        'applications.status': { $in: ['installed', 'installing', 'configuration failed'] }
+      }).populate('policies.firewall.policy', '_id name rules');
+
       const { valid, err } = await appsLogic.validateConfiguration(
-        identifier, configurationRequest, app, user.defaultAccount
+        identifier, configurationRequest, app, user.defaultAccount, installedDevices
       );
 
       if (!valid) {
@@ -441,17 +459,9 @@ class ApplicationsService {
       const updated = await appsLogic.saveConfiguration(identifier, app, combinedConfig);
 
       // Update devices if needed
-      if (isNeedToUpdatedDevices) {
-        const opDevices = await devices.find({
-          org: { $in: orgList },
-          'applications.app': id,
-          'applications.status': { $in: ['installed', 'installing', 'configuration failed'] }
-        });
-
-        if (opDevices.length) {
-          await dispatcher.apply(opDevices, 'application',
-            user, { org: orgList[0], meta: { op: 'config', id: id } });
-        }
+      if (isNeedToUpdatedDevices && installedDevices.length > 0) {
+        await dispatcher.apply(installedDevices, 'application',
+          user, { org: orgList[0], meta: { op: 'config', id: id } });
       }
 
       const parsed = await ApplicationsService.selectApplicationParams(updated);

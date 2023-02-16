@@ -54,7 +54,47 @@ class JobsService {
       'progress' // type: string
     ]);
 
-    retJob.error = item._error;
+    if (!item?._error) {
+      return retJob;
+    }
+
+    const buildDefaultErrorMessage = (retJob, itemError) => {
+      return {
+        errors: [{
+          command: {
+            func: retJob.data.message.title
+          },
+          error: itemError
+        }]
+      };
+    };
+
+    // old timeout errors appear as 'Error: Send Timeout' string, so part of this check is
+    // to ensure backward compatibility.
+    if (item._error === 'Send Timeout' || typeof item._error !== 'string') {
+      retJob.error = buildDefaultErrorMessage(retJob, item._error.toString());
+      return retJob;
+    }
+
+    // Old versions of flexiEdge report the error as string which is not a valid json object
+    // when being parsed, but it's a string. So when json parse returns an object, assume this is
+    // legacy job error.
+    // Example of such job error in the response:
+    // '"failed to ip route del 48.2.0.0/16 via 192.168.1.1 dev pci:0000:00:03.00.
+    // (error: API failed: add_remove_route)(aggregated): {'requests': [{'entity':
+    // 'agent', 'message': 'remove-route', 'params': {'addr': '48.2.0.0/16',
+    // 'via': '192.168.1.1', 'redistributeViaOSPF': False,
+    // 'redistributeViaBGP': False, 'onLink': False, 'dev_id': 'pci:0000:00:03.00'}}]}"'
+    try {
+      const parsedError = JSON.parse(item._error);
+      if (parsedError && typeof parsedError === 'object' && parsedError.constructor === Object) {
+        retJob.error = parsedError;
+      } else {
+        retJob.error = buildDefaultErrorMessage(retJob, item._error);
+      }
+    } catch (e) {
+      retJob.error = buildDefaultErrorMessage(retJob, item._error);
+    }
 
     return retJob;
   }

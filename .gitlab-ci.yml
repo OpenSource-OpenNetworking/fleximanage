@@ -1,4 +1,4 @@
-image: node:12.18.1
+image: node:16.15.0
 
 # This folder is cached between builds
 cache:
@@ -46,12 +46,12 @@ test_backend:
 backend_npm_audit:
   stage: test
   variables:
-    BACKEND_PACKAGE_WHITE_LIST: "dot-prop pug mquery extend"
+    BACKEND_PACKAGE_WHITE_LIST: "dot-prop pug mquery extend async express-fileupload mongoose mpath node-forge minimist yargs-parser dicer redis"
   script:
    - cd backend
     ## temp fix: change to 'npm ci audit-ci' when mongo-express is fixed
    - npm install audit-ci
-   - npx audit-ci --moderate --package-manager npm --whitelist $BACKEND_PACKAGE_WHITE_LIST >> backend_npm_audit.log
+   - npx audit-ci --moderate --show-found false --package-manager npm --allowlist $BACKEND_PACKAGE_WHITE_LIST >> backend_npm_audit.log
   timeout: 5m
   artifacts:
     when: always

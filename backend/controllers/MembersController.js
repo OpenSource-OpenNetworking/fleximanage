@@ -45,6 +45,10 @@ class MembersController {
   async membersOptionsTypeGET (request, response) {
     await Controller.handleRequest(request, response, this.service.membersOptionsTypeGET);
   }
+
+  async membersIdResetMfaGET (request, response) {
+    await Controller.handleRequest(request, response, this.service.membersIdResetMfaGET);
+  }
 }
 
 module.exports = MembersController;

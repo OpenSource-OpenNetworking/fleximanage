@@ -48,17 +48,28 @@ const queueMlPolicyJob = async (deviceList, op, requestTime, policy, user, org) 
 
   deviceList.forEach(dev => {
     const { _id, machineId, policies } = dev;
-    const tasks = [[
+    const tasks = [
       {
         entity: 'agent',
-        message: `${op === 'install' ? 'add' : 'remove'}-multilink-policy`,
-        params: {}
+        message: 'aggregated',
+        params: {
+          requests: [
+            {
+              entity: 'agent',
+              message: `${op === 'install' ? 'add' : 'remove'}-multilink-policy`,
+              params: {}
+            }
+          ]
+        }
       }
-    ]];
+    ];
+
+    const { requests } = tasks[0].params;
 
     if (op === 'install') {
-      tasks[0][0].params.id = policy._id;
-      tasks[0][0].params.rules = policy.rules.filter(rule => rule.enabled).map(rule => {
+      requests[0].params.id = policy._id;
+      requests[0].params.rules =
+      policy.rules.filter(rule => rule.enabled).map(rule => {
         const { _id, priority, action, classification } = rule;
         return {
           id: _id,
@@ -89,7 +100,7 @@ const queueMlPolicyJob = async (deviceList, op, requestTime, policy, user, org) 
         message: message,
         params: params
       };
-      op === 'install' ? tasks[0].unshift(task) : tasks[0].push(task);
+      op === 'install' ? requests.unshift(task) : requests.push(task);
 
       data.appIdentification = {
         deviceId: _id,

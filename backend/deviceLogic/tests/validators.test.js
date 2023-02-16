@@ -33,6 +33,12 @@ describe('validateDevice', () => {
 
   beforeEach(() => {
     device = {
+      bgp: {
+        neighbors: []
+      },
+      versions: {
+        agent: '6.0.1'
+      },
       interfaces: [{
         name: 'eth0',
         devId: '00:02.00',
@@ -74,6 +80,27 @@ describe('validateDevice', () => {
         routing: 'None',
         type: 'WAN',
         pathlabels: [ObjectId('5e65290fbe66a2335718e081')]
+      },
+      {
+        name: 'eth2',
+        devId: '00:03.00',
+        driver: 'igb-1000',
+        MAC: 'ab:45:90:ed:89:17',
+        dhcp: 'no',
+        IPv4: '192.168.105.1',
+        IPv4Mask: '24',
+        IPv6: '2001:db8:85a3:8d3:1319:8a2e:370:7349',
+        IPv6Mask: '64',
+        PublicIP: '72.168.10.56',
+        PublicPort: '4789',
+        NatType: '',
+        useStun: true,
+        gateway: '',
+        metric: '',
+        isAssigned: false,
+        routing: 'OSPF',
+        type: 'LAN',
+        pathlabels: []
       }]
     };
   });
@@ -238,7 +265,32 @@ describe('validateDevice', () => {
     expect(result).toMatchObject(failureObject);
   });
 
-  it('Should be an valid device if WAN and default GW IP addresses are not on the same subnet',
+  it('Should be an invalid device if LAN and WAN have the same ip', () => {
+    device.interfaces[0].IPv4 = '10.0.0.1';
+    device.interfaces[1].IPv4 = '10.0.0.1';
+    failureObject.err = 'IP addresses of the assigned interfaces have an overlap';
+    const result = validateDevice(device);
+    expect(result).toMatchObject(failureObject);
+  });
+
+  it('Should be a valid device if LAN assigned interfaces have the same ip', () => {
+    device.interfaces[0].IPv4 = '10.0.0.1';
+    device.interfaces[2].IPv4 = '10.0.0.1';
+    device.interfaces[2].isAssigned = true;
+    const result = validateDevice(device);
+    expect(result).toMatchObject(successObject);
+  });
+
+  it('Should be an invalid device if LAN assigned interfaces have overlapping', () => {
+    device.interfaces[0].IPv4 = '10.0.0.1';
+    device.interfaces[2].IPv4 = '10.0.0.2';
+    device.interfaces[2].isAssigned = true;
+    failureObject.err = 'IP addresses of the assigned interfaces have an overlap';
+    const result = validateDevice(device);
+    expect(result).toMatchObject(failureObject);
+  });
+
+  it('Should be a valid device if WAN and default GW IP addresses are not on the same subnet',
     () => {
       device.interfaces[1].IPv4 = '10.0.0.2';
       // failureObject.err = 'WAN and default route IP addresses are not on the same subnet';
@@ -257,7 +309,7 @@ describe('validateDevice', () => {
     device.name = 'Device 1';
     device._id = '123456';
     const organizationLanSubnets = [
-      { _id: '987', name: 'Device 2', subnet: '192.168.100.3', type: 'interface' }
+      { _id: '987', name: 'Device 2', subnet: '192.168.100.3/24', type: 'interface' }
     ];
 
     const deviceSubnet = `${device.interfaces[0].IPv4}/${device.interfaces[0].IPv4Mask}`;
@@ -277,7 +329,7 @@ describe('validateDevice', () => {
     device.interfaces[0].IPv4Mask = '24';
 
     const organizationLanSubnets = [
-      { _id: '987', name: 'Device 2', subnet: '192.168.100.3', type: 'interface' }
+      { _id: '987', name: 'Device 2', subnet: '192.168.100.3/24', type: 'interface' }
     ];
 
     const deviceSubnet = '10.100.0.1/24';
@@ -293,7 +345,7 @@ describe('validateDevice', () => {
     device.name = 'Device 1';
     device._id = '123456';
     const organizationLanSubnets = [
-      { _id: '987', name: 'Device 2', subnet: '192.168.88.3' }
+      { _id: '987', name: 'Device 2', subnet: '192.168.88.3/24' }
     ];
     const result = validateDevice(device, true, organizationLanSubnets);
     expect(result).toMatchObject(successObject);
@@ -580,33 +632,40 @@ describe('validateWiFiInterfaceConfiguration', () => {
     expect(result).toMatchObject(successObject);
   });
 
-  it('Should be an valid wifi configuration - 2.4GHz', () => {
+  it('Should be a valid wifi configuration - 2.4GHz', () => {
     delete configuration['5GHz'];
     const result = validateConfiguration(intf, configuration);
     expect(result).toMatchObject(successObject);
   });
 
-  it('Should be an valid wifi configuration - 5GHz', () => {
-    delete configuration['2.4Ghz'];
+  it('Should be a valid wifi configuration - 5GHz', () => {
+    delete configuration['2.4GHz'];
     const result = validateConfiguration(intf, configuration);
     expect(result).toMatchObject(successObject);
   });
 
-  it('Should be an valid wifi configuration - 5GHz', () => {
-    delete configuration['2.4Ghz'];
+  it('Should be a valid wifi configuration - 5GHz', () => {
+    delete configuration['2.4GHz'];
     delete configuration['5Ghz'];
     const result = validateConfiguration(intf, configuration);
     expect(result).toMatchObject(successObject);
   });
 
-  it('Should be an invalid wifi configuration - missed securityMode', () => {
-    configuration['2.4GHz'].securityMode = '';
-    failureObject.err = '"value" does not match any of the allowed types';
+  it('Should be an invalid configuration - wrong securityMode is not allowed when enabled', () => {
+    configuration['2.4GHz'].securityMode = 'test';
+    failureObject.err = '"2.4GHz.securityMode" must be one of [open, wpa-psk, wpa2-psk]';
     const result = validateConfiguration(intf, configuration);
     expect(result).toMatchObject(failureObject);
   });
 
-  it('Should be a valid wifi configuration - missed securityMode but band disabled', () => {
+  it('Should be an invalid configuration - empty securityMode is not allowed when enabled', () => {
+    configuration['2.4GHz'].securityMode = '';
+    failureObject.err = '"2.4GHz.securityMode" must be one of [open, wpa-psk, wpa2-psk]';
+    const result = validateConfiguration(intf, configuration);
+    expect(result).toMatchObject(failureObject);
+  });
+
+  it('Should be a valid wifi configuration - missed securityMode allowed when disabled', () => {
     configuration['2.4GHz'].securityMode = '';
     configuration['2.4GHz'].enable = false;
     const result = validateConfiguration(intf, configuration);
@@ -621,8 +680,15 @@ describe('validateWiFiInterfaceConfiguration', () => {
   });
 
   it('Should be an invalid wifi configuration - channel not valid', () => {
+    configuration['2.4GHz'].channel = 'test';
+    failureObject.err = 'test is not a valid channel number';
+    const result = validateConfiguration(intf, configuration);
+    expect(result).toMatchObject(failureObject);
+  });
+
+  it('Should be an invalid wifi configuration - channel not valid', () => {
     configuration['2.4GHz'].channel = '-2';
-    failureObject.err = '"value" does not match any of the allowed types';
+    failureObject.err = '-2 is not a valid channel number';
     const result = validateConfiguration(intf, configuration);
     expect(result).toMatchObject(failureObject);
   });
@@ -766,14 +832,6 @@ describe('validateStaticRoute', () => {
     expect(result).toMatchObject(failureObject);
   });
 
-  it('Should be an invalid static route config if unassigned interface used', () => {
-    device.interfaces.push({ name: 'eth3', devId: 'pci:0000:00:03.00', isAssigned: false });
-    route.ifname = 'pci:0000:00:03.00';
-    failureObject.err = `Static routes not allowed on unassigned interfaces '${route.ifname}'`;
-    const result = validateStaticRoute(device, tunnels, route);
-    expect(result).toMatchObject(failureObject);
-  });
-
   it('Should be an invalid route if interface IP and gateway not on the same subnet', () => {
     const ifc = device.interfaces[0];
     route.ifname = 'pci:0000:00:01.00';
@@ -782,6 +840,15 @@ describe('validateStaticRoute', () => {
       `Interface IP ${ifc.IPv4} and gateway ${route.gateway} are not on the same subnet`;
     const result = validateStaticRoute(device, tunnels, route);
     expect(result).toMatchObject(failureObject);
+  });
+
+  // eslint-disable-next-line max-len
+  it('Should be a valid route if interface IP and gateway not on the same subnet but "onlink" enabled', () => {
+    route.ifname = 'pci:0000:00:01.00';
+    route.gateway = '192.168.101.1';
+    route.onLink = true;
+    const result = validateStaticRoute(device, tunnels, route);
+    expect(result).toMatchObject(successObject);
   });
 
   it('Should be an invalid route if interface IP and gateway not on the same subnet', () => {

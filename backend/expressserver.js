@@ -21,7 +21,6 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const configs = require('./configs')();
-const clientConfig = configs.getClientConfig();
 const swaggerUI = require('swagger-ui-express');
 const yamljs = require('yamljs');
 const express = require('express');
@@ -31,7 +30,7 @@ const bodyParser = require('body-parser');
 const { OpenApiValidator } = require('express-openapi-validator');
 const openapiRouter = require('./utils/openapiRouter');
 const createError = require('http-errors');
-
+// const session = require('express-session');
 const passport = require('passport');
 const auth = require('./authenticate');
 const { connectRouter } = require('./routes/connect');
@@ -58,6 +57,12 @@ const RateLimitStore = require('./rateLimitStore');
 
 // Internal routers definition
 const adminRouter = require('./routes/admin');
+const ticketsRouter = require('./routes/tickets')(
+  configs.get('ticketingSystemUsername', 'string'),
+  configs.get('ticketingSystemToken', 'string'),
+  configs.get('ticketingSystemUrl', 'string'),
+  configs.get('ticketingSystemAccountId', 'string')
+);
 
 // WSS
 const WebSocket = require('ws');
@@ -95,10 +100,10 @@ class ExpressServer {
 
   async setupMiddleware () {
     // this.setupAllowedMedia();
-    this.app.use((req, res, next) => {
-      console.log(`${req.method}: ${req.url}`);
-      return next();
-    });
+    // this.app.use((req, res, next) => {
+    //   console.log(`${req.method}: ${req.url}`);
+    //   return next();
+    // });
 
     // A middleware that adds a unique request ID for each request
     // or uses the existing request ID, if there is one.
@@ -158,7 +163,7 @@ class ExpressServer {
       store: inMemoryStore,
       // Rate limit for requests in 5 min per IP address
       max: configs.get('userIpReqRateLimit', 'number'),
-      message: 'Request rate limit exceeded',
+      message: { error: 'Request rate limit exceeded' },
       onLimitReached: (req, res, options) => {
         logger.error(
           'Request rate limit exceeded. blocking request', {
@@ -177,7 +182,7 @@ class ExpressServer {
     this.app.use(cookieParser());
 
     // Routes allowed without authentication
-    this.app.get('/', (req, res) => this.sendIndexFile(res));
+    this.app.get('/', (req, res) => this.sendIndexFile(req, res));
     this.app.use(express.static(path.join(__dirname, configs.get('clientStaticDir'))));
 
     // Secure traffic only
@@ -237,6 +242,7 @@ class ExpressServer {
 
     // Intialize routes
     this.app.use('/api/admin', adminRouter);
+    this.app.use('/api/tickets', ticketsRouter);
 
     // reserved for future use
     // this.app.get('/login-redirect', (req, res) => {
@@ -263,7 +269,10 @@ class ExpressServer {
       });
   }
 
-  sendIndexFile (res) {
+  sendIndexFile (req, res) {
+    // get client config based on request object
+    const clientConfig = configs.getClientConfig(req);
+
     const transformIndex = (origIndex) => {
       let modifiedIndex = configs.get('removeBranding', 'boolean')
         ? origIndex.replace('<title>FlexiWAN Management</title>',
@@ -293,7 +302,7 @@ class ExpressServer {
     // "catchall" handler, for any request that doesn't match one above, send back index.html file.
     this.app.get('*', (req, res, next) => {
       logger.info('Route not found', { req: req });
-      this.sendIndexFile(res);
+      this.sendIndexFile(req, res);
     });
 
     // catch 404 and forward to error handler

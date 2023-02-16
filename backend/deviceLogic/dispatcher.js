@@ -26,11 +26,14 @@ const upgrade = require('./applyUpgrade');
 const mlpolicy = require('./mlpolicy');
 const application = require('./application');
 const firewallPolicy = require('./firewallPolicy');
+const qosPolicy = require('./qosPolicy');
+const qosTrafficMap = require('./qosTrafficMap');
 const dhcp = require('./dhcp');
 const appIdentification = require('./appIdentification');
 const sync = require('./sync');
 const IKEv2 = require('./IKEv2');
 const replace = require('./replace');
+const modifyHardware = require('./modifyHardware');
 const configs = require('../configs')();
 const deviceQueues = require('../utils/deviceQueue')(
   configs.get('kuePrefix'),
@@ -114,6 +117,24 @@ const methods = {
     complete: firewallPolicy.complete,
     error: firewallPolicy.error,
     remove: firewallPolicy.remove
+  },
+  qosPolicy: {
+    apply: qosPolicy.apply,
+    complete: qosPolicy.complete,
+    error: qosPolicy.error,
+    remove: qosPolicy.remove
+  },
+  qosTrafficMap: {
+    apply: qosTrafficMap.apply,
+    complete: qosTrafficMap.complete,
+    error: qosTrafficMap.error,
+    remove: qosTrafficMap.remove
+  },
+  modifyHardware: {
+    apply: modifyHardware.apply,
+    complete: modifyHardware.complete,
+    error: modifyHardware.error,
+    remove: modifyHardware.remove
   },
   appIdentification: {
     apply: appIdentification.apply,

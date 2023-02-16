@@ -59,7 +59,7 @@ class RemoteVpn extends IApplication {
       {
         _id: { $ne: application._id },
         configuration: { $exists: 1 },
-        'configuration.networkId': { $regex: regex, $options: 'i' }
+        'configuration.networkId': { $regex: regex }
       }
     );
 
@@ -130,7 +130,7 @@ class RemoteVpn extends IApplication {
       if (!dev.firewall.rules) continue;
       const outbound = dev.firewall.rules.some(r => {
         return r.direction === 'outbound' &&
-          r.interfaces.some(ri => `app_${app.appStoreApp.identifier}`);
+          r.interfaces.some(ri => ri === `app_${app.appStoreApp.identifier}`);
       });
 
       if (outbound) {
@@ -166,6 +166,16 @@ class RemoteVpn extends IApplication {
         valid: false,
         err: 'Remote Worker VPN is supported from version 5.2.X,' +
           ' Some devices have lower version'
+      };
+    }
+
+    // this field indicates that application configured.
+    // There is no way to save only networkId without other configurations
+    if (!app.configuration?.networkId) {
+      return {
+        valid: false,
+        err: 'Remote Worker VPN is not configured properly. ' +
+        'Check the installed application configuration page.'
       };
     }
 
@@ -376,20 +386,18 @@ class RemoteVpn extends IApplication {
 
       // if is new keys, save them on db
       if (isNew) {
-        const query = { _id: application._id };
-        const update = {
-          $set: {
-            'configuration.keys.caKey': caKey,
-            'configuration.keys.caCrt': caCrt,
-            'configuration.keys.serverKey': serverKey,
-            'configuration.keys.serverCrt': serverCrt,
-            'configuration.keys.clientKey': clientKey,
-            'configuration.keys.clientCrt': clientCrt,
-            'configuration.keys.tlsKey': tlsKey,
-            'configuration.keys.dhKey': dhKey
-          }
-        };
-        await applications.updateOne(query, update);
+        const keysObj = { caKey, caCrt, serverKey, serverCrt, clientKey, clientCrt, tlsKey, dhKey };
+
+        await applications.updateOne(
+          { _id: application._id },
+          { $set: { 'configuration.keys': keysObj } }
+        );
+
+        // store the keys in the "application" variable as well.
+        // If user selected multiple devices to install the application,
+        // we need to ensure that we don't generate different keys
+        // for each device. Hence we saving in DB and in variable.
+        application.configuration.keys = keysObj;
       }
 
       const dnsIps = config.dnsIps && config.dnsIps !== ''
@@ -407,8 +415,17 @@ class RemoteVpn extends IApplication {
       params.dnsIps = dnsIps;
       params.dnsDomains = dnsDomains;
       params.dhKey = dhKey;
-      params.vpnPortalServer = configs.get('flexiVpnServer');
       params.vpnTmpTokenTime = configs.get('vpnTmpTokenTime');
+
+      const majorVersion = getMajorVersion(device.versions.agent);
+
+      const flexiVpnServer = configs.get('flexiVpnServer'); // can be string or list
+      const isFlexiVpnServerArray = Array.isArray(flexiVpnServer);
+      if (majorVersion >= 6) { // from 6 version, list should be sent
+        params.vpnPortalServer = isFlexiVpnServerArray ? flexiVpnServer : [flexiVpnServer];
+      } else { // Otherwise, string should be sent.
+        params.vpnPortalServer = isFlexiVpnServerArray ? flexiVpnServer[0] : flexiVpnServer;
+      }
 
       // get per device configuration
       const deviceApplication = device.applications.find(
@@ -543,12 +560,13 @@ const secretFields = [
 const vpnConfigSchema = Joi.object().keys({
   networkId: Joi.string().pattern(/^[A-Za-z0-9]+$/).min(3).max(20)
     .invalid(
-      'flexiWAN', 'flexiwan', 'FLEXIWAN', 'company', 'acme', 'SASE', 'sase', 'security', 'info'
-    ).required()
+      'company', 'acme', 'SASE', 'sase', 'security', 'info'
+    ).pattern(/flexiwan/i, { invert: true }).required()
     .error(errors => {
       errors.forEach(err => {
         switch (err.code) {
           case 'any.invalid':
+          case 'string.pattern.invert.base':
             err.message = `${err.local.value} is not allowed for Workspace name`;
             break;
           default:
@@ -589,7 +607,7 @@ const vpnConfigSchema = Joi.object().keys({
     gsuite: Joi.object().keys({
       enabled: Joi.boolean().required(),
       domains: Joi.array().items(Joi.object().keys({
-        domain: Joi.string().required()
+        domain: Joi.string().required().domain({ tlds: true })
           .pattern(/^\S+$/, 'domain without whitespace').invalid('gmail.com')
           .error(errors => {
             errors.forEach(err => {
@@ -624,7 +642,8 @@ const vpnConfigSchema = Joi.object().keys({
     office365: Joi.object().keys({
       enabled: Joi.boolean().required(),
       domains: Joi.array().items(Joi.object().keys({
-        domain: Joi.string().required().pattern(/^\S+$/, 'domain without whitespace'),
+        domain: Joi.string().required()
+          .domain({ tlds: true }).pattern(/^\S+$/, 'domain without whitespace'),
         groups: Joi.string().required().allow('')
       })).required().when('enabled', { is: true, then: Joi.array().min(1) })
     }).required(),

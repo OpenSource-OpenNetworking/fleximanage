@@ -21,10 +21,9 @@ const tunnelsModel = require('../models/tunnels');
 const notificationsMgr = require('../notifications/notifications')();
 const cidr = require('cidr-tools');
 const keyBy = require('lodash/keyBy');
-const { generateTunnelParams } = require('../utils/tunnelUtils');
-const { sendRemoveTunnelsJobs } = require('./tunnels');
+const { getTunnelConfigDependencies } = require('./tunnels');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
-const { apply, reconstructTunnels } = require('./modifyDevice');
+const { apply } = require('./modifyDevice');
 const eventsReasons = require('./events/eventReasons');
 const publicAddrInfoLimiter = require('./publicAddressLimiter');
 const { getMajorVersion } = require('../versioning');
@@ -155,7 +154,7 @@ class Events {
    * @param  {boolean} state if true, the connectivity is online
   */
   async interfaceConnectivityChanged (device, origIfc, state) {
-    const stateTxt = state ? 'online' : 'offline';
+    const stateTxt = state === 'yes' ? 'online' : 'offline';
     logger.info(`Interface connectivity changed to ${stateTxt}`, { params: { origIfc } });
     await notificationsMgr.sendNotifications([{
       org: device.org,
@@ -342,13 +341,21 @@ class Events {
       const s = device.staticroutes[i];
       if (s.isPending) continue;
 
+      // check if the static route configured with the same devId as the missing IP interface
       const isSameIfc = s.ifname === ifc.devId;
-
-      const gatewaySubnet = `${s.gateway}/32`;
-      const isOverlapping = cidr.overlap(`${origIfc.IPv4}/${origIfc.IPv4Mask}`, gatewaySubnet);
-
-      if (isSameIfc || isOverlapping) {
+      if (isSameIfc) {
         await this.setIncompleteRouteStatus(s, true, reason, device);
+        continue;
+      }
+
+      // check if the static route gateway is overlaps with the missing IP interface
+      if (origIfc.IPv4 && origIfc.IPv4Mask && s.gateway) {
+        const gatewaySubnet = `${s.gateway}/32`;
+        const isOverlapping = cidr.overlap(`${origIfc.IPv4}/${origIfc.IPv4Mask}`, gatewaySubnet);
+
+        if (isOverlapping) {
+          await this.setIncompleteRouteStatus(s, true, reason, device);
+        }
       }
     }
   };
@@ -409,17 +416,12 @@ class Events {
       }]);
     }
 
-    const staticRoutesDevices = await this.getTunnelStaticRoutes(tunnel);
+    const dependedDevices = await getTunnelConfigDependencies(tunnel, false);
 
-    for (const staticRouteDevice of staticRoutesDevices) {
-      for (const staticRoute of staticRouteDevice.staticroutes) {
-        // no need to update pending static routes
-        if (staticRoute.isPending) {
-          continue;
-        }
-
+    for (const dependedDevice of dependedDevices) {
+      for (const staticRoute of dependedDevice.staticroutes) {
         const reason = eventsReasons.tunnelIsPending(tunnel.num);
-        await this.setIncompleteRouteStatus(staticRoute, true, reason, staticRouteDevice);
+        await this.setIncompleteRouteStatus(staticRoute, true, reason, dependedDevice);
       }
     }
   };
@@ -430,54 +432,14 @@ class Events {
   */
   async tunnelSetToActive (tunnel) {
     // get tunnel static routes
-    const staticRoutesDevices = await this.getTunnelStaticRoutes(tunnel);
+    const dependedDevices = await getTunnelConfigDependencies(tunnel, true);
 
-    for (const staticRouteDevice of staticRoutesDevices) {
-      for (const staticRoute of staticRouteDevice.staticroutes) {
-        // no need to update non pending routes
-        if (!staticRoute.isPending) {
-          continue;
-        } else {
-          await this.setIncompleteRouteStatus(staticRoute, false, '', staticRouteDevice);
-        }
+    for (const dependedDevice of dependedDevices) {
+      for (const staticRoute of dependedDevice.staticroutes) {
+        await this.setIncompleteRouteStatus(staticRoute, false, '', dependedDevice);
       }
     }
   };
-
-  /**
-   * Get all devices with static routes via the tunnel
-   * @param  {object} tunnel tunnel object
-   * @return {[{object}]} array of devices with static routes via the given tunnel
-  */
-  async getTunnelStaticRoutes (tunnel) {
-    const { ip1, ip2 } = generateTunnelParams(tunnel.num);
-
-    const devicesStaticRoutes = await devices.aggregate([
-      { $match: { org: tunnel.org } }, // org match is very important here
-      {
-        $addFields: {
-          staticroutes: {
-            $filter: {
-              input: '$staticroutes',
-              as: 'route',
-              cond: {
-                $and: [
-                  {
-                    $or: [
-                      { $eq: ['$$route.gateway', ip1] },
-                      { $eq: ['$$route.gateway', ip2] }
-                    ]
-                  }
-                ]
-              }
-            }
-          }
-        }
-      }
-    ]).allowDiskUse(true);
-
-    return devicesStaticRoutes;
-  }
 
   /**
    * Set incomplete state for static route if needed
@@ -506,26 +468,6 @@ class Events {
       await this.staticRouteSetToPending(route, device, reason);
     }
   };
-
-  /**
-   * Send needed tunnels jobs (remove or add)
-  */
-  async sendTunnelsRemoveJobs () {
-    const removeTunnelIds = Array.from(this.pendingTunnels);
-    if (removeTunnelIds.length > 0) {
-      await sendRemoveTunnelsJobs(removeTunnelIds);
-    }
-  }
-
-  /**
-   * Send needed tunnels jobs (remove or add)
-  */
-  async sendTunnelsCreateJobs () {
-    const reconstructTunnelIds = Array.from(this.activeTunnels);
-    if (reconstructTunnelIds.length > 0) {
-      await reconstructTunnels(reconstructTunnelIds, 'system');
-    }
-  }
 
   /**
    * Computes and checks if need to trigger event
@@ -710,25 +652,43 @@ const activatePendingTunnelsOfDevice = async (device) => {
   // and release them, and then it triggers the events chain once tunnel becomes active.
   const events = new Events();
   await events.removePendingStateFromTunnels(device);
+  const addTunnelIds = Object.assign({},
+    ...Array.from(events.activeTunnels, v => ({ [v]: '' })));
 
   const modifyDevices = await events.prepareModifyDispatcherParameters();
-
-  await events.sendTunnelsCreateJobs();
-
   for (const modified in modifyDevices) {
     await apply(
       [modifyDevices[modified].orig],
       { username: 'system' },
       {
         org: modifyDevices[modified].orig.org.toString(),
-        newDevice: modifyDevices[modified].updated
+        newDevice: modifyDevices[modified].updated,
+        sendAddTunnels: addTunnelIds
       }
     );
   }
+};
+
+const releasePublicAddrLimiterBlockage = async (device) => {
+  let blockagesReleased = false;
+
+  const wanIfcs = device.interfaces.filter(i => i.type === 'WAN');
+  const deviceId = device._id.toString();
+
+  for (const ifc of wanIfcs) {
+    const ifcId = ifc._id.toString();
+    const isReleased = await publicAddrInfoLimiter.release(`${deviceId}:${ifcId}`);
+    if (isReleased) {
+      blockagesReleased = true;
+    }
+  }
+
+  return blockagesReleased;
 };
 
 module.exports = Events; // default export
 exports = module.exports;
 
 exports.activatePendingTunnelsOfDevice = activatePendingTunnelsOfDevice; // named export
+exports.releasePublicAddrLimiterBlockage = releasePublicAddrLimiterBlockage; // named export
 exports.publicAddrInfoLimiter = publicAddrInfoLimiter; // named export

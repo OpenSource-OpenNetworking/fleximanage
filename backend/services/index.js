@@ -32,6 +32,7 @@ const PathLabelsService = require('./PathLabelsService');
 const MLPoliciesService = require('./MultiLinkPoliciesService');
 const ApplicationsService = require('./ApplicationsService');
 const FirewallPoliciesService = require('./FirewallPoliciesService');
+const QOSPoliciesService = require('./QOSPoliciesService');
 const PeersService = require('./PeersService');
 
 module.exports = {
@@ -52,5 +53,6 @@ module.exports = {
   MLPoliciesService,
   ApplicationsService,
   FirewallPoliciesService,
+  QOSPoliciesService,
   PeersService
 };

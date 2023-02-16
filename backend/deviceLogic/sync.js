@@ -27,6 +27,10 @@ const mlPolicySyncHandler = require('./mlpolicy').sync;
 const mlPolicyCompleteHandler = require('./mlpolicy').completeSync;
 const firewallPolicySyncHandler = require('./firewallPolicy').sync;
 const firewallPolicyCompleteHandler = require('./firewallPolicy').completeSync;
+const qosPolicySyncHandler = require('./qosPolicy').sync;
+const qosPolicyCompleteHandler = require('./qosPolicy').completeSync;
+const qosTrafficMapSyncHandler = require('./qosTrafficMap').sync;
+const qosTrafficMapCompleteHandler = require('./qosTrafficMap').completeSync;
 const deviceConfSyncHandler = require('./modifyDevice').sync;
 const deviceConfCompleteHandler = require('./modifyDevice').completeSync;
 const tunnelsSyncHandler = require('./tunnels').sync;
@@ -38,9 +42,10 @@ const appIdentificationCompleteHandler = require('./appIdentification').complete
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
 const stringify = require('json-stable-stringify');
 const SHA1 = require('crypto-js/sha1');
-const activatePendingTunnelsOfDevice = require('./events')
-  .activatePendingTunnelsOfDevice;
-const publicAddrInfoLimiter = require('./publicAddressLimiter');
+const {
+  activatePendingTunnelsOfDevice,
+  releasePublicAddrLimiterBlockage
+} = require('./events');
 const { reconfigErrorsLimiter } = require('../limiters/reconfigErrors');
 // const { publicPortLimiter } = require('../limiters/publicPort');
 
@@ -61,6 +66,14 @@ const syncHandlers = {
   firewallPolicies: {
     syncHandler: firewallPolicySyncHandler,
     completeHandler: firewallPolicyCompleteHandler
+  },
+  qosPolicies: {
+    syncHandler: qosPolicySyncHandler,
+    completeHandler: qosPolicyCompleteHandler
+  },
+  qosTrafficMap: {
+    syncHandler: qosTrafficMapSyncHandler,
+    completeHandler: qosTrafficMapCompleteHandler
   },
   appIdentification: {
     syncHandler: appIdentificationSyncHandler,
@@ -197,7 +210,7 @@ const incAutoSyncTrials = (deviceId) => {
   );
 };
 
-const queueFullSyncJob = async (device, hash, org) => {
+const queueFullSyncJob = async (device, hash, org, username = 'system') => {
   // Queue full sync job
   // Add current hash to message so the device can
   // use it to check if it is already synced
@@ -216,7 +229,7 @@ const queueFullSyncJob = async (device, hash, org) => {
       requests,
       completeCbData,
       callComplete
-    } = await syncHandler(deviceId, org);
+    } = await syncHandler(deviceId, org, device);
 
     // Add the requests to the sync message params object
     requests.forEach(subTask => {
@@ -242,7 +255,7 @@ const queueFullSyncJob = async (device, hash, org) => {
 
   const job = await deviceQueues.addJob(
     machineId,
-    'system',
+    username,
     org,
     // Data
     { title: 'Sync device ' + hostname, tasks: tasks },
@@ -449,7 +462,7 @@ const apply = async (device, user, data) => {
   await reconfigErrorsLimiter.release(_id.toString());
   const released = await releasePublicAddrLimiterBlockage(device[0]);
   if (released) {
-    await activatePendingTunnelsOfDevice(updDevice);
+    await activatePendingTunnelsOfDevice(updDevice, true);
   }
 
   // Get device current configuration hash
@@ -463,7 +476,8 @@ const apply = async (device, user, data) => {
   const job = await queueFullSyncJob(
     { deviceId: _id, machineId, hostname, versions },
     hash,
-    org
+    org,
+    user.username
   );
 
   if (!job) {
@@ -476,23 +490,6 @@ const apply = async (device, user, data) => {
     status: 'completed',
     message: ''
   };
-};
-
-const releasePublicAddrLimiterBlockage = async (device) => {
-  let blockagesReleased = false;
-
-  const wanIfcs = device.interfaces.filter(i => i.type === 'WAN');
-  const deviceId = device._id.toString();
-
-  for (const ifc of wanIfcs) {
-    const ifcId = ifc._id.toString();
-    const isReleased = await publicAddrInfoLimiter.release(`${deviceId}:${ifcId}`);
-    if (isReleased) {
-      blockagesReleased = true;
-    }
-  }
-
-  return blockagesReleased;
 };
 
 // Register a method that updates sync state

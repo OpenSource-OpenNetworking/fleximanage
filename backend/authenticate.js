@@ -45,9 +45,14 @@ exports.localPassport = passport.use(new LocalStrategy(User.authenticate()));
 var opts = {};
 opts.jwtFromRequest = ExtractJwt.fromAuthHeaderAsBearerToken();
 opts.secretOrKey = configs.get('userTokenSecretKey');
-exports.jwtPassport = passport.use(new JwtStrategy(opts, async (jwtPayload, done) => {
+exports.jwtPassport = passport.use('jwt', new JwtStrategy(opts, async (jwtPayload, done) => {
+  // prevent access sensitive resources with login token
+  if (jwtPayload.type === 'login') {
+    return done(null, false, { message: 'A login token is unauthorized to access this resource' });
+  }
+
   // check if account exists on payload
-  if (!jwtPayload.account) return done(null, false, { message: 'Invalid token' });
+  if (!jwtPayload.account) return done(null, false, { message: 'Account not found' });
 
   // check if token exists
   let token = null;
@@ -74,6 +79,27 @@ exports.jwtPassport = passport.use(new JwtStrategy(opts, async (jwtPayload, done
         return res === true
           ? done(null, user)
           : done(null, false, { message: 'Invalid Token' });
+      } else {
+        done(null, false, { message: 'Invalid Token' });
+      }
+    });
+}));
+
+passport.use('jwt-login', new JwtStrategy(opts, async (jwtPayload, done) => {
+  // prevent access sensitive resources with login token
+  if (jwtPayload.type !== 'login') {
+    return done(null, false, { message: 'The JWT token is unauthorized to access this resource' });
+  }
+
+  User
+    .findOne({ _id: jwtPayload.userId })
+    .populate('defaultOrg')
+    .populate('defaultAccount')
+    .exec(async (err, user) => {
+      if (err) {
+        return done(err, false);
+      } else if (user) {
+        return done(null, user);
       } else {
         done(null, false, { message: 'Invalid Token' });
       }
@@ -110,6 +136,9 @@ const setUserPerms = async (user, jwtPayload, token = null) => {
       user.perms = token.permissions;
     }
   }
+
+  // save if user passed mfa to login
+  user.isLoggedInWithMfa = jwtPayload.mfaVerified ?? true;
 
   return true;
 };
@@ -171,6 +200,8 @@ exports.verifyUserLocal = async function (req, res, next) {
         req.user = user;
         // Try to update organization if null
         await orgUpdateFromNull(req, res);
+        // If there's no account found after login generate an error
+        if (!req.user.defaultAccount) return next(createError(401, 'Account not found'));
         // Add userId to the request for logging purposes.
         req.userId = useUserName ? user.username : user.id;
         return next();
@@ -185,7 +216,7 @@ exports.verifyUserJWT = function (req, res, next) {
     logger.debug('verifyUserJWT: OPTIONS request');
     return next();
     // Check if an API call
-  } else if (req.url.startsWith('/api')) {
+  } else if (req.url.startsWith('/api') || req.url.includes('/mfa')) {
     passport.authenticate('jwt', { session: false }, async (err, user, info) => {
       if (err || !user) {
         // If the JWT token has expired, but the request
@@ -219,7 +250,7 @@ exports.verifyUserJWT = function (req, res, next) {
             // Attach the token to the headers and let
             // the request continue to the next middleware.
             req.user = userDetails;
-            const token = await getToken(req);
+            const token = await getToken(req, { mfaVerified: decodedToken.mfaVerified ?? false });
             res.setHeader('Refresh-JWT', token);
 
             // Manually set the user details and permissions
@@ -273,7 +304,7 @@ exports.verifyUserJWT = function (req, res, next) {
 exports.verifyAdmin = function (req, res, next) {
   // Allow access to admin users only
   return !req.user.admin
-    ? next(createError(403, 'not authorized')) : next();
+    ? next(createError(403, 'You are not authorized for this operation')) : next();
 };
 
 /**
@@ -322,4 +353,20 @@ exports.verifyPermissionEx = function (serviceName, { method, user, openapi }) {
 
 exports.validatePassword = function (password) {
   return (password !== null && password !== undefined && password.length >= 8);
+};
+
+exports.verifyUserOrLoginJWT = function (req, res, next) {
+  // Allow options to pass through without verification for preflight options requests
+  if (!req.originalUrl.startsWith('/api/users')) {
+    return next(createError(403, "You don't have permission to perform this operation"));
+  }
+
+  passport.authenticate(['jwt-login', 'jwt'], { session: false }, async (err, user, info) => {
+    if (err || !user) {
+      logger.warn('JWT verification failed', { params: { err: err?.message }, req: req });
+      return next(createError(401));
+    }
+    req.user = user;
+    return next();
+  })(req, res, next);
 };

@@ -85,7 +85,7 @@ class FlexiBilling {
    * @async
    */
   async retrieveInvoices (options) {
-    return [];
+    return { list: [] };
   }
 
   /**
@@ -155,6 +155,10 @@ class FlexiBilling {
   }
 
   async getFeaturesSummaryByAccounts (accounts) {
+    return [];
+  }
+
+  async getAllSubscriptionsForQuery (query) {
     return [];
   }
 }

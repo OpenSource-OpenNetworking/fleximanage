@@ -20,7 +20,22 @@ const Schema = mongoose.Schema;
 const mongoConns = require('../mongoConns.js')();
 const find = require('lodash/find');
 const concat = require('lodash/concat');
+const union = require('lodash/union');
 const { validateIPv4WithMask, validatePortRange } = require('./validators');
+
+const predefinedServiceClasses = [
+  'default',
+  'real-time',
+  'signaling',
+  'telephony',
+  'broadcast-video',
+  'network-control',
+  'oam',
+  'high-throughput',
+  'multimedia-conferencing',
+  'multimedia-streaming',
+  'low-latency'
+];
 
 /**
  * Rules Database Schema
@@ -363,11 +378,50 @@ const getAppIdentificationUpdateAt = async (orgList) => {
   };
 };
 
+/**
+ * Gets all existing service classes
+ * @param {*} orgList Organization filter
+ * @returns {Array} an array of existing service classes
+ */
+const getExistingServiceClasses = async (orgList) => {
+  const importedRes = await importedAppIdentifications.aggregate([
+    { $project: { 'appIdentifications.serviceClass': 1 } },
+    { $unwind: '$appIdentifications' },
+    {
+      $group: {
+        _id: null,
+        serviceClasses: {
+          $addToSet: '$appIdentifications.serviceClass'
+        }
+      }
+    }
+  ]);
+  const customRes = await appIdentifications.aggregate([
+    { $match: { 'meta.org': { $in: orgList.map(o => mongoose.Types.ObjectId(o)) } } },
+    { $project: { 'appIdentifications.serviceClass': 1 } },
+    { $unwind: '$appIdentifications' },
+    {
+      $group: {
+        _id: null,
+        serviceClasses: {
+          $addToSet: '$appIdentifications.serviceClass'
+        }
+      }
+    }
+  ]);
+  return union(
+    customRes.length ? customRes[0].serviceClasses : [],
+    importedRes.length ? importedRes[0].serviceClasses : []
+  ).sort();
+};
+
 // Default exports
 module.exports = {
   getAllAppIdentifications,
   getAppIdentificationUpdateAt,
   getAppIdentificationById,
+  getExistingServiceClasses,
+  predefinedServiceClasses,
   appIdentifications,
   importedAppIdentifications,
   Rules: mongoConns.getMainDB().model('Rules', rulesSchema)

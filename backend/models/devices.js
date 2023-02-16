@@ -246,6 +246,16 @@ const interfacesSchema = new Schema({
     ],
     default: ''
   },
+  // the interface link status
+  linkStatus: {
+    type: String,
+    enum: [
+      '',
+      'up',
+      'down'
+    ],
+    default: ''
+  },
   // device type - wifi, lte
   deviceType: {
     type: String,
@@ -258,6 +268,19 @@ const interfacesSchema = new Schema({
   deviceParams: {
     type: Object,
     default: {}
+  },
+  bandwidthMbps: {
+    type: Object,
+    required: true,
+    default: {
+      tx: 100,
+      rx: 100
+    }
+  },
+  qosPolicy: {
+    type: Schema.Types.ObjectId,
+    ref: 'QOSPolicies',
+    default: null
   },
   ospf: {
     area: {
@@ -367,6 +390,14 @@ const staticroutesSchema = new Schema({
     }
   },
   redistributeViaOSPF: {
+    type: Boolean,
+    default: false
+  },
+  redistributeViaBGP: {
+    type: Boolean,
+    default: false
+  },
+  onLink: {
     type: Boolean,
     default: false
   },
@@ -561,13 +592,54 @@ const deviceApplicationSchema = new Schema({
 });
 
 /**
- * Device multilink policy schema
+ * Device routing filter schema
  */
-const deviceMultilinkPolicySchema = new Schema({
+const deviceRoutingFilterRuleSchema = new Schema({
+  network: {
+    type: String,
+    validate: {
+      validator: val => validators.validateIPv4WithMask(val),
+      message: 'network should be a valid IPv4/mask'
+    },
+    required: true
+  }
+});
+
+/**
+ * Device routing filter schema
+ */
+const deviceRoutingFiltersSchema = new Schema({
+  name: {
+    type: String,
+    required: true,
+    validate: {
+      validator: validators.validateStringNoSpaces,
+      message: 'name cannot include spaces'
+    }
+  },
+  defaultAction: {
+    type: String,
+    enum: ['deny', 'allow'],
+    default: 'deny'
+  },
+  description: {
+    type: String,
+    required: true
+  },
+  rules: {
+    type: [deviceRoutingFilterRuleSchema],
+    required: true
+  }
+});
+
+/**
+ * Device policy schema
+ */
+const devicePolicySchema = (ref) => new Schema({
   _id: false,
   policy: {
     type: Schema.Types.ObjectId,
-    ref: 'MultiLinkPolicies',
+    ref: ref,
     default: null
   },
   status: {
@@ -583,24 +655,33 @@ const deviceMultilinkPolicySchema = new Schema({
 });
 
 /**
- * Device firewall policy schema
+ * Device QoS traffic map install schema
  */
-const deviceFirewallPolicySchema = new Schema({
-  _id: false,
-  policy: {
-    type: Schema.Types.ObjectId,
-    ref: 'FirewallPolicies',
+const QOSTrafficMapSchema = new Schema({
+  /**
+   * This indicates the last time requested to update.
+   * Its purpose is to prevent multiple identical requests
+   * Updated when a new job request is sent or when the job removed/failed
+   * Possible values:
+   *  - null: last request indicated to remove the QoS traffic map
+   *  - <Latest Date>: last request indicated to add the QoS traffic map
+   */
+  lastRequestTime: {
+    type: Date,
     default: null
   },
-  status: {
-    type: String,
-    enum: statusEnums,
-    default: ''
-  },
-  requestTime: {
+  /**
+   * This indicates what is installed on the device, only updated by QOS Policy complete callback
+   * Possible values:
+   *  - null: last request indicated to remove the QoS Traffic Map
+   *  - <Latest Date>: last request indicated to install the QoS Traffic Map
+   */
+  lastUpdateTime: {
     type: Date,
     default: null
   }
+}, {
+  timestamps: false
 });
 
 /**
@@ -673,6 +754,39 @@ const IKEv2Schema = new Schema({
     type: Boolean,
     default: false
   }
+});
+
+const BGPNeighborSchema = new Schema({
+  ip: {
+    type: String,
+    required: true,
+    validate: {
+      validator: validators.validateIPv4,
+      message: props => `${props.value} should be a valid ipv4`
+    }
+  },
+  remoteASN: {
+    type: String,
+    required: true,
+    validate: {
+      validator: validators.validateBGPASN,
+      message: props => `${props.value} should be a vaild ASN`
+    }
+  },
+  password: {
+    type: String,
+    default: ''
+  },
+  inboundFilter: {
+    type: String,
+    default: ''
+  },
+  outboundFilter: {
+    type: String,
+    default: ''
+  }
+}, {
+  timestamps: true
 });
 
 /**
@@ -828,12 +942,16 @@ const deviceSchema = new Schema({
   labels: [String],
   policies: {
     multilink: {
-      type: deviceMultilinkPolicySchema,
-      default: deviceMultilinkPolicySchema
+      type: devicePolicySchema('MultiLinkPolicies'),
+      default: devicePolicySchema('MultiLinkPolicies')
     },
     firewall: {
-      type: deviceFirewallPolicySchema,
-      default: deviceFirewallPolicySchema
+      type: devicePolicySchema('FirewallPolicies'),
+      default: devicePolicySchema('FirewallPolicies')
+    },
+    qos: {
+      type: devicePolicySchema('QOSPolicies'),
+      default: devicePolicySchema('QOSPolicies')
     }
   },
   deviceSpecificRulesEnabled: {
@@ -843,6 +961,7 @@ const deviceSchema = new Schema({
   firewall: {
     rules: [firewallRuleSchema]
   },
+  qosTrafficMap: QOSTrafficMapSchema,
   sync: {
     type: deviceSyncSchema,
     default: deviceSyncSchema
@@ -851,6 +970,50 @@ const deviceSchema = new Schema({
   IKEv2: {
     type: IKEv2Schema,
     default: IKEv2Schema
+  },
+  bgp: {
+    enable: {
+      type: Boolean,
+      required: true,
+      default: false
+    },
+    routerId: {
+      type: String,
+      required: false,
+      validate: {
+        validator: validators.validateIPv4,
+        message: props => `${props.value} should be a vaild ip address`
+      }
+    },
+    localASN: {
+      type: String,
+      default: '',
+      validate: {
+        validator: asn => asn === '' || validators.validateBGPASN(asn),
+        message: props => `${props.value} should be a vaild ASN`
+      }
+    },
+    keepaliveInterval: {
+      type: String,
+      default: '30',
+      validate: {
+        validator: validators.validateBGPInterval,
+        message: props => `${props.value} should be a vaild interval`
+      }
+    },
+    holdInterval: {
+      type: String,
+      default: '90',
+      validate: {
+        validator: validators.validateBGPInterval,
+        message: props => `${props.value} should be a vaild interval`
+      }
+    },
+    redistributeOspf: {
+      type: Boolean,
+      default: true
+    },
+    neighbors: [BGPNeighborSchema]
   },
   ospf: {
     routerId: {
@@ -876,9 +1039,54 @@ const deviceSchema = new Schema({
         validator: validators.validateOSPFInterval,
         message: props => `${props.value} should be a valid integer`
       }
+    },
+    redistributeBgp: {
+      type: Boolean,
+      default: true
     }
   },
-  applications: [deviceApplicationSchema]
+  routingFilters: {
+    type: [deviceRoutingFiltersSchema]
+  },
+  applications: [deviceApplicationSchema],
+  cpuInfo: {
+    hwCores: {
+      type: Number,
+      default: 2,
+      validate: {
+        validator: validators.validateCpuCoresNumber,
+        message: props => `${props.value} should be a valid integer`
+      }
+    },
+    grubCores: {
+      type: Number,
+      default: 2,
+      validate: {
+        validator: validators.validateCpuCoresNumber,
+        message: props => `${props.value} should be a valid integer`
+      }
+    },
+    vppCores: {
+      type: Number,
+      default: 1,
+      validate: {
+        validator: validators.validateCpuCoresNumber,
+        message: props => `${props.value} should be a valid integer`
+      }
+    },
+    configuredVppCores: {
+      type: Number,
+      default: 1,
+      validate: {
+        validator: validators.validateCpuCoresNumber,
+        message: props => `${props.value} should be a valid integer`
+      }
+    },
+    powerSaving: {
+      type: Boolean,
+      default: false
+    }
+  }
 },
 {
   timestamps: true

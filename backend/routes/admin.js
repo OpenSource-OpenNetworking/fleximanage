@@ -264,9 +264,9 @@ adminRouter
     // 1. Open websocket connections and connection info
     const devices = connections.getAllDevices();
     result.numConnectedDevices = devices.length;
-    devices.forEach((device) => {
-      const deviceInfo = connections.getDeviceInfo(device);
-      const devStatus = deviceStatus.getDeviceStatus(device);
+    devices.forEach(deviceMachineId => {
+      const deviceInfo = connections.getDeviceInfo(deviceMachineId);
+      const devStatus = deviceStatus.getDeviceStatus(deviceMachineId);
 
       let deviceOrg = null;
       const account = accounts.data.find(a => {
@@ -274,10 +274,10 @@ adminRouter
         if (org) {
           deviceOrg = org;
         }
-        return org !== null;
+        return org !== undefined;
       });
       result.connectedDevices.push({
-        machineID: device,
+        machineID: deviceMachineId,
         status: devStatus ? devStatus.state : 'unknown',
         version: deviceInfo.version,
         org: deviceInfo.org,

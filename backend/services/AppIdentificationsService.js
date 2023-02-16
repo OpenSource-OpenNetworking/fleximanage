@@ -428,7 +428,7 @@ class AppIdentificationsService {
         return Service.rejectResponse(
           'Failed to delete app identification', 500);
       }
-      return Service.successResponse({}, 204);
+      return Service.successResponse(null, 204);
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',

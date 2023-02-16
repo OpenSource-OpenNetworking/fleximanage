@@ -213,7 +213,8 @@ class DeviceQueues {
         target: deviceId,
         username: (username) || 'unknown',
         org: (org) || 'unknown',
-        init: init
+        init: init,
+        jobUpdated: false
       };
 
       const job = this.queue
@@ -329,9 +330,11 @@ class DeviceQueues {
      * @param  {string}   dir      order to return data 'asc' or 'desc'
      * @param  {integer}  limit    limit the number of processed jobs, -1 for no limit
      *                             the callback should return 'true' for processed job
+     * @param  {boolean}  isDelete job will be deleted in the callback
      * @return {void}
      */
-  iterateJobs (state, callback, deviceId = null, from = 0, to = -1, dir = 'asc', limit = -1) {
+  iterateJobs (state, callback, deviceId = null, from = 0, to = -1, dir = 'asc', limit = -1,
+    isDelete = false) {
     return new Promise((resolve, reject) => {
       let done = 0;
 
@@ -350,12 +353,20 @@ class DeviceQueues {
             };
             resolve();
           };
+          // if jobs are removed after single batch iteration
+          // we need to start a new iteration shifted by the number of deleted jobs
+          let getJobsFrom = batchFrom;
+          let getJobsTo = batchTo;
+          if (isDelete) {
+            getJobsTo = getJobsTo - done;
+            getJobsFrom = getJobsFrom - done;
+          }
           if (state === 'all') {
-            kue.Job.range(batchFrom, batchTo, dir, handleFunc);
+            kue.Job.range(getJobsFrom, getJobsTo, dir, handleFunc);
           } else if (deviceId) {
-            kue.Job.rangeByType(deviceId, state, batchFrom, batchTo, dir, handleFunc);
+            kue.Job.rangeByType(deviceId, state, getJobsFrom, getJobsTo, dir, handleFunc);
           } else {
-            kue.Job.rangeByState(state, batchFrom, batchTo, dir, handleFunc);
+            kue.Job.rangeByState(state, getJobsFrom, getJobsTo, dir, handleFunc);
           }
         });
       };
@@ -367,7 +378,7 @@ class DeviceQueues {
           let loopFrom = from;
           let loopDelta = CHUNK_SIZE;
           if (dir === 'desc') {
-            loopFrom = to - CHUNK_SIZE;
+            loopFrom = to - CHUNK_SIZE + 1;
             loopDelta = -CHUNK_SIZE;
           }
           for (
@@ -378,7 +389,7 @@ class DeviceQueues {
             if (limit > 0 && done >= limit) break;
             await singleBatchIteration(
               Math.max(chunkFrom, from),
-              Math.min(chunkFrom + CHUNK_SIZE, to)
+              Math.min(chunkFrom + CHUNK_SIZE - 1, to)
             );
             await this.setImmediatePromise();
           };
@@ -408,10 +419,11 @@ class DeviceQueues {
      * @param  {integer}  limit    limit the number of processed jobs, -1 for no limit
      * @param  {array}    filters  an array of filters objects [{ key, op, val}]
      *                             example [{key:'state',op:'!=',val:'failed'}, ...]
+     * @param  {boolean}  isDelete jobs will be deleted in the callback
      * @return {void}
      */
   iterateJobsByOrg (org, state, callback, from = 0, to = -1, dir = 'asc',
-    skip = 0, limit = -1, filters) {
+    skip = 0, limit = -1, filters, isDelete = false) {
     return new Promise((resolve, reject) => {
       let skipped = 0;
       let deviceId = null;
@@ -448,7 +460,7 @@ class DeviceQueues {
         return false;
       };
 
-      this.iterateJobs(state, orgCallback, deviceId, from, to, dir, limit)
+      this.iterateJobs(state, orgCallback, deviceId, from, to, dir, limit, isDelete)
         .then(() => {
           return resolve();
         })
@@ -528,12 +540,13 @@ class DeviceQueues {
    */
   async removeJobsByOrgAndFilters (org, filters) {
     try {
+      const isDelete = true;
       await this.iterateJobsByOrg(org, 'all', async (job) => {
         const removedJob = await job.remove(err => { if (err) throw err; });
         const { method } = removedJob.data.response;
         this.callRemoveRegisteredCallback(method, removedJob);
         return true;
-      }, 0, -1, 'asc', 0, -1, filters);
+      }, 0, -1, 'asc', 0, -1, filters, isDelete);
     } catch (err) {
       logger.warn('Encountered an error while removing jobs', {
         params: { org: org, filters: filters, err: err.message }

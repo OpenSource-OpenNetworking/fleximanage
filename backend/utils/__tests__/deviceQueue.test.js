@@ -33,7 +33,13 @@ describe('Initialization', () => {
         expect(job.data).toEqual({
           message: { testdata: 'AAA1' },
           response: { resp: 'RRR1' },
-          metadata: { target: 'AAA', username: 'unknown', org: 'unknown', init: false }
+          metadata: {
+            target: 'AAA',
+            username: 'unknown',
+            org: 'unknown',
+            init: false,
+            jobUpdated: false
+          }
         });
         expect(rjob.id).toBe(job.id);
       });
@@ -63,7 +69,8 @@ describe('Initialization', () => {
             target: 'BBB',
             username: 'user1',
             org: '4edd40c86762e0fb12000001',
-            init: false
+            init: false,
+            jobUpdated: false
           }
         });
         expect(rjob.id).toBe(job.id);
@@ -239,7 +246,8 @@ describe('Initialization', () => {
             target: 'CCC',
             username: 'user2',
             org: '4edd40c86762e0fb12000002',
-            init: false
+            init: false,
+            jobUpdated: false
           }
         });
         expect(rjob.id).toBe(job.id);

@@ -179,6 +179,10 @@ const firewallRuleSchema = new Schema({
     type: String,
     required: false,
     enum: ['applications']
+  },
+  referenceNumber: {
+    type: Number,
+    required: false
   }
 });
 

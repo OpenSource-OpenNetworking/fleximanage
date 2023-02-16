@@ -23,7 +23,7 @@ const isEqual = require('lodash/isEqual');
 const omit = require('lodash/omit');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
-const { reconstructTunnels } = require('../deviceLogic/modifyDevice');
+const { sendRemoveTunnelsJobs, sendAddTunnelsJobs } = require('../deviceLogic/tunnels');
 const DevicesService = require('./DevicesService');
 const deviceQueues = require('../utils/deviceQueue')(
   configs.get('kuePrefix'),
@@ -128,7 +128,9 @@ class PeersService {
 
           let jobs = [];
           if (isNeedToReconstructTunnels) {
-            jobs = await reconstructTunnels(ids, user.username, true);
+            const removeJobs = await sendRemoveTunnelsJobs(ids, user.username, true);
+            const addJobs = await sendAddTunnelsJobs(ids, user.username, true);
+            jobs = jobs.concat([...removeJobs, ...addJobs]);
           } else {
             for (const tunnel of tunnels) {
               const tasks = [{
@@ -167,7 +169,6 @@ class PeersService {
               );
 
               jobs.push(job);
-              // jobs = await reconstructTunnels(ids, orgList[0], user.username, true);
             }
           }
           reconstructedTunnels = jobs.length;

@@ -46,7 +46,7 @@ class WebHooks {
         throw error;
       })
       .then(response => {
-        console.log(JSON.stringify(response));
+        // console.log(JSON.stringify(response));
         if (response.ok) {
           // Success handling
           if (response.message.status === 'success') return true;

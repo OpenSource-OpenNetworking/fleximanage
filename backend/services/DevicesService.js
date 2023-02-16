@@ -32,7 +32,6 @@ const validator = require('validator');
 const net = require('net');
 const pick = require('lodash/pick');
 const isEqual = require('lodash/isEqual');
-
 const uniqBy = require('lodash/uniqBy');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 const flexibilling = require('../flexibilling');
@@ -41,15 +40,15 @@ const { validateOperations } = require('../deviceLogic/interfaces');
 const {
   validateDevice,
   validateDhcpConfig,
-  validateStaticRoute
+  validateStaticRoute,
+  validateQOSPolicy
 } = require('../deviceLogic/validators');
 const {
-  mapLteNames, mapWifiNames, getBridges, parseLteStatus
+  mapLteNames, mapWifiNames, getBridges, parseLteStatus, getCpuInfo
 } = require('../utils/deviceUtils');
-const { getAllOrganizationSubnets } = require('../utils/orgUtils');
+const { getAllOrganizationSubnets, getAllOrganizationBGPDevices } = require('../utils/orgUtils');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
 const { generateTunnelParams } = require('../utils/tunnelUtils');
-const wifiChannels = require('../utils/wifi-channels');
 const deviceQueues = require('../utils/deviceQueue')(
   configs.get('kuePrefix'),
   configs.get('redisUrl')
@@ -59,10 +58,14 @@ const { TypedError, ErrorTypes } = require('../utils/errors');
 const { getMatchFilters } = require('../utils/filterUtils');
 const TunnelsService = require('./TunnelsService');
 const eventsReasons = require('../deviceLogic/events/eventReasons');
+const {
+  activatePendingTunnelsOfDevice,
+  releasePublicAddrLimiterBlockage
+} = require('../deviceLogic/events');
 const publicAddrInfoLimiter = require('../deviceLogic/publicAddressLimiter');
 const applications = require('../models/applications');
 const applicationStore = require('../models/applicationStore');
-const { getMajorVersion } = require('../versioning');
+const { getMajorVersion, getMinorVersion } = require('../versioning');
 const createError = require('http-errors');
 
 class DevicesService {
@@ -158,7 +161,10 @@ class DevicesService {
       'upgradeSchedule',
       'sync',
       'ospf',
-      'coords'
+      'coords',
+      'bgp',
+      'routingFilters',
+      'cpuInfo'
     ]);
 
     retDevice.isConnected = connections.isConnected(retDevice.machineId);
@@ -177,6 +183,7 @@ class DevicesService {
           'useFixedPublicPort',
           'internetAccess',
           'monitorInternet',
+          'linkStatus',
           'gateway',
           'metric',
           'mtu',
@@ -196,14 +203,21 @@ class DevicesService {
           'deviceType',
           'configuration',
           'deviceParams',
+          'qosPolicy',
+          'bandwidthMbps',
           'dnsServers',
           'dnsDomains',
           'useDhcpDnsServers',
           'ospf'
         ]);
         retIf._id = retIf._id.toString();
+        if (retIf.qosPolicy) {
+          retIf.qosPolicy = (retIf.qosPolicy._id ? retIf.qosPolicy._id : retIf.qosPolicy)
+            .toString();
+        }
         // if device is not connected then internet access status is unknown
         retIf.internetAccess = retDevice.isConnected ? retIf.internetAccess : '';
+        retIf.linkStatus = retDevice.isConnected ? retIf.linkStatus : '';
 
         retIf.isPublicAddressRateLimited =
           await publicAddrInfoLimiter.isBlocked(`${deviceId}:${retIf._id}`);
@@ -222,8 +236,10 @@ class DevicesService {
           'ifname',
           'metric',
           'redistributeViaOSPF',
+          'redistributeViaBGP',
           'isPending',
-          'pendingReason'
+          'pendingReason',
+          'onLink'
         ]);
         retRoute._id = retRoute._id.toString();
         return retRoute;
@@ -320,6 +336,11 @@ class DevicesService {
         await statusesInDb.updateDevicesStatuses(orgList);
       }
 
+      let parsedFilters = [];
+      if (filters) {
+        parsedFilters = JSON.parse(filters);
+      }
+
       const pipeline = [
         {
           $match: {
@@ -356,38 +377,24 @@ class DevicesService {
         },
         {
           $lookup: {
+            from: 'qospolicies',
+            localField: 'policies.qos.policy',
+            foreignField: '_id',
+            as: 'policies.qos.policy'
+          }
+        },
+        {
+          $unwind: {
+            path: '$policies.qos.policy',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        {
+          $lookup: {
             from: 'pathlabels',
             localField: 'interfaces.pathlabels',
             foreignField: '_id',
             as: 'pathlabels'
-          }
-        },
-        {
-          $lookup: {
-            from: 'applications',
-            localField: 'applications.app',
-            foreignField: '_id',
-            as: 'applications.app'
-          }
-        },
-        {
-          $unwind: {
-            path: '$applications.app',
-            preserveNullAndEmptyArrays: true
-          }
-        },
-        {
-          $lookup: {
-            from: 'applicationStore',
-            localField: 'applications.app.appStoreApp',
-            foreignField: '_id',
-            as: 'applications.app.appStoreApp'
-          }
-        },
-        {
-          $unwind: {
-            path: '$applications.app.appStoreApp',
-            preserveNullAndEmptyArrays: true
           }
         },
         {
@@ -404,8 +411,34 @@ class DevicesService {
         }
       ];
 
-      if (filters) {
-        const parsedFilters = JSON.parse(filters);
+      // The stages associated with apps are relatively heavy.
+      // They are used only for filtering. No need to run them every time
+      if (parsedFilters.find(f => f.key.includes('applications'))) {
+        pipeline.push(...deviceApplicationFilters);
+      }
+
+      if (parsedFilters.length > 0) {
+        let populateInterfacesQosPolicy = false;
+        parsedFilters = parsedFilters.map(({ key, op, val }) => {
+          if (key.startsWith('policies.qos.policy')) {
+            // check interfaces specific policy also
+            populateInterfacesQosPolicy = true;
+            const combinedKey = key + '|interfacesQosPolicy.' + key.split('.').pop();
+            return { key: combinedKey, op, val };
+          } else {
+            return { key, op, val };
+          }
+        });
+        if (populateInterfacesQosPolicy) {
+          pipeline.push({
+            $lookup: {
+              from: 'qospolicies',
+              localField: 'interfaces.qosPolicy',
+              foreignField: '_id',
+              as: 'interfacesQosPolicy'
+            }
+          });
+        }
         const matchFilters = getMatchFilters(parsedFilters);
         if (matchFilters.length > 0) {
           pipeline.push({
@@ -444,7 +477,9 @@ class DevicesService {
             pathlabels: { name: 1, description: 1, color: 1, type: 1 },
             'policies.multilink': { status: 1, policy: { name: 1, description: 1 } },
             'policies.firewall': { status: 1, policy: { name: 1, description: 1 } },
+            'policies.qos': { status: 1, policy: { name: 1, description: 1 } },
             applications: 1,
+            cpuInfo: 1,
             deviceState: '$deviceStatus.state'
           }
         });
@@ -472,11 +507,14 @@ class DevicesService {
           'dhcp',
           'deviceSpecificRulesEnabled',
           'firewall',
+          'qosPolicy',
+          'bandwidthMbps',
           'upgradeSchedule',
           'sync',
           'ospf',
           'isConnected',
           'deviceState',
+          'cpuInfo',
           'coords'
         ];
         // populate pathlabels for every interface
@@ -681,6 +719,7 @@ class DevicesService {
         .populate('interfaces.pathlabels', '_id name description color type')
         .populate('policies.firewall.policy', '_id name description rules')
         .populate('policies.multilink.policy', '_id name description')
+        .populate('policies.qos.policy', '_id name description')
         .populate({
           path: 'applications.app',
           populate: {
@@ -815,6 +854,9 @@ class DevicesService {
               );
             }
 
+            // update server stats cache, so the UI will have the most updated data
+            deviceStatus.setDeviceLteStatus(deviceObject.machineId, ifc.devId, response);
+            response = deviceStatus.getDeviceLteStatus(deviceObject.machineId, ifc.devId);
             return response;
           }
         },
@@ -826,7 +868,7 @@ class DevicesService {
           },
           parseResponse: async response => {
             response = mapWifiNames(response);
-            return { ...response, wifiChannels };
+            return response;
           }
         }
       };
@@ -1257,6 +1299,8 @@ class DevicesService {
       let origDevice;
       let updDevice;
 
+      let isNeedToReleasePendingTunnels = false;
+
       // We set closeSession to false since apply uses documents with the session
       // The session is closed at the end of the API
       sessionCopy = await mongoConns.mainDBwithTransaction(async (session) => {
@@ -1298,6 +1342,7 @@ class DevicesService {
         if (isRunning && configs.get('forbidLanSubnetOverlaps', 'boolean')) {
           orgSubnets = await getAllOrganizationSubnets(origDevice.org);
         }
+        const orgBgp = await getAllOrganizationBGPDevices(origDevice.org);
 
         const origTunnels = await tunnelsModel.find({
           isActive: true,
@@ -1343,8 +1388,7 @@ class DevicesService {
                 origIntf.useFixedPublicPort !== updIntf.useFixedPublicPort;
 
               if (isStunDisabledNow || isStaticPublicInfoChanged || isPortForwardingChanged) {
-                const deviceId = origDevice._id.toString();
-                await publicAddrInfoLimiter.release(`${deviceId}:${interfaceId}`);
+                isNeedToReleasePendingTunnels = true;
               }
 
               // Public port and NAT type is assigned by system only
@@ -1352,6 +1396,7 @@ class DevicesService {
                 ? origIntf.PublicPort : configs.get('tunnelPort');
               updIntf.NatType = updIntf.useStun ? origIntf.NatType : 'Static';
               updIntf.internetAccess = origIntf.internetAccess;
+              updIntf.linkStatus = origIntf.linkStatus;
               // Device type is assigned by system only
               updIntf.deviceType = origIntf.deviceType;
 
@@ -1362,6 +1407,11 @@ class DevicesService {
               if (origIntf.isAssigned) {
                 // if interface unassigned make sure it's not used by any tunnel
                 if (!updIntf.isAssigned) {
+                  if (Array.isArray(deviceRequest.staticroutes) &&
+                    (deviceRequest.staticroutes.some(r => r.ifname === updIntf.devId))) {
+                    // eslint-disable-next-line max-len
+                    throw new Error('Unassigned interface used by existing static routes, please delete related static routes before');
+                  }
                   const numTunnels = await tunnelsModel
                     .countDocuments({
                       isActive: true,
@@ -1369,7 +1419,7 @@ class DevicesService {
                     }).session(session);
                   if (numTunnels > 0) {
                     // eslint-disable-next-line max-len
-                    throw new Error('Unassigned interface used by existing tunnels, please delete related tunnels before');
+                    throw new Error('Interface used by existing tunnels, cannot un-assign. Please delete tunnels first.');
                   }
                 } else {
                   // interface still assigned, check if removed path labels not used by any tunnel
@@ -1394,6 +1444,15 @@ class DevicesService {
                   }
                 }
               }
+
+              // check interface specific validation
+              if (updIntf?.qosPolicy) {
+                const { valid, err } = validateQOSPolicy([origDevice]);
+                if (!valid) {
+                  throw new Error(err);
+                }
+              }
+
               // check firewall rules
               if (deviceRequest.firewall) {
                 let hadInbound = false;
@@ -1460,9 +1519,11 @@ class DevicesService {
                 if ((updIntf.IPv4 && updIntf.IPv4 !== origIntf.IPv4) ||
                   (updIntf.IPv4Mask && updIntf.IPv4Mask !== origIntf.IPv4Mask) ||
                   (updIntf.gateway && updIntf.gateway !== origIntf.gateway)) {
-                  throw createError(400,
-                    `Not allowed to modify parameters of unassigned interfaces (${origIntf.name})`
+                  logger.warn(
+                    'Unassigned interface is managed by the device host, parameters not applied',
+                    { params: { deviceId: id, request: updIntf } }
                   );
+                  return origIntf;
                 }
               };
               // Not allowed to modify parameters of PPPoE interfaces
@@ -1515,6 +1576,13 @@ class DevicesService {
               if ((keyId && !key) || (!keyId && key)) {
                 throw createError(400,
                   `(${origIntf.name}) Not allowed to save OSPF key ID without key and vice versa`
+                );
+              }
+
+              if (updIntf.isAssigned && updIntf.routing === 'BGP' && !deviceRequest.bgp.enable) {
+                throw new Error(
+                  `Can't set BGP on ${origIntf.name}. ` +
+                  'BGP is disabled, please configure BGP from routing settings first'
                 );
               }
 
@@ -1623,9 +1691,32 @@ class DevicesService {
             return d;
           });
 
+          // Verify there is no DHCP interfaces duplication
+          const uniqInterfaces = uniqBy(deviceRequest.dhcp, 'interface');
+          if (uniqInterfaces.length !== deviceRequest.dhcp.length) {
+            throw new Error('Multiple DHCP for the same interface not allowed');
+          }
+
           // validate DHCP info if it exists
           for (const dhcpRequest of deviceRequest.dhcp) {
             DevicesService.validateDhcpRequest(deviceToValidate, dhcpRequest);
+          }
+        }
+
+        if (deviceRequest?.bgp?.enable) {
+          const major = getMajorVersion(origDevice.versions.agent);
+          const minor = getMinorVersion(origDevice.versions.agent);
+          if (major <= 5 && minor < 3) {
+            throw createError(400,
+              'The device does not run the required flexiWAN version for BGP. ' +
+              'Please disable BGP or upgrade the device');
+          }
+        } else {
+          // if bgp disabled, make sure no tunnel created with BGP on this device
+          if (origTunnels.some(t => t?.advancedOptions?.routing === 'bgp')) {
+            throw createError(400,
+              'BGP cannot be disabled because there are tunnels created with BGP ' +
+              'routing protocol. Please delete them first');
           }
         }
 
@@ -1721,39 +1812,47 @@ class DevicesService {
         }
 
         // make sure that system rules not deleted or modified
+        const origSystemRules = origDevice.firewall.rules.filter(r => r.system);
         if ('firewall' in deviceRequest && Array.isArray(deviceRequest.firewall.rules)) {
-          const origSystemRules = origDevice.firewall.rules.filter(r => r.system);
           for (const origSystemRule of origSystemRules) {
             const origId = origSystemRule._id.toString();
             const idx = deviceRequest.firewall.rules.findIndex(r => r._id === origId);
             if (idx === -1) {
               // system rule doesn't exist in the incoming rules
-              throw new Error('System rules cannot be deleted');
+              throw new Error('Firewall system rule cannot be deleted');
             } else {
-              // system rule cannot be modified, set it to the orig rule
-              deviceRequest.firewall.rules[idx] = origSystemRule.toObject();
+              // system rule cannot be modified but disabled/enabled only.
+              // set it back to the orig rule except of the "enabled" field
+              deviceRequest.firewall.rules[idx] = {
+                ...origSystemRule.toObject(),
+                enabled: deviceRequest.firewall.rules[idx].enabled
+              };
             }
           }
 
           for (const newRule of deviceRequest.firewall.rules) {
             // prevent user to set negative value for non system rule
             if (!newRule.system && newRule.priority < 0) {
-              throw new Error('A user\'s rule cannot have a priority lower than 0');
+              throw new Error('A user\'s firewall rule cannot have a priority lower than 0');
             }
 
             if (!newRule._id) {
               // don't allow to create new rule as system rule
               if (newRule.system) {
-                throw new Error('Cannot mark user rule as system rule');
+                throw new Error('A system rule cannot be created by a user');
               }
             } else {
               // don't allow to change existing user rule to a system rule
               const newRuleId = newRule._id.toString();
               if (newRule.system && !origSystemRules.some(o => newRuleId === o._id.toString())) {
-                throw new Error('Cannot mark user rule as system rule');
+                throw new Error('A system rule cannot be created by a user');
               }
             }
           };
+        } else if (origSystemRules.length > 0) {
+          // there are system rules in the origDevice,
+          // but incoming modified device has no system rules
+          throw new Error('Firewall system rule cannot be deleted');
         }
 
         // Need to validate device specific rules combined with global policy rules
@@ -1762,7 +1861,13 @@ class DevicesService {
             firewall: origDevice.policies.firewall.toObject()
           };
         }
-        const { valid, err } = validateDevice(deviceToValidate, isRunning, orgSubnets);
+
+        // don't  allow to change "versions" and "cpuInfo"
+        deviceToValidate.versions = origDevice.versions;
+        deviceToValidate.cpuInfo = getCpuInfo(origDevice.cpuInfo);
+        deviceRequest.cpuInfo = deviceToValidate.cpuInfo;
+
+        const { valid, err } = validateDevice(deviceToValidate, isRunning, orgSubnets, orgBgp);
 
         if (!valid) {
           logger.warn('Device update failed',
@@ -1771,6 +1876,9 @@ class DevicesService {
             });
           throw createError(400, err);
         }
+
+        // reset the reconfig hash to update the info of unassigned interfaces
+        connections.devices.updateDeviceInfo(origDevice.machineId, 'reconfig', '');
 
         // If device changed to not approved disconnect it's socket
         if (deviceRequest.isApproved === false) connections.deviceDisconnect(origDevice.machineId);
@@ -1794,9 +1902,17 @@ class DevicesService {
           { new: true, upsert: false, runValidators: true }
         )
           .session(session)
+          // should be populated exactly as devicesIdGet response
           .populate('interfaces.pathlabels', '_id name description color type')
           .populate('policies.firewall.policy', '_id name description rules')
-          .populate('policies.multilink.policy', '_id name description');
+          .populate('policies.multilink.policy', '_id name description')
+          .populate('policies.qos.policy', '_id name description')
+          .populate({
+            path: 'applications.app',
+            populate: {
+              path: 'appStoreApp'
+            }
+          });
       }, false);
 
       // If the change made to the device fields requires a change on the
@@ -1805,6 +1921,13 @@ class DevicesService {
         org: orgList[0],
         newDevice: updDevice
       });
+
+      if (isNeedToReleasePendingTunnels) {
+        const released = await releasePublicAddrLimiterBlockage(updDevice);
+        if (released) {
+          await activatePendingTunnelsOfDevice(updDevice);
+        }
+      }
 
       const status = modifyDevResult.ids.length > 0 ? 202 : 200;
       DevicesService.setLocationHeader(server, response, modifyDevResult.ids, orgList[0]);
@@ -1853,7 +1976,7 @@ class DevicesService {
         null,
         device[0].machineId,
         { entity: 'agent', message: 'get-device-os-routes' },
-        configs.get('directMessageTimeout', 'number')
+        60000 // specific timeout for the get OS routes message (60 sec)
       );
 
       if (!deviceOsRoutes.ok) {
@@ -2428,7 +2551,7 @@ class DevicesService {
         );
       }
 
-      return Service.successResponse({}, 202);
+      return Service.successResponse(null, 202);
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
@@ -2512,6 +2635,12 @@ class DevicesService {
       if (dhcpFiltered.length !== 1) return Service.rejectResponse('DHCP ID not found', 404);
 
       DevicesService.validateDhcpRequest(deviceObject, dhcpRequest);
+
+      // Verify there is no DHCP interfaces duplication
+      const hasDuplicates = deviceObject.dhcp.some(s =>
+        s.id !== dhcpId && s.interface === dhcpRequest.interface
+      );
+      if (hasDuplicates) throw new Error('Multiple DHCP for the same interface not allowed');
 
       const dhcpData = {
         _id: dhcpId,
@@ -2681,11 +2810,13 @@ class DevicesService {
     }
 
     // check that DHCP Range Start/End IP are on the same subnet with interface IP
-    if (!cidr.overlap(`${interfaceObj.IPv4}/${interfaceObj.IPv4Mask}`, dhcpRequest.rangeStart)) {
+    if (!cidr.overlap(`${interfaceObj.IPv4}/${interfaceObj.IPv4Mask}`,
+    `${dhcpRequest.rangeStart}/32`)) {
       // eslint-disable-next-line max-len
       throw new Error('DHCP Server Range Start IP address is not on the same subnet with interface IP');
     }
-    if (!cidr.overlap(`${interfaceObj.IPv4}/${interfaceObj.IPv4Mask}`, dhcpRequest.rangeEnd)) {
+    if (!cidr.overlap(`${interfaceObj.IPv4}/${interfaceObj.IPv4Mask}`,
+    `${dhcpRequest.rangeEnd}/32`)) {
       // eslint-disable-next-line max-len
       throw new Error('DHCP Server Range End IP address is not on the same subnet with interface IP');
     }
@@ -2842,35 +2973,25 @@ class DevicesService {
           pin: {
             job: false,
             message: 'modify-lte-pin',
-            onError: async (jobId, err) => {
+            onError: async (jobId, agentError, parsedError) => {
               try {
-                err = JSON.parse(err.replace(/'/g, '"'));
-                const data = mapLteNames(err.data);
-                await devices.updateOne(
-                  { _id: id, org: { $in: orgList }, 'interfaces._id': interfaceId },
-                  {
-                    $set: {
-                      'interfaces.$.deviceParams.initial_pin1_state': data
-                    }
-                  }
-                );
-                return JSON.stringify({ err_msg: err.err_msg, data: data });
+                const regex = new RegExp(/(?<='data': {).+?(?=})/g);
+                let data = agentError.match(regex);
+                if (data) {
+                  data = data[0].replace(/'/g, '"');
+                }
+
+                data = JSON.parse(`{${data}}`);
+                data = mapLteNames(data);
+                await updatePin(data, deviceObject, interfaceId, selectedIf);
+                return JSON.stringify({ err_msg: parsedError, data: data });
               } catch (err) { }
             },
             onComplete: async (jobId, response) => {
               if (response.message && response.message.data) {
                 const data = mapLteNames(response.message.data);
                 response.message.data = data;
-                // update pin state
-                await devices.updateOne(
-                  { _id: id, org: { $in: orgList }, 'interfaces._id': interfaceId },
-                  {
-                    $set: {
-                      'interfaces.$.deviceParams.initial_pin1_state': data
-                    }
-                  }
-                );
-
+                await updatePin(data, deviceObject, interfaceId, selectedIf);
                 return data;
               }
             }
@@ -2965,14 +3086,30 @@ class DevicesService {
               }
             });
 
-            const regex = new RegExp(/(?<=failed: ).+?(?=\()/g);
-            let err = response.message.match(regex).join(',');
+            // The error message is *a string* that looks as follows:
+            // 'modify-lte-pin({'enable': True, ....'}): {'err_msg': '...', 'data': {....}}'
+            // Here, prase it and get the 'err_mgs' and the 'data' if exists.
+            let error = null;
 
-            if (agentAction.onError) {
-              err = await agentAction.onError(null, err);
+            let fullErrMsg = null;
+            if (Array.isArray(response?.message?.errors) && response.message.errors?.[0]) {
+              // from agent version 6, the error message contains 'errors' list.
+              fullErrMsg = response.message.errors[0];
+            } else {
+              fullErrMsg = response.message;
             }
 
-            return Service.rejectResponse(err, 500);
+            const regex = new RegExp(/(?<='err_msg': ').+?(?=')/g);
+            const errMsg = fullErrMsg.match(regex);
+            if (errMsg) {
+              error = errMsg[0];
+            }
+
+            if (agentAction.onError) {
+              error = await agentAction.onError(null, fullErrMsg, error);
+            }
+
+            return Service.rejectResponse(error, 500);
           }
 
           if (agentAction.onComplete) {
@@ -3008,7 +3145,7 @@ class DevicesService {
       const orgList = await getAccessTokenOrgList(user, org, false);
       const device = await devices.findOne(
         { _id: id, org: { $in: orgList } },
-        'sync machineId isApproved interfaces.devId interfaces.internetAccess'
+        'sync machineId isApproved interfaces.devId interfaces.internetAccess interfaces.linkStatus'
       ).lean();
       if (!device) {
         return Service.rejectResponse('Device not found', 404);
@@ -3219,6 +3356,91 @@ class DevicesService {
       );
     }
   }
+}
+
+const deviceApplicationFilters = [{
+  // split applications array to objects. Note! this creates duplication in devices,
+  // remember to group it back
+  $unwind: {
+    path: '$applications',
+    preserveNullAndEmptyArrays: true
+  }
+},
+{
+  $lookup: {
+    from: 'applications',
+    localField: 'applications.app',
+    foreignField: '_id',
+    as: 'applications.app'
+  }
+},
+{
+  $unwind: {
+    path: '$applications.app',
+    preserveNullAndEmptyArrays: true
+  }
+},
+{
+  $lookup: {
+    from: 'applicationStore',
+    localField: 'applications.app.appStoreApp',
+    foreignField: '_id',
+    as: 'applications.app.appStoreApp'
+  }
+},
+{
+  $unwind: {
+    path: '$applications.app.appStoreApp',
+    preserveNullAndEmptyArrays: true
+  }
+},
+{
+  $group: {
+    _id: '$_id',
+    device: { $first: '$$ROOT' },
+    applications: {
+      $push: '$applications'
+    }
+  }
+},
+{
+  $addFields: {
+    'device.applications': {
+      $filter: {
+        input: '$applications',
+        as: 'app',
+        cond: {
+          $ne: ['$$app.app', {}]
+        }
+      }
+    }
+  }
+},
+{
+  $replaceRoot: { newRoot: '$device' }
+}];
+
+async function updatePin (data, device, interfaceId, lteInterface) {
+  // update pin in database
+  await devices.updateOne(
+    { _id: device.id, org: device.org, 'interfaces._id': interfaceId },
+    {
+      $set: {
+        'interfaces.$.deviceParams.initial_pin1_state': data
+      }
+    }
+  );
+
+  // update pin in stats cache
+  const devId = lteInterface.devId;
+  const machineId = device.machineId;
+  const updated = deviceStatus.getDeviceLteStatus(machineId, devId);
+  updated.pinState = {
+    ...updated.pinState,
+    ...data
+  };
+
+  deviceStatus.setDeviceLteStatus(machineId, devId, updated);
 }
 
 module.exports = DevicesService;

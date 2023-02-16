@@ -19,6 +19,7 @@ const Service = require('./Service');
 
 const Accounts = require('../models/accounts');
 const Users = require('../models/users');
+const pick = require('lodash/pick');
 const { getToken } = require('../tokens');
 const {
   getUserAccounts,
@@ -26,6 +27,27 @@ const {
 } = require('../utils/membershipUtils');
 
 class AccountsService {
+  /**
+   * Select the API fields from mongo Account Object
+   *
+   * @param {mongo Account Object} item
+   */
+  static selectAccountParams (item) {
+    const ret = pick(item, [
+      '_id',
+      'companyType',
+      'companyDesc',
+      'enableNotifications',
+      'isSubscriptionValid',
+      'trial_end',
+      'forceMfa',
+      'name',
+      'country'
+    ]);
+    ret._id = ret._id.toString();
+    return ret;
+  }
+
   /**
    * Get all AccessTokens
    *
@@ -59,17 +81,8 @@ class AccountsService {
         );
       }
       const account = await Accounts.findOne({ _id: id });
-      const {
-        logoFile,
-        organizations,
-        companySize,
-        serviceType,
-        numSites,
-        __v,
-        ...rest
-      } = account.toObject();
-      rest._id = rest._id.toString();
-      return Service.successResponse(rest);
+      const result = AccountsService.selectAccountParams(account);
+      return Service.successResponse(result);
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
@@ -92,28 +105,21 @@ class AccountsService {
           'No permission to access this account', 403
         );
       }
-      const { name, companyType, companyDesc, country, enableNotifications } = accountRequest;
+      const {
+        name, companyType, companyDesc, country, enableNotifications, forceMfa
+      } = accountRequest;
+
       const account = await Accounts.findOneAndUpdate(
         { _id: id },
-        { $set: { name, companyType, companyDesc, country, enableNotifications } },
+        { $set: { name, companyType, companyDesc, country, enableNotifications, forceMfa } },
         { upsert: false, new: true, runValidators: true });
 
       // Update token
       const token = await getToken({ user }, { accountName: account.name });
       response.setHeader('Refresh-JWT', token);
 
-      // Return organization
-      const {
-        logoFile,
-        organizations,
-        companySize,
-        serviceType,
-        numSites,
-        __v,
-        ...rest
-      } = account.toObject();
-      rest._id = rest._id.toString();
-      return Service.successResponse(rest);
+      const result = AccountsService.selectAccountParams(account);
+      return Service.successResponse(result);
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
@@ -143,9 +149,19 @@ class AccountsService {
       }
 
       const accounts = await getUserAccounts(user);
-      if (!accounts.find(acc => acc._id === account)) {
+      const requestedAccount = accounts.find(acc => acc._id === account);
+      if (!requestedAccount) {
         return Service.rejectResponse(
           'No permission to access this account', 403
+        );
+      }
+
+      // if user logged in to account that doesn't force MFA on user,
+      // but now wants to switch to account that does force it,
+      // we don't allow it, The user should configure MFA for himself.
+      if (!req.user.isLoggedInWithMfa && requestedAccount.forceMfa) {
+        return Service.rejectResponse(
+          'No permission to access this account. Two-Factor-authenticator is required', 403
         );
       }
 
@@ -165,7 +181,9 @@ class AccountsService {
       user.defaultOrg = null;
 
       await orgUpdateFromNull(req, res);
-      return Service.successResponse({ _id: updUser.defaultAccount._id.toString() }, 201);
+
+      const result = AccountsService.selectAccountParams(updUser.defaultAccount);
+      return Service.successResponse(result, 201);
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',

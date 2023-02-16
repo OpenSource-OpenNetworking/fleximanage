@@ -130,6 +130,29 @@ const User = new Schema({
   defaultOrg: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'organizations'
+  },
+  // MFA configuration
+  mfa: {
+    // Array of all secrets that user received.
+    // We reset this field to empty after first verification.
+    unverifiedSecrets: {
+      type: [String],
+      default: []
+    },
+    // Once first verification done, we save the secret that will be used for next logins
+    secret: {
+      type: String,
+      default: null
+    },
+    // Indicates if MFA is enabled and verified.
+    enabled: {
+      type: Boolean,
+      default: false
+    },
+    // Array of codes that user can use to login to the system without the 2fa.
+    recoveryCodes: {
+      type: []
+    }
   }
 });
 

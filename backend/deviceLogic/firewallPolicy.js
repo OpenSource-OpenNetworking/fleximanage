@@ -142,10 +142,13 @@ const getFirewallParameters = (policy, device) => {
         priority,
         classification,
         action: {
-          interfaces,
           permit: action === 'allow'
         }
       };
+      if ((priority >= 0) && (priority < globalShift) && interfaces?.length) {
+        // attach interfaces only for device specific rules
+        jobRule.action.interfaces = interfaces;
+      }
       return jobRule;
     })
   };
@@ -406,6 +409,14 @@ const apply = async (deviceList, user, data) => {
   }
   const deviceIdsSet = new Set(deviceIds.map(id => id.toString()));
   const opDevices = filterDevices(deviceList, deviceIdsSet, op);
+  if (opDevices.length === 0) {
+    // no need to apply if not installed on any of devices
+    return {
+      ids: [],
+      status: 'completed',
+      message: 'The policy is not installed on any of the devices'
+    };
+  }
   return applyPolicy(opDevices, firewallPolicy, op, user, org);
 };
 

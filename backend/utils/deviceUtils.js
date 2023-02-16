@@ -153,7 +153,7 @@ const getBridges = interfaces => {
     const addr = ifc.IPv4 + '/' + ifc.IPv4Mask;
 
     const needsToBridge = interfaces.some(i => {
-      return devId !== i.devId && addr === i.IPv4 + '/' + i.IPv4Mask;
+      return devId !== i.devId && addr === i.IPv4 + '/' + i.IPv4Mask && i.type === 'LAN';
     });
 
     if (!needsToBridge) {
@@ -170,11 +170,36 @@ const getBridges = interfaces => {
   return bridges;
 };
 
+/**
+ * Get CPU info or set default values
+ * @param {object}  cpuInfo object with CPU info
+ * @return {object} object with CPU info or default values
+ */
+const getCpuInfo = cpuInfo => {
+  // device vpp cores
+  const vppCores = cpuInfo?.vppCores ? parseInt(cpuInfo?.vppCores) : 1;
+
+  // configured vpp cores. It might be different than vppCores,
+  // since vppCores reflects the current value of the device
+  // and configuredVppCores is what user configured.
+  const configuredVppCores =
+    cpuInfo?.configuredVppCores ? parseInt(cpuInfo?.configuredVppCores) : vppCores;
+
+  return {
+    hwCores: cpuInfo?.hwCores ? parseInt(cpuInfo.hwCores) : 2,
+    grubCores: cpuInfo?.grubCores ? parseInt(cpuInfo.grubCores) : 2,
+    vppCores: vppCores,
+    configuredVppCores: configuredVppCores,
+    powerSaving: cpuInfo?.powerSaving === true
+  };
+};
+
 // Default exports
 module.exports = {
   getDefaultGateway,
   getBridges,
   mapLteNames,
   parseLteStatus,
-  mapWifiNames
+  mapWifiNames,
+  getCpuInfo
 };

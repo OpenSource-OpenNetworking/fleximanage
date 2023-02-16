@@ -24,7 +24,7 @@ const User = require('../models/users');
 const Account = require('../models/accounts');
 const { membership, preDefinedPermissions } = require('../models/membership');
 const auth = require('../authenticate');
-const { getToken, getRefreshToken } = require('../tokens');
+const { getLoginProcessToken, getToken, getRefreshToken } = require('../tokens');
 const cors = require('./cors');
 const mongoConns = require('../mongoConns.js')();
 const randomKey = require('../utils/random-key');
@@ -39,6 +39,8 @@ const logger = require('../logging/logging')({ module: module.filename, type: 'r
 const { getUiServerUrl } = require('../utils/httpUtils');
 const flexibilling = require('../flexibilling');
 const { getUserOrganizations } = require('../utils/membershipUtils');
+const { generateSecret, verifyCode } = require('../otp');
+const SHA256 = require('crypto-js/sha256');
 
 router.use(bodyParser.json());
 
@@ -114,8 +116,11 @@ router.route('/register')
           }
         });
       })
-      .then(customerId => {
+      .then(async customerId => {
         registerCustomerId = customerId;
+        const subscription = await flexibilling.getAllSubscriptionsForQuery({
+          'customer_id[is]': customerId
+        });
         return Account.create([{
           name: req.body.accountName,
           country: req.body.country,
@@ -123,7 +128,9 @@ router.route('/register')
           serviceType: req.body.serviceType,
           numSites: req.body.numberSites,
           logoFile: '',
-          billingCustomerId: customerId
+          billingCustomerId: customerId,
+          isSubscriptionValid: true,
+          trial_end: subscription?.[0]?.subscription?.trial_end ?? null
         }], { session: session });
       })
       .then((account) => {
@@ -444,18 +451,46 @@ router.route('/reset-password')
     else return updatePassword(req, res, next);
   });
 
-// Authentication check is done within passport, if passed, no login error exists
+// This endpoint receives the username and password from the initial screen of the login process.
+// Here, a check is made as to whether to allow the user to enter,
+// or whether he needs to pass another identification factor (like 2FA)
 router.route('/login')
   .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
   .post(cors.corsWithOptions, auth.verifyUserLocal, async (req, res) => {
-    // Create token with user id and username
-    const token = await getToken(req);
-    const refreshToken = await getRefreshToken(req);
-    res.statusCode = 200;
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Refresh-JWT', token);
-    res.setHeader('refresh-token', refreshToken);
-    res.json({ name: req.user.name, status: 'logged in' });
+    // if user enabled 2fa or account forces using it- send login process token
+    // else, allow login without mfa
+    const isUserEnabledMfa = req.user?.mfa?.enabled;
+    const isAccountForcesIt = req.user?.defaultAccount?.forceMfa;
+    if (isUserEnabledMfa || isAccountForcesIt) {
+      const token = await getLoginProcessToken(req.user);
+      res.status(200).json({ name: req.user.name, token });
+    } else {
+      return await sendJwtToken(req, res, false);
+    }
+  });
+
+// This endpoint returns to the user his options,
+// which he can use to identify himself and enter the system
+router.route('/login/methods')
+  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
+  .get(cors.corsWithOptions, auth.verifyUserOrLoginJWT, async (req, res) => {
+    const methods = {
+      recoveryCodes: 0,
+      authenticatorApp: 0
+    };
+
+    const recoveryCodes = req.user?.mfa?.recoveryCodes ?? [];
+    // Check if there is a recovery code,
+    // and also if there is at least one that has not been used yet
+    if (recoveryCodes.length > 0 && recoveryCodes.some(c => c.usedTime === null)) {
+      methods.recoveryCodes = 1;
+    }
+
+    if (req.user?.mfa?.enabled) {
+      methods.authenticatorApp = 1;
+    }
+
+    res.status(200).json({ methods });
   });
 
 // Authentication check is done within passport, if passed, no login error exists
@@ -478,6 +513,189 @@ router.route('/logout')
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json');
     res.json({ status: 'logged out' });
+  });
+
+// This endpoint checks if user enabled and verified 2FA for himself.
+// Once user enabled it, he cannot login without it.
+router.route('/mfa/isEnabled')
+  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
+  .get(cors.corsWithOptions, auth.verifyUserOrLoginJWT, async (req, res) => {
+    res.status(200).json({ isEnabled: req?.user?.mfa?.enabled });
+  });
+
+// This endpoint generates for the user the URI that will be displayed in the UI as a QR code
+// that can be scanned by an authenticator application
+router.route('/mfa/getMfaConfigUri')
+  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
+  .get(cors.corsWithOptions, auth.verifyUserOrLoginJWT, async (req, res, next) => {
+    // if verified - don't generate
+    if (req.user.mfa.enabled) {
+      return next(createError(500, 'Secret already verified'));
+    }
+
+    // generate unique secret for user
+    // this secret will be used to check the verification code sent by user
+    const userName = req.user.email;
+    const secret = await generateSecret(configs.get('companyName'), userName);
+
+    // save secret for the user
+    await User.findOneAndUpdate(
+      { _id: req.user._id },
+      // keep the last 30
+      { $push: { 'mfa.unverifiedSecrets': { $each: [secret.secret], $slice: -30 } } },
+      { upsert: false });
+
+    res.status(200).json({ configUri: secret.uri });
+  });
+
+// This endpoint verifies user code with his unique secret.
+router.route('/mfa/verify')
+  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
+  .post(cors.corsWithOptions, auth.verifyUserOrLoginJWT, async (req, res, next) => {
+    if (!req.body.token) {
+      return next(createError(401, 'Token is required'));
+    }
+
+    let secrets = [];
+
+    // Check with which secret we need to verify the code.
+    if (req.user.mfa.secret) {
+      // if user already enabled and verified 2fa, verify code with this verified secret.
+      secrets.push(req.user.mfa.secret);
+    } else if (req.user.mfa.unverifiedSecrets.length > 0) {
+      // if user didn't enabled 2fa and wants to verify it on first time,
+      // verify code with this unverifiedSecrets secrets code.
+      secrets = req.user.mfa.unverifiedSecrets;
+    } else {
+      return next(createError(401, 'Multi-Factor is not configured'));
+    }
+
+    let validated = null;
+    for (const secret of secrets) {
+      const isValid = verifyCode(req.body.token, secret);
+      if (isValid) {
+        validated = secret;
+        break;
+      }
+    }
+
+    if (!validated) {
+      return next(createError(403, 'Invalid Code'));
+    }
+
+    const updateQuery = { $set: {} };
+    if (!req.user.mfa.secret) {
+      updateQuery.$set['mfa.secret'] = validated;
+    }
+
+    if (!req.user.mfa.enabled) {
+      updateQuery.$set['mfa.enabled'] = true;
+    }
+
+    if (req.user.mfa.unverifiedSecrets.length > 0) {
+      updateQuery.$set['mfa.unverifiedSecrets'] = [];
+    }
+
+    if (Object.keys(updateQuery.$set).length > 0) {
+      // save secret for the user
+      await User.findOneAndUpdate(
+        { _id: req.user._id },
+        updateQuery,
+        { upsert: false }
+      );
+    }
+
+    return await sendJwtToken(req, res, validated !== null);
+  });
+
+// This function generates the JWT after the authentication process is complete.
+// With this token, the user can access and receive the organization's information.
+const sendJwtToken = async (req, res, mfaVerified) => {
+  const token = await getToken(req, { mfaVerified });
+  const refreshToken = await getRefreshToken(req, { mfaVerified });
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Refresh-JWT', token);
+  res.setHeader('refresh-token', refreshToken);
+  res.json({ name: req.user.name, status: 'logged in' });
+};
+
+router.route('/mfa/generateRecoveryCodes')
+  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
+  .get(cors.corsWithOptions, auth.verifyUserJWT, async (req, res, next) => {
+    if (!req?.user?.mfa?.enabled) {
+      return next(createError(403, 'Two-Factor authentication is not configured'));
+    }
+
+    if (req?.user?.mfa?.recoveryCodes?.length > 0) {
+      const availableCodes = req?.user?.mfa?.recoveryCodes.filter(r => r.usedTime === null);
+      res.json({ codes: availableCodes.map(c => c.code) });
+      return;
+    }
+
+    const codes = []; // send to user as clear text
+    const hashed = []; // store hashed in DB
+
+    for (let i = 0; i < 10; i++) {
+      const code = randomKey(40);
+      codes.push(code);
+      hashed.push({ code: SHA256(code).toString(), usedTime: null });
+    };
+
+    await User.findOneAndUpdate(
+      { _id: req.user._id },
+      { $set: { 'mfa.recoveryCodes': hashed } },
+      { upsert: false }
+    );
+
+    res.json({ codes });
+  });
+
+router.route('/mfa/verifyRecoveryCode')
+  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
+  .post(cors.corsWithOptions, auth.verifyUserOrLoginJWT, async (req, res, next) => {
+    const userRecoveryCodes = req.user?.mfa?.recoveryCodes ?? [];
+    if (userRecoveryCodes.length === 0) {
+      return next(createError(401, 'Recovery codes are not generated for the user'));
+    }
+
+    const requestedCode = req.body?.recoveryCode;
+    if (!requestedCode) {
+      return next(createError(403, 'Recovery codes are missing'));
+    }
+
+    let validated = false;
+
+    const hashedRequestedCode = SHA256(requestedCode).toString();
+    for (const userRecoveryCode of userRecoveryCodes) {
+      const { code, usedTime } = userRecoveryCode;
+
+      // recovery code can be used once
+      if (usedTime) {
+        return next(createError(403, 'This recovery code is already used'));
+      };
+
+      if (hashedRequestedCode === code) {
+        // mark recovery code as used
+        await User.findOneAndUpdate(
+          {
+            _id: req.user._id,
+            'mfa.recoveryCodes.code': code
+          },
+          { $set: { 'mfa.recoveryCodes.$.usedTime': new Date() } },
+          { upsert: false }
+        );
+
+        validated = true;
+        break;
+      }
+    }
+
+    if (!validated) {
+      return next(createError(403, 'Recovery code is invalid'));
+    }
+
+    return await sendJwtToken(req, res, validated);
   });
 
 // Default exports

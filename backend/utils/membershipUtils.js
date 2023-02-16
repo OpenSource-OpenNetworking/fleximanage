@@ -148,9 +148,14 @@ const getUserAccounts = async (user, offset = 0, limit = 0) => {
       .skip(offset)
       .limit(limit)
       .populate('account');
-    accounts.forEach((entry) => { resultSet[entry.account._id] = entry.account.name; });
+    accounts.forEach((entry) => {
+      resultSet[entry.account._id] = {
+        name: entry.account.name,
+        forceMfa: entry.account?.forceMfa
+      };
+    });
     const result = Object.keys(resultSet).map(key => {
-      return { _id: key, name: resultSet[key] };
+      return { _id: key, name: resultSet[key].name, forceMfa: resultSet[key].forceMfa };
     });
     return result;
   } catch (err) {
@@ -168,6 +173,15 @@ const getUserAccounts = async (user, offset = 0, limit = 0) => {
 const orgUpdateFromNull = async ({ user }, res) => {
   if (user.defaultOrg == null) {
     let org0 = null;
+
+    // Check if account is set, if not try to set one for the user
+    if (user._id && !user.defaultAccount) {
+      const account = await membership.findOne({ user: user._id }).populate('account');
+      if (account) {
+        user.defaultAccount = account.account;
+        await User.updateOne({ _id: user._id }, { defaultAccount: account.account._id });
+      }
+    }
 
     try {
       const orgs = await getUserOrganizations(user);

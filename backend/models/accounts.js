@@ -118,10 +118,21 @@ const Accounts = new Schema({
     required: false,
     default: null
   },
-  // Is subscription valid for account, will set to false when cancled in the billing system
+  // Is subscription valid for account, will set to false when canceled in the billing system
+  // True means the subscription is either active or in_trial
   isSubscriptionValid: {
     type: Boolean,
     default: true
+  },
+  // Epoch time in UTC representing the trial end time. Null means not in trial
+  trial_end: {
+    type: Number,
+    default: null
+  },
+  // Is forceMfa enabled, all account's users will not be able login without configuring 2fa
+  forceMfa: {
+    type: Boolean,
+    default: false
   }
 });
 

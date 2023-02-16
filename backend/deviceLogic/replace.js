@@ -52,6 +52,21 @@ const apply = async (opDevices, user, data) => {
   if (!isEqual(oldInterfaces, newInterfaces)) {
     throw new Error('Device interfaces do not match, must have same number of interfaces.');
   }
+
+  // check that hardware cpu equal
+  const oldHwCores = oldDevice.cpuInfo.hwCores;
+  const newHwCores = newDevice.cpuInfo.hwCores;
+  if (!isEqual(oldHwCores, newHwCores)) {
+    throw new Error('The number of CPU cores is not the same in both devices.');
+  }
+
+  // check that vpp cores cpu equal
+  const oldVppCores = oldDevice.cpuInfo.vppCores;
+  const newVppCores = newDevice.cpuInfo.vppCores;
+  if (!isEqual(oldVppCores, newVppCores)) {
+    throw new Error('The number of VRouter cores is not the same in both devices.');
+  }
+
   // check the new device config
   const tunnelCount = await tunnelsModel.countDocuments({
     $or: [{ deviceA: newId }, { deviceB: newId }],
@@ -83,7 +98,7 @@ const apply = async (opDevices, user, data) => {
     { upsert: false }
   );
   const status = 'completed';
-  const message = 'Replaced successfully';
+  const message = 'Devices replaced successfully';
   return { ids: [], status, message };
 };
 

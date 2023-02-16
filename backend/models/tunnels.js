@@ -63,6 +63,11 @@ const tunnelAdvancedOptionsSchema = new Schema({
   ospfCost: {
     type: String,
     default: ''
+  },
+  routing: {
+    type: String,
+    enum: ['ospf', 'bgp'],
+    default: 'ospf'
   }
 });
 

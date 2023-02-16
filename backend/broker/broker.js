@@ -96,7 +96,7 @@ const deviceProcessor = async (job) => {
         if (remaining <= 1) {
           dispatcher.error(job.id, job.data.response);
         }
-        if (error.message === 'Error: Send Timeout') {
+        if (error.message === 'Send Timeout') {
           // If the device paused, reject doesn't mark the job as failed
           // In that case we make sure to explicitly mark it this way
           // If reject executed correctly, it overrides this failure
