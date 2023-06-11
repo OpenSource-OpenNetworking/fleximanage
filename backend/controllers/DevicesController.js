@@ -54,6 +54,10 @@ class DevicesController {
     await Controller.handleRequest(request, response, this.service.devicesIdConfigurationGET);
   }
 
+  async devicesIdRecoveryInfoGET (request, response) {
+    await Controller.handleRequest(request, response, this.service.devicesIdRecoveryInfoGET);
+  }
+
   async devicesIdLogsGET (request, response) {
     await Controller.handleRequest(request, response, this.service.devicesIdLogsGET);
   }

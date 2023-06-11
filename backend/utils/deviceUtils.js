@@ -153,7 +153,10 @@ const getBridges = interfaces => {
     const addr = ifc.IPv4 + '/' + ifc.IPv4Mask;
 
     const needsToBridge = interfaces.some(i => {
-      return devId !== i.devId && addr === i.IPv4 + '/' + i.IPv4Mask && i.type === 'LAN';
+      return i.isAssigned &&
+        devId !== i.devId &&
+        addr === i.IPv4 + '/' + i.IPv4Mask &&
+        i.type === 'LAN';
     });
 
     if (!needsToBridge) {

@@ -16,6 +16,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 const applicationsModel = require('../models/applications');
+const organizationsModel = require('../models/organizations');
 const fs = require('fs');
 const path = require('path');
 const logger = require('../logging/logging')({
@@ -370,7 +371,11 @@ class ApplicationLogic extends IApplication {
       : [];
 
     // validate new rules
-    const { valid, err } = validateFirewallRules([...deviceSpecific, ...globalRules]);
+    const org = await organizationsModel.findOne({ _id: application.org }).lean();
+    const { valid, err } = validateFirewallRules(
+      [...deviceSpecific, ...globalRules],
+      org
+    );
     if (!valid) {
       let prefix = '';
       if (op === 'install') {

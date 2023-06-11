@@ -15,14 +15,32 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-const reasons = {
-  interfaceHasNoIp: (ifcName, deviceName) => {
+const pendingTypes = {
+  // if interfaces loses is IP, we set tunnels/static routes
+  // via this interface as pending due to missing ip
+  interfaceHasNoIp: 'interfaceHasNoIp',
+  // if tunnel marked as pending, we set static routes
+  // via this tunnel as pending due to tunnel pending
+  tunnelIsPending: 'tunnelIsPending',
+  // if we marked tunnels as pending because we are waiting for STUN in both sides
+  waitForStun: 'waitForStun',
+  // if public port changed a lot and tunnel is down,
+  // we reduce system effort and put tunnels as pending until the port will be stabilized
+  publicPortHighRate: 'publicPortHighRate'
+};
+
+const pendingReasons = {
+  [pendingTypes.interfaceHasNoIp]: (ifcName, deviceName) => {
     return `Interface ${ifcName} in device ${deviceName} has no IP address`;
   },
-  tunnelIsPending: (tunnelNumber) => {
+  [pendingTypes.tunnelIsPending]: (tunnelNumber) => {
     return `Tunnel ${tunnelNumber} is in pending state`;
   },
-  publicPortHighRate: (ifcName, deviceName) => {
+  [pendingTypes.waitForStun]: () => {
+    return 'Wait for STUN update to reconstruct. ' +
+    'To activate it without waiting for STUN, click on the "sync" button';
+  },
+  [pendingTypes.publicPortHighRate]: (ifcName, deviceName) => {
     return `The public IP/Port of interface ${ifcName}` +
     ` in device ${deviceName} is changing at a high rate.\n` +
     ' Usually this is due to ISP symmetric NAT with port randomization.\n' +
@@ -32,4 +50,11 @@ const reasons = {
   }
 };
 
-module.exports = reasons;
+const getReason = (type, ...args) => {
+  return pendingReasons[type](...args);
+};
+
+module.exports = {
+  pendingTypes,
+  getReason
+};

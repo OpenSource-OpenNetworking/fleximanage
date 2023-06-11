@@ -372,14 +372,14 @@ describe('validateIfcName', () => {
         ${'eth0'}                    | ${true}
         ${'lo0'}                     | ${true}
         ${'enp0s3'}                  | ${true}
-        ${'maxIfNameLength'}         | ${true}
+        ${'a'.repeat(64)}            | ${true}
         ${null}                      | ${false}
         ${undefined}                 | ${false}
         ${''}                        | ${false}
         ${'eth-0'}                   | ${false}
         ${'eth\0'}                   | ${false}
         ${'eth{0'}                   | ${false}
-        ${'tooLongInterfaceName'}    | ${false}
+        ${'a'.repeat(65)}            | ${false}
   `('Should return $result if interface name is $name', ({ name, result }) => {
     expect(validators.validateIfcName(name)).toEqual(result);
   });

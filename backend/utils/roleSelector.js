@@ -22,6 +22,7 @@
  * as active. The role can be kept for TTL time.
  */
 const redis = require('redis');
+const { getRedisAuthUrl } = require('../utils/httpUtils');
 const Selector = require('./redis-selector');
 const logger = require('../logging/logging')({ module: module.filename, type: 'periodic' });
 
@@ -33,7 +34,9 @@ class RoleSelector {
    */
   constructor (redisUrl) {
     // Create a redisClient based on the redis URL
-    this.redis = redis.createClient({ url: redisUrl });
+    const { redisAuth, redisUrlNoAuth } = getRedisAuthUrl(redisUrl);
+    this.redis = redis.createClient({ url: redisUrlNoAuth });
+    if (redisAuth) this.redis.auth(redisAuth);
     logger.info('RoleSelector init', { params: { redisUrl: redisUrl } });
 
     // Selectors by key

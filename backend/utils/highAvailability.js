@@ -19,8 +19,8 @@
  * This module takes a decision whether this instance of flexiManage is active
  * or standby. It relies on redis semaphore used by redis-leader
  */
-const configs = require('../configs')();
 const redis = require('redis');
+const { getRedisAuthUrl } = require('../utils/httpUtils');
 const Leader = require('./redis-leader');
 const logger = require('../logging/logging')({ module: module.filename, type: 'periodic' });
 
@@ -31,7 +31,9 @@ class HighAvailability {
    */
   constructor (redisUrl) {
     // Create a redisClient based on the redis URL
-    this.redis = redis.createClient({ url: configs.get('redisUrl') });
+    const { redisAuth, redisUrlNoAuth } = getRedisAuthUrl(redisUrl);
+    this.redis = redis.createClient({ url: redisUrlNoAuth });
+    if (redisAuth) this.redis.auth(redisAuth);
     // Create a leader
     const options = {
       key: 'haleaderselect',

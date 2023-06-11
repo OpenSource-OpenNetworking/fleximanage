@@ -218,7 +218,9 @@ class DeviceQueues {
       };
 
       const job = this.queue
-        .create(deviceId, { message, response, metadata });
+        .create(deviceId, { message, response, metadata })
+        .ttl(configs.get('jobTimeout', 'number') + 60000);
+
       if (priority) job.priority(priority);
       if (attempts) job.attempts(attempts);
       if (removeOnComplete) job.removeOnComplete(removeOnComplete);

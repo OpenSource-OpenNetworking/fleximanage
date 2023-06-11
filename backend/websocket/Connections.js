@@ -77,7 +77,11 @@ class Connections {
     this.getAllDevices().forEach(deviceID => {
       const { socket } = this.devices.getDeviceInfo(deviceID);
       // Don't try to ping a closing, or already closed socket
-      if (!socket || [socket.CLOSING, socket.CLOSED].includes(socket.readyState)) return;
+      if (!socket) return;
+      if ([socket.CLOSING, socket.CLOSED].includes(socket.readyState)) {
+        this.closeConnection(deviceID);
+        return;
+      }
       if (socket.isAlive <= 0) {
         logger.warn('Terminating device due to ping failure', {
           params: { deviceId: deviceID }
@@ -450,9 +454,18 @@ class Connections {
 
         const incomingInterfaces = deviceInfo.message.network.interfaces;
 
-        const interfaces = origDevice.interfaces.map(i => {
+        const interfaces = [];
+        origDevice.interfaces.forEach(i => {
           const updatedConfig = incomingInterfaces.find(u => u.devId === i.devId);
           if (!updatedConfig) {
+            if (i.devId.startsWith('vlan')) {
+              // the VLAN sub-interface is removed in device
+              // it should be unlocked in manage if assigned or removed if not assigned
+              if (i.isAssigned) {
+                interfaces.push({ ...i.toObject(), locked: false });
+              }
+              return;
+            }
             logger.warn('Missing interface configuration in the get-device-info message', {
               params: {
                 reconfig: deviceInfo.message.reconfig,
@@ -460,7 +473,8 @@ class Connections {
                 interface: i.toJSON()
               }
             });
-            return i;
+            interfaces.push(i.toObject());
+            return;
           }
 
           // send a notification if the link changed to down
@@ -492,12 +506,14 @@ class Connections {
 
           // allow to modify the interface type dpdk/pppoe for unassigned interfaces
           if (!i.isAssigned && ['dpdk', 'pppoe'].includes(updatedConfig.deviceType)) {
-            if (i.deviceType !== 'lte') { // don't allow to change LTE device type dynamically
+            // don't allow to change LTE or WiFi deviceType dynamically
+            if (i.deviceType !== 'lte' && i.deviceType !== 'wifi') {
               updInterface.deviceType = updatedConfig.deviceType;
             }
             updInterface.dhcp = updatedConfig.dhcp;
             if (updatedConfig.deviceType === 'pppoe') {
               updInterface.type = 'WAN';
+              updInterface.routing = 'NONE';
             }
           }
 
@@ -519,12 +535,15 @@ class Connections {
             updInterface.gateway = updatedConfig.gateway;
           };
 
-          if (!i.isAssigned) {
+          if (!i.isAssigned && updInterface.deviceType === 'dpdk') {
             // changing the type of an unassigned interface based on the gateway
+            // Non dpdk interfaces are pppoe (WAN) or lte (WAN) or wifi (LAN),
+            // these shouldn't be modified from the value set on registration
             updInterface.type = updInterface.gateway ? 'WAN' : 'LAN';
           }
 
-          return updInterface;
+          updInterface.locked = i.locked;
+          interfaces.push(updInterface);
         });
 
         const deviceId = origDevice._id.toString();
@@ -546,7 +565,7 @@ class Connections {
           // add current device to changed devices in order to run modify process for it
           await events.addChangedDevice(origDevice._id, origDevice);
 
-          await events.checkIfToTriggerEvent(plainJsDevice, interfaces);
+          await events.analyze(plainJsDevice, interfaces);
 
           // Update the reconfig hash before applying to prevent infinite loop
           this.devices.updateDeviceInfo(machineId, 'reconfig', deviceInfo.message.reconfig);
@@ -560,11 +579,6 @@ class Connections {
             }
           });
 
-          let addTunnelIds = Object.assign({},
-            ...Array.from(events.activeTunnels, v => ({ [v]: '' })));
-          let removeTunnelIds = Object.assign({},
-            ...Array.from(events.pendingTunnels, v => ({ [v]: '' })));
-
           // modify jobs
           const modifyDevices = await events.prepareModifyDispatcherParameters();
           const completedTasks = {};
@@ -576,8 +590,8 @@ class Connections {
               {
                 org: modifyDevices[modified].orig.org.toString(),
                 newDevice: modifyDevices[modified].updated,
-                sendAddTunnels: addTunnelIds,
-                sendRemoveTunnels: removeTunnelIds,
+                sendAddTunnels: events.activeTunnels,
+                sendRemoveTunnels: events.pendingTunnels,
                 ignoreTasks: completedTasks[modifyDevices[modified].orig._id] ?? []
               }
             );
@@ -607,9 +621,10 @@ class Connections {
               completedTasks[deviceId].push(...tasks[deviceId]);
             }
 
-            // send tunnel jobs only on the first iteration to prevent job duplications
-            addTunnelIds = {};
-            removeTunnelIds = {};
+            // send tunnel jobs only on the first iteration to prevent job duplications.
+            // Hance on end of first iteration, clear the tunnels sets.
+            events.activeTunnels.clear();
+            events.pendingTunnels.clear();
           }
 
           // remove the variable from the memory.
@@ -682,7 +697,8 @@ class Connections {
           certificateExpiration: Joi.string().allow('').optional(),
           error: Joi.string().allow('').optional()
         }).allow({}).optional(),
-        cpuInfo: Joi.object().optional()
+        cpuInfo: Joi.object().optional(),
+        distro: Joi.object().optional()
       }).custom((obj, helpers) => {
         for (const [component, info] of Object.entries(
           obj.components
@@ -765,6 +781,10 @@ class Connections {
       });
       origDevice.cpuInfo = cpuInfo;
       origDevice.versions = versions;
+      origDevice.distro = {
+        version: deviceInfo.message?.distro?.version ?? '',
+        codename: deviceInfo.message?.distro?.codename ?? ''
+      };
       await origDevice.save();
 
       const { expireTime, jobQueued } = origDevice.IKEv2;
@@ -831,6 +851,12 @@ class Connections {
             }
             if (job?.errors?.length > 0) {
               jobToUpdate.error(JSON.stringify({ errors: job.errors }));
+              // unlike the jobs which got marked as failed due to the send timeout, in the case
+              // of the upgrade-device-sw job, it is initially marked as complete, so need to
+              // mark it as failed.
+              if (job.request === 'upgrade-device-sw' || job.request === 'upgrade-linux-sw') {
+                jobToUpdate.failed();
+              }
               jobToUpdate.data.metadata.jobUpdated = true;
               jobToUpdate.save();
             }

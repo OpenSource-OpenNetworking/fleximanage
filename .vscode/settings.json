@@ -13,6 +13,7 @@
 		"Ifcs",
 		"ifname",
 		"intf",
+		"Multipath",
 		"pathlabel",
 		"pathlabels",
 		"staticroutes",

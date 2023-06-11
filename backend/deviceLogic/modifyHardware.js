@@ -46,6 +46,10 @@ const apply = async (devicesList, user, data) => {
     // check if device.cpuInfo is different than data.cpuInfo
     // If so, generate a job
     if (meta?.cpuInfo && !isEqual(cpuInfo.toObject(), meta.cpuInfo)) {
+      if (meta.cpuInfo.configuredVppCores > 1 && meta.cpuInfo.powerSaving) {
+        throw new Error('Power saving should be disabled if multicore is used.');
+      }
+
       logger.info('Changing CPU info:', { params: { machineId, user, data } });
 
       modified = true;

@@ -82,6 +82,8 @@ const protocolsValues = [
 
 const keySizesValues = ['128', '256'];
 
+const idTypesValues = ['fqdn', 'ip4-addr', 'email'];
+
 /**
  * Peers Database Schema
  */
@@ -96,10 +98,15 @@ const peerSchema = new Schema({
     type: String,
     required: [true, 'Name must be set']
   },
-  idType: {
+  idType: { // uses as  *local* IdType"
     type: String,
-    enum: ['fqdn', 'ip4-addr'],
-    required: [true, 'ID Type must be set']
+    enum: idTypesValues,
+    required: [true, 'Local ID Type must be set']
+  },
+  remoteIdType: {
+    type: String,
+    enum: idTypesValues,
+    required: [true, 'Remote ID Type must be set']
   },
   localId: {
     type: String,

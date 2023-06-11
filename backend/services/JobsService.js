@@ -71,8 +71,8 @@ class JobsService {
 
     // old timeout errors appear as 'Error: Send Timeout' string, so part of this check is
     // to ensure backward compatibility.
-    if (item._error === 'Error: Send Timeout' || typeof item._error !== 'string') {
-      retJob.error = buildDefaultErrorMessage(retJob, item._error);
+    if (item._error === 'Send Timeout' || typeof item._error !== 'string') {
+      retJob.error = buildDefaultErrorMessage(retJob, item._error.toString());
       return retJob;
     }
 

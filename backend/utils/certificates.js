@@ -79,7 +79,7 @@ const generateRemoteVpnPKI = async (orgName) => {
       .catch(err => {
         logger.error('failed to create certificates', { params: { orgName, err } });
         const errMsg =
-          new Error('An error occurred while creating the keys key for your organization');
+          new Error('An error occurred while creating the keys for your organization');
         return reject(errMsg);
       })
       .finally(() => {

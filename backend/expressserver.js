@@ -46,6 +46,7 @@ const deviceQueues = require('./periodic/deviceQueue')();
 const deviceSwVersion = require('./periodic/deviceSwVersion')();
 const deviceSwUpgrade = require('./periodic/deviceperiodicUpgrade')();
 const notifyUsers = require('./periodic/notifyUsers')();
+const releasePendingTunnels = require('./periodic/releasePendingTunnels')();
 const appRules = require('./periodic/appRules')();
 const applications = require('./periodic/applications')();
 const statusesInDb = require('./periodic/statusesInDb')();
@@ -143,6 +144,7 @@ class ExpressServer {
     appRules.start();
     applications.start();
     statusesInDb.start();
+    releasePendingTunnels.start();
 
     // Secure traffic only
     this.app.all('*', (req, res, next) => {
@@ -277,7 +279,7 @@ class ExpressServer {
 
     const transformIndex = (origIndex) => {
       let modifiedIndex = configs.get('removeBranding', 'boolean')
-        ? origIndex.replace('<title>FlexiWAN Management</title>',
+        ? origIndex.replace('<title>flexiWAN Management</title>',
           `<title>${configs.get('companyName')} Management</title>`)
         : origIndex;
       const m = modifiedIndex.match(/const __FLEXIWAN_SERVER_CONFIG__=(.*?);/);

@@ -157,6 +157,10 @@ class FlexiBilling {
   async getFeaturesSummaryByAccounts (accounts) {
     return [];
   }
+
+  async getAllSubscriptionsForQuery (query) {
+    return [];
+  }
 }
 
 // check if flexibilling is required

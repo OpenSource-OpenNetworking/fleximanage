@@ -16,6 +16,8 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // Logic to replace a device
+const mongoConns = require('../mongoConns.js')();
+const flexibilling = require('../flexibilling');
 const tunnelsModel = require('../models/tunnels');
 const devicesModel = require('../models/devices').devices;
 const connections = require('../websocket/Connections')();
@@ -81,22 +83,43 @@ const apply = async (opDevices, user, data) => {
   connections.deviceDisconnect(oldDevice.machineId);
   connections.deviceDisconnect(newDevice.machineId);
 
-  // replace devices in DB
-  await devicesModel.remove(
-    { _id: newId, org: org }
-  );
-  await devicesModel.update(
-    { _id: oldId, org: org },
-    {
-      $set: {
-        deviceToken: newDevice.deviceToken,
-        machineId: newDevice.machineId,
-        serial: newDevice.serial,
-        hostname: newDevice.hostname
-      }
-    },
-    { upsert: false }
-  );
+  const { account } = oldDevice;
+  await mongoConns.mainDBwithTransaction(async (session) => {
+    const deviceCount = await devicesModel.countDocuments({
+      account: account
+    }).session(session);
+
+    const orgCount = await devicesModel.countDocuments({
+      account: account, org: org
+    }).session(session);
+
+    // Unregister a device (by adding - count)
+    await flexibilling.registerDevice({
+      account: account,
+      org: org,
+      count: deviceCount,
+      orgCount: orgCount,
+      increment: -1
+    }, session);
+
+    // replace devices in DB
+    await devicesModel.deleteOne(
+      { _id: newId, org: org }
+    ).session(session);
+    await devicesModel.updateOne(
+      { _id: oldId, org: org },
+      {
+        $set: {
+          deviceToken: newDevice.deviceToken,
+          machineId: newDevice.machineId,
+          serial: newDevice.serial,
+          hostname: newDevice.hostname
+        }
+      },
+      { upsert: false }
+    ).session(session);
+  });
+
   const status = 'completed';
   const message = 'Devices replaced successfully';
   return { ids: [], status, message };

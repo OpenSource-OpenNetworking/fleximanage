@@ -73,7 +73,7 @@ const configEnv = {
     // Biling config site - this is used as the billing site name in ChargeBee
     billingConfigSite: 'flexiwan-test',
     // ChargeBee default plan for a new customer
-    billingDefaultPlan: 'enterprise',
+    billingDefaultPlan: 'enterprise-standard',
     // Wheter to enable billing
     useFlexiBilling: false,
     // API key for ChargeBee Billing config site. Not used when useFlexiBilling is false
@@ -84,6 +84,7 @@ const configEnv = {
     // Use automatic charges collection
     autoCollectionCharges: 'off', // "on" or "off"
     // Redis host and port, override default with environment variable REDIS_URL
+    // If 'requirepass' enabled in redis configuration use 'redis://authpass@host:port'
     redisUrl: 'redis://localhost:6379',
     // Redis connectivity options
     redisTotalRetryTime: 1000 * 60 * 60,
@@ -214,7 +215,7 @@ const configEnv = {
     // UI URL for feedback
     feedbackUrl: '',
     // If to show device limit alert banner
-    showDeviceLimitAlert: true,
+    showDeviceLimitAlert: false,
     // Whether to remove branding, e.g. powered by...
     removeBranding: false,
     // URL for account qualification

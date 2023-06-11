@@ -53,13 +53,16 @@ const isObject = require('lodash/isObject');
 const { buildInterfaces } = require('./interfaces');
 const { getBridges } = require('../utils/deviceUtils');
 const uniqWith = require('lodash/uniqWith');
+const cloneDeep = require('lodash/cloneDeep');
 const { getMajorVersion, getMinorVersion } = require('../versioning');
 const {
   transformInterfaces,
   transformRoutingFilters,
   transformOSPF,
+  transformVxlanConfig,
   transformBGP,
-  transformDHCP
+  transformDHCP,
+  transformLte
 } = require('./jobParameters');
 
 const modifyBGPParams = ['neighbors', 'networks', 'redistributeOspf'];
@@ -72,10 +75,11 @@ const modifyBGPParams = ['neighbors', 'networks', 'redistributeOspf'];
 const prepareIfcParams = (interfaces, newDevice) => {
   const bridges = getBridges(newDevice.interfaces);
   return interfaces.map(ifc => {
-    const newIfc = omit(ifc, ['_id', 'isAssigned', 'pathlabels']);
+    const newIfc = cloneDeep(omit(ifc, ['_id', 'isAssigned', 'pathlabels']));
 
     newIfc.dev_id = newIfc.devId;
     delete newIfc.devId;
+    delete newIfc.parentDevId;
 
     // Device should only be aware of DIA labels.
     const labels = [];
@@ -125,6 +129,22 @@ const prepareIfcParams = (interfaces, newDevice) => {
         // remove empty values since they are optional
         newIfc.ospf = omitBy(newIfc.ospf, val => val === '');
       }
+
+      // Currently, when sending modify-x device the agent does smart replacement in a way
+      // that if only one field exists in a sub-object, it adds this field
+      // to the sub-object but it keeps the other existing fields.
+      // So, in WiFi we need to send both keys (2.4GHz, and 5GHz) always.
+      // Otherwise, if we will send only the enabled one, ans user changed the enabled band,
+      // in some case, at the agent both can be enabled which is not supported.
+      // Hence, we send both always.
+      if (newIfc.deviceType === 'wifi') {
+        if (!('2.4GHz' in newIfc.configuration)) {
+          newIfc.configuration['2.4GHz'] = { enable: false };
+        }
+        if (!('5GHz' in newIfc.configuration)) {
+          newIfc.configuration['5GHz'] = { enable: false };
+        }
+      }
     }
     return newIfc;
   });
@@ -144,8 +164,6 @@ const prepareModificationMessages = (messageParams, device, newDevice) => {
   // If they are the same, do not initiate modify-device job.
   if (has(messageParams, 'modify_interfaces')) {
     const interfaces = messageParams.modify_interfaces.interfaces || [];
-    const lteInterfaces = messageParams.modify_interfaces.lte_enable_disable || [];
-
     if (interfaces.length > 0) {
       const modifiedInterfaces = prepareIfcParams(interfaces, newDevice);
       requests.push(...modifiedInterfaces.map(item => {
@@ -156,17 +174,26 @@ const prepareModificationMessages = (messageParams, device, newDevice) => {
         };
       }));
     }
+  }
 
-    if (lteInterfaces.length > 0) {
-      requests.push(...lteInterfaces.map(item => {
+  if (has(messageParams, 'modify_lte')) {
+    const { remove, add } = messageParams.modify_lte;
+    if (remove && remove.length > 0) {
+      requests.push(...remove.map(item => {
         return {
           entity: 'agent',
-          message: item.configuration.enable ? 'add-lte' : 'remove-lte',
-          params: {
-            ...item.configuration,
-            dev_id: item.devId,
-            metric: item.metric
-          }
+          message: 'remove-lte',
+          params: item
+        };
+      }));
+    }
+
+    if (add && add.length > 0) {
+      requests.push(...add.map(item => {
+        return {
+          entity: 'agent',
+          message: 'add-lte',
+          params: item
         };
       }));
     }
@@ -388,7 +415,9 @@ const prepareModificationMessages = (messageParams, device, newDevice) => {
  */
 const queueJob = async (org, username, tasks, device, jobResponse) => {
   const job = await deviceQueues.addJob(
-    device.machineId, username, org,
+    device.machineId,
+    username,
+    org,
     // Data
     { title: `Modify device ${device.hostname}`, tasks: tasks },
     // Response data
@@ -420,8 +449,8 @@ const queueJob = async (org, username, tasks, device, jobResponse) => {
  * @param  {Object}  messageParams  object with all changes that will be sent to the device
  * @param  {Object}  user           the user that created the request
  * @param  {string}  org            organization to which the user belongs
- * @param  {object}  sendAddTunnels object of tunnel ids as keys to send add-tunnel job for
- * @param  {object}  sendRemoveTunnels object of tunnel ids as keys to send remove-tunnel job for
+ * @param  {set}     sendAddTunnels Set of tunnel ids to send add-tunnel job for
+ * @param  {set}     sendRemoveTunnels Set of tunnel ids to send remove-tunnel job for
  * @param  {array}   ignoreTasks array of tasks that should be ignored.
  *                               Usually it means that in the current process,
                                  these jobs already sent and no need to resend them.
@@ -450,10 +479,7 @@ const queueModifyDeviceJob = async (
     (unassign || []).forEach(ifc => { interfacesIdsSet.add(ifc._id); });
   }
   if (has(messageParams, 'modify_interfaces')) {
-    const interfaces = [
-      ...messageParams.modify_interfaces.interfaces,
-      ...messageParams.modify_interfaces.lte_enable_disable
-    ];
+    const interfaces = [...messageParams.modify_interfaces.interfaces];
     interfaces.forEach(ifc => {
       interfacesIdsSet.add(ifc._id);
       modifiedIfcsMap[ifc._id] = ifc;
@@ -545,47 +571,30 @@ const queueModifyDeviceJob = async (
             ]
           },
           // Tunnels regardless of interfaces' changes - Reason 3 above
-          { _id: { $in: [...Object.keys(sendAddTunnels), ...Object.keys(sendRemoveTunnels)] } }
+          { _id: { $in: [...sendAddTunnels, ...sendRemoveTunnels] } }
         ]
       })
       .populate('deviceA')
       .populate('deviceB')
+      .populate('org')
       .populate('peer');
 
     for (const tunnel of tunnels) {
-      let { deviceA, deviceB, peer, pathlabel, _id, advancedOptions } = tunnel;
-
-      const ifcA = deviceA.interfaces.find(ifc => {
-        return ifc._id.toString() === tunnel.interfaceA.toString();
-      });
-
-      const ifcB = peer ? null : deviceB.interfaces.find(ifc => {
-        return ifc._id.toString() === tunnel.interfaceB.toString();
-      });
+      let { deviceA, deviceB, peer, _id, advancedOptions, org: tunnelOrg } = tunnel;
 
       // First check if need to send tunnel jobs regardless of interface change.
       const [
         removeTasksDeviceA, removeTasksDeviceB
-      ] = await prepareTunnelRemoveJob(tunnel, peer, true);
+      ] = await prepareTunnelRemoveJob(tunnel, true);
 
-      if (_id.toString() in sendRemoveTunnels) {
+      if (sendRemoveTunnels.has(_id.toString())) {
         _addTunnelTasks(tasks, tunnel, removeTasksDeviceA, removeTasksDeviceB);
         continue;
       }
 
-      const [addTasksDeviceA, addTasksDeviceB] = await prepareTunnelAddJob(
-        tunnel,
-        ifcA,
-        ifcB,
-        pathlabel,
-        deviceA,
-        deviceB,
-        advancedOptions,
-        peer,
-        true
-      );
+      const [addTasksDeviceA, addTasksDeviceB] = await prepareTunnelAddJob(tunnel, tunnelOrg, true);
 
-      if (_id.toString() in sendAddTunnels) {
+      if (sendAddTunnels.has(_id.toString())) {
         _addTunnelTasks(tasks, tunnel, addTasksDeviceA, addTasksDeviceB);
         continue;
       }
@@ -752,53 +761,20 @@ const queueModifyDeviceJob = async (
     // at this point, list of jobs is ready.
     for (const deviceId in tasks) {
       const deviceTasks = tasks[deviceId].tasks;
-
-      // during the process, can be duplications in tasks so here we clean it
-      let finalTasks = uniqWith(deviceTasks, isEqual);
-
-      // remove the ignored tasks
-      // "ignoreTasks" is array of tasks that should be removed from the final list.
-      // The reason could be that those tasks already sent to the device
-      // and no need to send it once again.
-      // (see the long comment with examples in Connections.js file).
-      for (const ignoreTask of ignoreTasks) {
-        const index = finalTasks.findIndex(f => isEqual(ignoreTask, f));
-        if (index > -1) {
-          finalTasks.splice(index, 1);
-        }
-      }
-
-      sentTasks[deviceId] = finalTasks;
+      const device = tasks[deviceId].device;
       tasks[deviceId].jobResponse ??= {};
 
-      if (finalTasks.length === 0) {
-        continue;
-      }
+      const { modifyJob, finalTasks } = await processModifyJob(
+        deviceTasks,
+        device,
+        org,
+        user,
+        ignoreTasks,
+        tasks[deviceId].jobResponse
+      );
 
-      if (finalTasks.length > 1) {
-        // convert the tasks to one aggregated request
-        finalTasks = [{
-          entity: 'agent',
-          message: 'aggregated',
-          params: { requests: finalTasks }
-        }];
-      }
-
-      try {
-        const modifyJob = await queueJob(
-          org,
-          user.username,
-          finalTasks,
-          tasks[deviceId].device,
-          tasks[deviceId].jobResponse
-        );
-
-        jobs.push(modifyJob);
-      } catch (err) {
-        logger.error('Failed to queue device modification message', {
-          params: { err: err.message, finalTasks, deviceId }
-        });
-      }
+      if (modifyJob) jobs.push(modifyJob);
+      if (sentTasks) sentTasks[deviceId] = finalTasks ?? [];
     }
   } catch (err) {
     logger.error('Failed to handle device modification process', {
@@ -970,13 +946,9 @@ const prepareModifyRoutes = (origDevice, newDevice) => {
  * @return {Object}            an object containing add and remove ospf parameters
  */
 const prepareModifyBGP = async (origDevice, newDevice) => {
-  const majorVersion = getMajorVersion(newDevice.versions.agent);
-  const minorVersion = getMinorVersion(newDevice.versions.agent);
-  const includeTunnelNeighbors = majorVersion === 5 && minorVersion === 3;
-
   const [origBGP, newBGP] = [
-    await transformBGP(origDevice, includeTunnelNeighbors),
-    await transformBGP(newDevice, includeTunnelNeighbors)
+    await transformBGP(origDevice),
+    await transformBGP(newDevice)
   ];
 
   const origEnable = origDevice.bgp.enable;
@@ -1013,8 +985,8 @@ const prepareModifyBGP = async (origDevice, newDevice) => {
  */
 const prepareModifyRoutingFilters = (origDevice, newDevice) => {
   const [origLists, newLists] = [
-    transformRoutingFilters(origDevice.routingFilters),
-    transformRoutingFilters(newDevice.routingFilters)
+    transformRoutingFilters(origDevice.routingFilters, origDevice.versions.agent),
+    transformRoutingFilters(newDevice.routingFilters, newDevice.versions.agent)
   ];
 
   const [addRoutingFilters, removeRoutingFilters] = [
@@ -1115,6 +1087,37 @@ const prepareModifyDHCP = (origDevice, newDevice) => {
   return { dhcpRemove, dhcpAdd };
 };
 
+const prepareAddRemoveLte = (origDevice, updatedDevice) => {
+  const oldLteInterfaces = origDevice.interfaces.filter(item => item.deviceType === 'lte');
+  const newLteInterfaces = updatedDevice.interfaces.filter(item => item.deviceType === 'lte');
+
+  const result = { add: [], remove: [] };
+
+  const lteInterfacesDiff = differenceWith(
+    newLteInterfaces,
+    oldLteInterfaces,
+    (origIfc, newIfc) => {
+      // no need to send job if LTE configuration changed but LTE is disable
+      if (!origIfc.configuration.enable && !newIfc.configuration.enable) {
+        return true;
+      }
+
+      return isEqual(origIfc.configuration, newIfc.configuration) &&
+        isEqual(origIfc.metric, newIfc.metric);
+    }
+  );
+
+  lteInterfacesDiff.forEach(lteIfc => {
+    if (lteIfc.configuration.enable) {
+      result.add.push(transformLte(lteIfc));
+    } else {
+      result.remove.push(transformLte(lteIfc));
+    }
+  });
+
+  return result;
+};
+
 /**
  * Creates and queues the modify-device job. It compares
  * the current view of the device in the database with
@@ -1128,7 +1131,7 @@ const prepareModifyDHCP = (origDevice, newDevice) => {
  * @return {None}
  */
 const apply = async (device, user, data) => {
-  const org = data.org;
+  const orgId = data.org;
   const modifyParams = {};
 
   device[0] = await device[0]
@@ -1149,8 +1152,8 @@ const apply = async (device, user, data) => {
     .populate('policies.qos.policy')
     .execPopulate();
 
-  data.sendAddTunnels ??= {};
-  data.sendRemoveTunnels ??= {};
+  data.sendAddTunnels ??= new Set();
+  data.sendRemoveTunnels ??= new Set();
   data.ignoreTasks ??= [];
 
   // Create the default/static routes modification parameters
@@ -1220,9 +1223,12 @@ const apply = async (device, user, data) => {
   // an array of the interfaces that have changed
   // First, extract only the relevant interface fields
   const origDeviceVersion = device[0].versions.agent;
+  const origTransformedIfcs = transformInterfaces(
+    device[0].interfaces, device[0].ospf, origDeviceVersion
+  );
   const [origInterfaces, origIsAssigned] = [
     // add global ospf settings to each interface
-    transformInterfaces(device[0].interfaces, device[0].ospf, origDeviceVersion),
+    origTransformedIfcs,
     device[0].interfaces.map(ifc => {
       return ({
         _id: ifc._id,
@@ -1233,9 +1239,12 @@ const apply = async (device, user, data) => {
   ];
 
   const newDeviceVersion = data.newDevice.versions.agent;
+  const newTransformedIfcs = transformInterfaces(
+    data.newDevice.interfaces, data.newDevice.ospf, newDeviceVersion
+  );
   const [newInterfaces, newIsAssigned] = [
     // add global ospf settings to each interface
-    transformInterfaces(data.newDevice.interfaces, data.newDevice.ospf, newDeviceVersion),
+    newTransformedIfcs,
     data.newDevice.interfaces.map(ifc => {
       return ({
         _id: ifc._id,
@@ -1244,6 +1253,20 @@ const apply = async (device, user, data) => {
       });
     })
   ];
+
+  // Push missing VLAN interfaces as unassigned to initiate a remove-interface task
+  origInterfaces.forEach(origIfc => {
+    if (origIfc.parentDevId &&
+      !newInterfaces.some(newIfc => origIfc.devId === newIfc.devId)) {
+      newInterfaces.push({ ...origIfc, isAssigned: false });
+      newIsAssigned.push({
+        _id: origIfc._id,
+        devId: origIfc.devId,
+        isAssigned: false
+      });
+    }
+  });
+
   // Handle changes in the 'assigned' field. assignedDiff will contain
   // all the interfaces that have changed their 'isAssigned' field
   const assignedDiff = differenceWith(
@@ -1325,26 +1348,15 @@ const apply = async (device, user, data) => {
 
   // add-lte job should be submitted even if unassigned interface
   // we send this job if configuration or interface metric was changed
-  const oldLteInterfaces = device[0].interfaces.filter(item => item.deviceType === 'lte');
-  const newLteInterfaces = data.newDevice.interfaces.filter(item => item.deviceType === 'lte');
-  const lteInterfacesDiff = differenceWith(
-    newLteInterfaces,
-    oldLteInterfaces,
-    (origIfc, newIfc) => {
-      // no need to send job if LTE configuration changed but LTE is disable
-      if (!origIfc.configuration.enable && !newIfc.configuration.enable) {
-        return true;
-      }
+  // Create (add|remove)-lte parameters
+  const { add: addLte, remove: removeLte } = prepareAddRemoveLte(device[0], data.newDevice);
+  if (addLte.length > 0 || removeLte.length > 0) {
+    modifyParams.modify_lte = { remove: removeLte, add: addLte };
+  }
 
-      return isEqual(origIfc.configuration, newIfc.configuration) &&
-        isEqual(origIfc.metric, newIfc.metric);
-    }
-  );
-
-  if (assignedInterfacesDiff.length > 0 || lteInterfacesDiff.length > 0) {
+  if (assignedInterfacesDiff.length > 0) {
     modifyParams.modify_interfaces = {};
     modifyParams.modify_interfaces.interfaces = assignedInterfacesDiff;
-    modifyParams.modify_interfaces.lte_enable_disable = lteInterfacesDiff;
   }
 
   const origDevice = device[0];
@@ -1401,11 +1413,12 @@ const apply = async (device, user, data) => {
       has(modifyParams, 'modify_bgp') ||
       has(modifyParams, 'modify_firewall') ||
       has(modifyParams, 'modify_qos') ||
+      has(modifyParams, 'modify_lte') ||
       has(modifyParams, 'modify_dhcp_config');
 
   // Queue job only if the device has changed
   // Return empty jobs array if the device did not change
-  if (!modified && isEmpty(data.sendAddTunnels) && isEmpty(data.sendRemoveTunnels)) {
+  if (!modified && data.sendAddTunnels.size === 0 && data.sendRemoveTunnels.size === 0) {
     logger.debug('The device was not modified, nothing to apply', {
       params: { newInterfaces: JSON.stringify(newInterfaces), device: device[0]._id }
     });
@@ -1439,7 +1452,7 @@ const apply = async (device, user, data) => {
       ...unassign
     ]);
     if (!dhcpValidation.valid) throw (new Error(dhcpValidation.err));
-    await setJobPendingInDB(device[0]._id, org, true);
+    await setJobPendingInDB(device[0]._id, orgId, true);
 
     // Queue device modification job
     const { jobs, sentTasks } = await queueModifyDeviceJob(
@@ -1447,7 +1460,7 @@ const apply = async (device, user, data) => {
       data.newDevice,
       modifyParams,
       user,
-      org,
+      orgId,
       data.sendAddTunnels,
       data.sendRemoveTunnels,
       data.ignoreTasks
@@ -1525,14 +1538,29 @@ const sync = async (deviceId, org) => {
   )
     .lean()
     // no need to populate pathLabel name here, since we need only the id's
-    .populate('interfaces.pathlabels', '_id type');
+    .populate('interfaces.pathlabels', '_id type')
+    .populate('org');
 
   const {
     interfaces, staticroutes, dhcp, ospf, bgp, routingFilters, versions
   } = device;
 
+  const majorVersion = getMajorVersion(versions.agent);
+  const minorVersion = getMinorVersion(versions.agent);
+
   // Prepare add-interface message
   const deviceConfRequests = [];
+
+  // do not send it to device version < 6.2
+  const isVxlanConfigSupported = majorVersion > 6 || (majorVersion === 6 && minorVersion >= 2);
+  if (isVxlanConfigSupported) {
+    const vxlanConfigParams = transformVxlanConfig(device.org);
+    deviceConfRequests.push({
+      entity: 'agent',
+      message: 'add-vxlan-config',
+      params: vxlanConfigParams
+    });
+  }
 
   // build bridges
   const bridges = getBridges(interfaces);
@@ -1563,11 +1591,7 @@ const sync = async (deviceId, org) => {
       deviceConfRequests.push({
         entity: 'agent',
         message: 'add-lte',
-        params: {
-          ...lte.configuration,
-          dev_id: lte.devId,
-          metric: lte.metric
-        }
+        params: transformLte(lte)
       });
     });
   }
@@ -1585,7 +1609,7 @@ const sync = async (deviceId, org) => {
   }
 
   // Prepare add-routing-filter message
-  const routingFiltersData = transformRoutingFilters(routingFilters);
+  const routingFiltersData = transformRoutingFilters(routingFilters, versions.agent);
   routingFiltersData.forEach(entry => {
     deviceConfRequests.push({
       entity: 'agent',
@@ -1594,12 +1618,9 @@ const sync = async (deviceId, org) => {
     });
   });
 
-  const majorVersion = getMajorVersion(versions.agent);
-  const minorVersion = getMinorVersion(versions.agent);
   const isBgpSupported = majorVersion > 5 || (majorVersion === 5 && minorVersion >= 3);
-  const includeTunnelNeighbors = majorVersion === 5 && minorVersion === 3;
   if (isBgpSupported && bgp?.enable) {
-    const bgpData = await transformBGP(device, includeTunnelNeighbors);
+    const bgpData = await transformBGP(device);
     if (!isEmpty(bgpData)) {
       deviceConfRequests.push({
         entity: 'agent',
@@ -1716,6 +1737,7 @@ const _isNeedToSkipModifyJob = (messageParams, modifiedIfcsMap, device) => {
     !has(messageParams, 'modify_ospf') &&
     !has(messageParams, 'modify_bgp') &&
     !has(messageParams, 'modify_routing_filters') &&
+    !has(messageParams, 'modify_lte') &&
     !has(messageParams, 'modify_firewall') &&
     !has(messageParams, 'modify_qos') &&
     Object.values(modifiedIfcsMap).every(modifiedIfc => {
@@ -1741,11 +1763,58 @@ const _isNeedToSkipModifyJob = (messageParams, modifiedIfcsMap, device) => {
     });
 };
 
+const processModifyJob = async (tasks, device, orgId, user, ignoreTasks = [], jobResponse = {}) => {
+  // during the process, can be duplications in tasks so here we clean it
+  let finalTasks = uniqWith(tasks, isEqual);
+
+  // remove the ignored tasks
+  // "ignoreTasks" is array of tasks that should be removed from the final list.
+  // The reason could be that those tasks already sent to the device
+  // and no need to send it once again.
+  // (see the long comment with examples in Connections.js file).
+  for (const ignoreTask of ignoreTasks) {
+    const index = finalTasks.findIndex(f => isEqual(ignoreTask, f));
+    if (index > -1) {
+      finalTasks.splice(index, 1);
+    }
+  }
+
+  if (finalTasks.length === 0) {
+    return { modifyJob: null, finalTasks: null };
+  }
+
+  if (finalTasks.length > 1) {
+    // convert the tasks to one aggregated request
+    finalTasks = [{
+      entity: 'agent',
+      message: 'aggregated',
+      params: { requests: finalTasks }
+    }];
+  }
+
+  try {
+    const modifyJob = await queueJob(
+      orgId,
+      user.username,
+      finalTasks,
+      device,
+      jobResponse
+    );
+
+    return { modifyJob, finalTasks };
+  } catch (err) {
+    logger.error('Failed to queue device modification message', {
+      params: { err: err.message, finalTasks, deviceId: device._id }
+    });
+  }
+};
+
 module.exports = {
   apply: apply,
   complete: complete,
   completeSync: completeSync,
   sync: sync,
   error: error,
-  remove: remove
+  remove: remove,
+  processModifyJob: processModifyJob
 };

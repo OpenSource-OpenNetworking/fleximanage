@@ -38,6 +38,26 @@ class PathLabelsService {
   }
 
   /**
+   * Validate path label request
+   * @param {mongoID} id  - path label id
+   * @param {mongoID} org - organization id
+   * @param {Object} pathLabelRequest - request values
+   * @throw error, if not valid
+   */
+  static async validatePathLabelRequest (id, org, pathLabelRequest) {
+    // check for duplicated names
+    const { name } = pathLabelRequest;
+    const searchQuery = { org, name };
+    if (id) {
+      searchQuery._id = { $ne: id };
+    }
+    const hasDuplicatedNames = await PathLabels.countDocuments(searchQuery);
+    if (hasDuplicatedNames) {
+      throw new Error('Duplicated path labels names are not allowed');
+    }
+  }
+
+  /**
    * Get all Path labels
    *
    * offset Integer The number of items to skip before starting to collect the result set (optional)
@@ -154,6 +174,8 @@ class PathLabelsService {
       const { name, description, color, type } = pathLabelRequest;
       const orgList = await getAccessTokenOrgList(user, org, true);
 
+      await PathLabelsService.validatePathLabelRequest(id, orgList[0], pathLabelRequest);
+
       // A label's type field cannot be changed if the
       // labels being used. Therefore we perform the
       // update as a transaction with 3 steps:
@@ -233,6 +255,8 @@ class PathLabelsService {
     try {
       const { name, description, color, type } = pathLabelRequest;
       const orgList = await getAccessTokenOrgList(user, org, true);
+
+      await PathLabelsService.validatePathLabelRequest(null, orgList[0], pathLabelRequest);
 
       // Allow up to 200 path labels per organization
       const count = await PathLabels.countDocuments({

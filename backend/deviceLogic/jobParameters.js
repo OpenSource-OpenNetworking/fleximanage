@@ -20,6 +20,7 @@ const pick = require('lodash/pick');
 const { getMajorVersion, getMinorVersion } = require('../versioning');
 const { generateTunnelParams } = require('../utils/tunnelUtils');
 const tunnelsModel = require('../models/tunnels');
+const configs = require('../configs')();
 
 /**
  * Transforms mongoose array of interfaces into array of objects
@@ -37,29 +38,36 @@ const transformInterfaces = (interfaces, globalOSPF, deviceVersion) => {
     const ifcObg = {
       _id: ifc._id,
       devId: ifc.devId,
+      parentDevId: ifc.parentDevId,
       dhcp: ifc.dhcp ? ifc.dhcp : 'no',
       addr: ifc.IPv4 && ifc.IPv4Mask ? `${ifc.IPv4}/${ifc.IPv4Mask}` : '',
       addr6: ifc.IPv6 && ifc.IPv6Mask ? `${ifc.IPv6}/${ifc.IPv6Mask}` : '',
       PublicIP: ifc.PublicIP,
       PublicPort: ifc.PublicPort,
-      useStun: ifc.useStun,
       useFixedPublicPort: ifc.useFixedPublicPort,
-      monitorInternet: ifc.monitorInternet,
-      gateway: ifc.gateway,
-      metric: ifc.metric,
-      mtu: ifc.mtu,
       type: ifc.type,
       isAssigned: ifc.isAssigned,
       pathlabels: ifc.pathlabels,
       configuration: ifc.configuration,
-      deviceType: ifc.deviceType,
-      dnsServers: ifc.dnsServers,
-      dnsDomains: ifc.dnsDomains,
-      useDhcpDnsServers: ifc.useDhcpDnsServers
+      deviceType: ifc.deviceType
     };
 
-    if (majorVersion >= 6) {
-      ifcObg.bandwidthMbps = ifc.bandwidthMbps;
+    if (ifc.type === 'WAN') {
+      ifcObg.gateway = ifc.gateway;
+      ifcObg.metric = ifc.metric;
+      ifcObg.useStun = ifc.useStun;
+      ifcObg.monitorInternet = ifc.monitorInternet;
+      ifcObg.dnsServers = ifc.dnsServers;
+      ifcObg.dnsDomains = ifc.dnsDomains;
+
+      // if useDhcpDnsServers is true, we set empty array to the agent
+      if (ifc.dhcp === 'yes' && ifc.useDhcpDnsServers === true) {
+        ifcObg.dnsServers = [];
+      }
+
+      if (majorVersion >= 6) {
+        ifcObg.bandwidthMbps = ifc.bandwidthMbps;
+      }
     }
 
     if (majorVersion > 5 || (majorVersion === 5 && minorVersion >= 3)) {
@@ -76,6 +84,11 @@ const transformInterfaces = (interfaces, globalOSPF, deviceVersion) => {
         deadInterval: globalOSPF.deadInterval
       };
     }
+
+    // do not send MTU for VLANs
+    if (!ifc.vlanTag) {
+      ifcObg.mtu = ifc.mtu;
+    }
     return ifcObg;
   });
 };
@@ -85,15 +98,44 @@ const transformInterfaces = (interfaces, globalOSPF, deviceVersion) => {
  * @param  {array} RoutingFilters routingFilters array
  * @return {array}   routingFilters array
  */
-const transformRoutingFilters = (routingFilters) => {
+const transformRoutingFilters = (routingFilters, deviceVersion) => {
+  const majorVersion = getMajorVersion(deviceVersion);
+  const minorVersion = getMinorVersion(deviceVersion);
+  const oldFormat = majorVersion < 6 || (majorVersion === 6 && minorVersion === 1);
+
+  if (oldFormat) {
+    return routingFilters.map(filter => {
+      // old devices should have old format of job.
+      // "action", "nextHop" and "priority" are not supported.
+      // In this format, there is "defaultAction" for all rules,
+      // except those that exists in "rules". Hence, we put all routes
+      // that have the opposite action as the default.
+      const defaultRoute = filter.rules.find(r => r.route === '0.0.0.0/0');
+      if (!defaultRoute) throw Error('Default route is missing');
+
+      return {
+        name: filter.name,
+        description: filter.description,
+        defaultAction: defaultRoute.action,
+        rules: filter.rules.filter(r => r.action !== defaultRoute.action).map(r => {
+          return {
+            network: r.route
+          };
+        })
+      };
+    });
+  }
+
   return routingFilters.map(filter => {
     return {
       name: filter.name,
       description: filter.description,
-      defaultAction: filter.defaultAction,
       rules: filter.rules.map(r => {
         return {
-          network: r.network
+          route: r.route,
+          action: r.action,
+          nextHop: r.nextHop,
+          priority: r.priority
         };
       })
     };
@@ -125,17 +167,34 @@ const transformOSPF = (ospf, bgp) => {
 };
 
 /**
- * Creates a modify-routing-bgp object
- * @param  {Object} bgp bgp configuration
- * @param  {Object} interfaces  assigned interfaces of device
- * @return {Object}            an object containing an array of routes
+ * Creates a add-vxlan-config object
+ * @param  {Object} org organization object
+ * @return {Object}      an object containing the VXLAN config parameters
  */
-const transformBGP = async (device, includeTunnelNeighbors = false) => {
-  let { bgp, interfaces, org, _id } = device;
+const transformVxlanConfig = org => {
+  const vxlanConfigParams = {
+    port: org.vxlanPort || configs.get('tunnelPort')
+  };
+
+  return vxlanConfigParams;
+};
+
+/**
+ * Creates a modify-routing-bgp object
+ * @param  {Object} device device object
+ * @return {Object}        an object containing an bgp configuration
+ */
+const transformBGP = async (device) => {
+  let { bgp, interfaces, org, _id, versions } = device;
   interfaces = interfaces.filter(i => i.isAssigned);
 
+  const majorVersion = getMajorVersion(versions.agent);
+  const minorVersion = getMinorVersion(versions.agent);
+  const includeTunnelNeighbors = majorVersion === 5 && minorVersion === 3;
+  const sendCommunityAndBestPath = majorVersion > 6 || (majorVersion === 6 && minorVersion >= 2);
+
   const neighbors = bgp.neighbors.map(n => {
-    return {
+    const neighbor = {
       ip: n.ip,
       remoteAsn: n.remoteASN,
       password: n.password || '',
@@ -144,6 +203,12 @@ const transformBGP = async (device, includeTunnelNeighbors = false) => {
       holdInterval: bgp.holdInterval,
       keepaliveInterval: bgp.keepaliveInterval
     };
+
+    if (sendCommunityAndBestPath) {
+      neighbor.sendCommunity = n.sendCommunity;
+    }
+
+    return neighbor;
   });
 
   if (includeTunnelNeighbors) {
@@ -180,6 +245,7 @@ const transformBGP = async (device, includeTunnelNeighbors = false) => {
         outboundFilter: '',
         holdInterval: bgpConfig.holdInterval,
         keepaliveInterval: bgpConfig.keepaliveInterval
+        // no need to send community here, since it is only for 5.3 version
       });
     }
   }
@@ -191,13 +257,19 @@ const transformBGP = async (device, includeTunnelNeighbors = false) => {
     });
   });
 
-  return {
+  const bgpConfig = {
     routerId: bgp.routerId,
     localAsn: bgp.localASN,
     neighbors: neighbors,
     redistributeOspf: bgp.redistributeOspf,
     networks: networks
   };
+
+  if (sendCommunityAndBestPath) {
+    bgpConfig.bestPathMultipathRelax = true;
+  }
+
+  return bgpConfig;
 };
 
 /**
@@ -220,10 +292,20 @@ const transformDHCP = dhcp => {
   };
 };
 
+const transformLte = lteInterface => {
+  return {
+    ...lteInterface.configuration,
+    dev_id: lteInterface.devId,
+    metric: lteInterface.metric
+  };
+};
+
 module.exports = {
   transformInterfaces,
   transformRoutingFilters,
   transformOSPF,
   transformBGP,
-  transformDHCP
+  transformDHCP,
+  transformVxlanConfig,
+  transformLte
 };

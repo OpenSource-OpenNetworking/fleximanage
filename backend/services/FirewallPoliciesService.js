@@ -19,6 +19,7 @@ const Service = require('./Service');
 const createError = require('http-errors');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
 const FirewallPolicies = require('../models/firewallPolicies');
+const organizationsModal = require('../models/organizations');
 const { devices } = require('../models/devices');
 const { ObjectId } = require('mongoose').Types;
 const { validateFirewallRules } = require('../deviceLogic/validators');
@@ -27,6 +28,14 @@ const { applyPolicy } = require('../deviceLogic/firewallPolicy');
 class FirewallPoliciesService {
   static async verifyRequestSchema (firewallPolicyRequest, org, devices = []) {
     const { _id, name, rules } = firewallPolicyRequest;
+
+    // Policy must have at least one enabled rule
+    if (!rules.some(r => r.enabled)) {
+      return {
+        valid: false,
+        message: 'Policy must have at least one enabled rule'
+      };
+    }
 
     // Duplicate names are not allowed in the same organization
     const hasDuplicateName = await FirewallPolicies.findOne(
@@ -39,17 +48,22 @@ class FirewallPoliciesService {
       };
     };
 
+    const orgObject = await organizationsModal.findOne({ _id: org }).lean();
     const devicesWithSpecificRules = devices.filter(d => d.deviceSpecificRulesEnabled);
     if (devicesWithSpecificRules.length > 0) {
       for (const device of devicesWithSpecificRules) {
         const allRules = [...rules, ...device.firewall.rules];
-        const { valid, err: message } = validateFirewallRules(allRules, device.interfaces);
+        const { valid, err: message } = validateFirewallRules(
+          allRules,
+          orgObject,
+          device.interfaces
+        );
         if (!valid) {
           return { valid, message };
         }
       }
     } else {
-      const { valid, err: message } = validateFirewallRules(rules);
+      const { valid, err: message } = validateFirewallRules(rules, orgObject);
       if (!valid) {
         return { valid, message };
       }

@@ -100,6 +100,11 @@ const methods = {
     error: upgrade.error,
     remove: upgrade.remove
   },
+  osupgrade: {
+    apply: upgrade.osUpgradeApply,
+    complete: upgrade.osUpgradeComplete,
+    remove: errorNOOP
+  },
   mlpolicy: {
     apply: mlpolicy.apply,
     complete: mlpolicy.complete,

@@ -31,8 +31,8 @@ const getFilterExpression = ({ key, op, val }) => {
   // where 'cond' depends on 'op' - if negative it will be '$and' and '$or' if opposite
   // Example: 'op' is '==' or 'contains' the condition in that case will be
   // { $or: [{"deviceA.name": "DeviceName"}, {"deviceB.name": "DeviceName"}] }
+  const cond = op.includes('!') ? '$and' : '$or';
   if (key.includes('?')) {
-    const cond = op.includes('!') ? '$and' : '$or';
     return {
       [cond]: ['A', 'B'].map(side => {
         const sideKey = key.replace(/\?/g, side);
@@ -43,6 +43,12 @@ const getFilterExpression = ({ key, op, val }) => {
         }
         return expr;
       })
+    };
+  }
+  // similar to '?', just the 'key' includes several keys divided by '|'
+  if (key.includes('|')) {
+    return {
+      [cond]: key.split('|').map(key => getFilterExpression({ key, op, val }))
     };
   }
   // Special case for dates filtering

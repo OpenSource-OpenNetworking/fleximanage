@@ -17,6 +17,7 @@
 
 const { Schema, Types } = require('mongoose');
 const {
+  validateFirewallDevId,
   validateIPv4WithMask,
   validateIPv4,
   validatePort,
@@ -74,7 +75,10 @@ const destinationClassificationSchema = new Schema({
     },
     interface: {
       type: String,
-      maxlength: [25, 'interface must be at most 25']
+      validate: {
+        validator: validateFirewallDevId,
+        message: 'interface should be a valid interface devId'
+      }
     }
   },
   trafficId: {
@@ -160,7 +164,11 @@ const firewallRuleSchema = new Schema({
     required: true
   },
   interfaces: [{
-    type: String
+    type: String,
+    validate: {
+      validator: validateFirewallDevId,
+      message: 'interface should be a valid interface devId'
+    }
   }],
   // indicates if rule created by the system and cannot be modified by a user
   system: {

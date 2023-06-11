@@ -9,7 +9,7 @@ info:
     name: AGPLv3
     url: https://www.gnu.org/licenses/agpl-3.0.en.html
   termsOfService: https://flexiwan.com/legal/terms-of-service/
-  title: FlexiWAN API
+  title: flexiWAN API
   version: 1.0.0
 servers:
 - description: Main server
@@ -1361,109 +1361,71 @@ paths:
       x-swagger-router-controller: Devices
       x-openapi-router-controller: DevicesController
       x-openapi-router-service: DevicesService
-#
-#  /devices/register:
-#    post:
-#      operationId: devicesRegisterPOST
-#      responses:
-#        "204":
-#          description: No Content
-#        "400":
-#          description: Bad Request
-#        "401":
-#          content:
-#            application/json:
-#              schema:
-#                $ref: '#/components/schemas/Error'
-#          description: Unauthorized
-#        "402":
-#          content:
-#            application/json:
-#              schema:
-#                $ref: "#/components/schemas/Error"
-#          description: Payment needed
-#        "403":
-#          content:
-#            application/json:
-#              schema:
-#                $ref: '#/components/schemas/Error'
-#          description: Forbidden
-#        "500":
-#          content:
-#            application/json:
-#              schema:
-#                $ref: '#/components/schemas/Error'
-#          description: Internal server error
-#        default:
-#          content:
-#            application/json:
-#              schema:
-#                $ref: '#/components/schemas/Error'
-#          description: Unexpected error
-#      security:
-#      - apiKey: []
-#      - bearerAuth: []
-#      summary: Execute an action on the device side
-#      tags:
-#      - Devices
-#      x-swagger-router-controller: Devices
-#      x-openapi-router-controller: DevicesController
-#      x-openapi-router-service: DevicesService
-#  /devices/execute:
-#    post:
-#      operationId: devicesExecutePOST
-#      parameters:
-#      - description: Command to execute
-#        explode: true
-#        in: query
-#        name: action
-#        required: true
-#        schema:
-#          type: string
-#        style: form
-#      requestBody:
-#        content:
-#          application/json:
-#            schema:
-#              $ref: '#/components/schemas/CommandRequest'
-#      responses:
-#        "204":
-#          description: No Content
-#        "400":
-#          description: Bad Request
-#        "401":
-#          content:
-#            application/json:
-#              schema:
-#                $ref: '#/components/schemas/Error'
-#          description: Unauthorized
-#        "403":
-#          content:
-#            application/json:
-#              schema:
-#                $ref: '#/components/schemas/Error'
-#          description: Forbidden
-#        "500":
-#          content:
-#            application/json:
-#              schema:
-#                $ref: '#/components/schemas/Error'
-#          description: Internal server error
-#        default:
-#          content:
-#            application/json:
-#              schema:
-#                $ref: '#/components/schemas/Error'
-#          description: Unexpected error
-#      security:
-#      - apiKey: []
-#      - bearerAuth: []
-#      summary: Execute an action on the device side
-#      tags:
-#      - Devices
-#      x-swagger-router-controller: Devices
-#      x-openapi-router-controller: DevicesController
-#      x-openapi-router-service: DevicesService
+  /devices/{id}/recoveryInfo:
+    get:
+      operationId: devicesIdRecoveryInfoGET
+      parameters:
+      - description: Numeric ID of the Device to retrieve recovery info
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Organization to be filtered by
+        explode: true
+        in: query
+        name: org
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceRecoveryInfo'
+          description: Successful operation
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Get Device
+      tags:
+      - Devices
+      x-swagger-router-controller: Devices
+      x-openapi-router-controller: DevicesController
+      x-openapi-router-service: DevicesService
   /peers:
     get:
       operationId: peersGET
@@ -5191,6 +5153,54 @@ paths:
       x-swagger-router-controller: Accounts
       x-openapi-router-controller: AccountsController
       x-openapi-router-service: AccountsService
+  /accounts/{id}/subscription-status:
+    get:
+      operationId: accountsIdSubscriptionStatusGET
+      parameters:
+      - description: Numeric ID of the Account to retrieve information
+        explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+          description: Successful operation
+        "400":
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+      security:
+      - bearerAuth: []
+      - apiKey: []
+      summary: Retrieve account information, account response with subscription status
+      tags:
+      - Accounts
+      x-swagger-router-controller: Accounts
+      x-openapi-router-controller: AccountsController
+      x-openapi-router-service: AccountsService
   /organizations:
     get:
       operationId: organizationsGET
@@ -8849,12 +8859,15 @@ components:
       type: object
     Account:
       example:
+        _id: _id
+        name: name
         country: country
         companyType: companyType
         companyDesc: companyDesc
         enableNotifications: true
-        name: name
-        _id: _id
+        isSubscriptionValid: true
+        trial_end: 1676591999
+        forceMfa: false
       properties:
         _id:
           maxLength: 24
@@ -8862,34 +8875,42 @@ components:
           type: string
         name:
           type: string
+        country:
+          maxLength: 2
+          type: string
         companyType:
           type: string
         companyDesc:
           type: string
-        country:
-          maxLength: 2
-          type: string
         enableNotifications:
           default: true
+          type: boolean
+        isSubscriptionValid:
+          default: true
+          type: boolean
+        trial_end:
+          type: integer
+        forceMfa:
+          default: false
           type: boolean
       type: object
     AccountRequest:
       example:
+        name: name
         country: country
         companyType: companyType
         companyDesc: companyDesc
         enableNotifications: true
         forceMfa: false
-        name: name
       properties:
         name:
+          type: string
+        country:
+          maxLength: 2
           type: string
         companyType:
           type: string
         companyDesc:
-          type: string
-        country:
-          maxLength: 2
           type: string
         enableNotifications:
           default: true
@@ -8904,6 +8925,7 @@ components:
         description: description
         group: group
         encryptionMethod: ikev2
+        vxlanPort: 4789
       required:
         - name
         - group
@@ -8921,6 +8943,8 @@ components:
           - psk
           - ikev2
           type: string
+        vxlanPort:
+          type: string
       type: object
     Organization:
       example:
@@ -8930,6 +8954,7 @@ components:
         account: account
         group: group
         encryptionMethod: ikev2
+        vxlanPort: 4789
       properties:
         _id:
           maxLength: 24
@@ -8948,6 +8973,8 @@ components:
           - none
           - psk
           - ikev2
+          type: string
+        vxlanPort:
           type: string
       type: object
     OrganizationSummary:
@@ -9257,12 +9284,17 @@ components:
         - 46.5
         - 3.6
         routingFilters:
-        - defaultAction: deny
-          name: routingFilterName
+        - name: routingFilterName
           description: description for the filter
           rules:
-          - network: 192.168.55.0/24
-          - network: 192.168.66.0/24
+          - route: 192.168.55.0/24
+            action: allow
+            nextHop: ''
+            priority: 1
+          - route: 192.168.66.0/24
+            action: deny
+            nextHop: 65.65.65.65
+            priority: 2
         bgp:
           enable: true
           holdInterval: 90
@@ -9276,9 +9308,13 @@ components:
             remoteASN: 65002
             inboundFilter: routingFilterName
             outboundFilter: routingFilterName
+            sendCommunity: both
         cpuInfo:
           powerSaving: true
           vppCores: 3
+        distro:
+          version: 20.04
+          codename: focal
       properties:
         machineId:
           type: string
@@ -9344,6 +9380,15 @@ components:
           $ref: '#/components/schemas/DeviceVersion'
         cpuInfo:
           $ref: '#/components/schemas/DeviceCpuInfo'
+        distro:
+          $ref: '#/components/schemas/DeviceDistro'
+      type: object
+    OrganizationInfo:
+      example:
+        vxlanPort: 4789
+      properties:
+        vxlanPort:
+          type: string
       type: object
     Device:
       example:
@@ -9483,6 +9528,8 @@ components:
           type: string
         org:
           type: string
+        orgInfo:
+          $ref: '#/components/schemas/OrganizationInfo'
         ipList:
           type: string
         staticroutes:
@@ -9582,6 +9629,10 @@ components:
           type: string
         devId:
           type: string
+        parentDevId:
+          type: string
+        vlanTag:
+          type: string
         driver:
           type: string
         dhcp:
@@ -9636,6 +9687,7 @@ components:
           enum:
           - WAN
           - LAN
+          - TRUNK
           - NONE
           type: string
         IPv4Mask:
@@ -9777,6 +9829,16 @@ components:
         powerSaving:
           type: boolean
       type: object
+    DeviceDistro:
+      example:
+        version: 20.04
+        codename: focal
+      properties:
+        version:
+          type: string
+        codename:
+          type: string
+      type: object
     Role:
       enum:
       - owner
@@ -9889,11 +9951,6 @@ components:
           type: string
         description:
           type: string
-        defaultAction:
-          type: string
-          enum:
-          - deny
-          - allow
         rules:
           items:
             $ref: '#/components/schemas/RoutingFilterRule'
@@ -9903,9 +9960,18 @@ components:
       example:
         $ref: '#/components/examples/RoutingFilterRuleExample'
       properties:
-        network:
+        route:
           type: string
           maxLength: 24
+        action:
+          enum:
+          - allow
+          - deny
+          type: string
+        nextHop:
+          type: string
+        priority:
+          type: integer
       type: object
     BgpConfigs:
       example:
@@ -9966,6 +10032,16 @@ components:
         outboundFilter:
           type: string
           description: A routing filter name to apply on the expose routes to the BGP peer
+        sendCommunity:
+          enum:
+          - all
+          - both
+          - extended
+          - large
+          - standard
+          - ''
+          type: string
+          description: A BGP attribute to attach to the BGP peer
       type: object
     OspfConfigs:
       example:
@@ -10120,6 +10196,16 @@ components:
           type: string
         params:
           type: object
+      type: object
+    DeviceRecoveryInfo:
+      example:
+        token: 'eyJhbGciOiJIUz...ms9U'
+        server: 'https://manage.flexiwan.com:443'
+      properties:
+        token:
+          type: string
+        server:
+          type: string
       type: object
     WifiConnectRequest:
       example:
@@ -10318,6 +10404,7 @@ components:
         _id: _id
         name: Cloud Provider Name
         idType: fqdn
+        remoteIdType: fqdn
         localId: a4bbd424b1
         remoteId: 100.100.100.100
         psk: 123456f5621c1a95997997c8cd123456
@@ -10355,6 +10442,13 @@ components:
           enum:
             - fqdn
             - ip4-addr
+            - email
+        remoteIdType:
+          type: string
+          enum:
+            - fqdn
+            - ip4-addr
+            - email
         localId:
           type: string
         remoteId:
@@ -10544,7 +10638,7 @@ components:
           type: string
         ifname:
           description: Interface name
-          maxLength: 24
+          maxLength: 64
           type: string
         metric:
           description: Route metric
@@ -10590,7 +10684,7 @@ components:
       properties:
         interface:
           description: Interface bus Address
-          maxLength: 24
+          maxLength: 64
           type: string
         rangeStart:
           description: Start IP Range
@@ -10632,7 +10726,7 @@ components:
           type: string
         interface:
           description: Interface bus Address
-          maxLength: 24
+          maxLength: 64
           type: string
         rangeStart:
           description: Start IP Range
@@ -11869,6 +11963,9 @@ components:
         - $ref: '#/components/examples/RoutingFilterRuleExample'
     RoutingFilterRuleExample:
       value:
-        network: 100.200.30.1/24
+        route: 100.200.30.1/24
+        action: deny
+        nextHop: 8.8.8.8
+        priority: 2
 
 

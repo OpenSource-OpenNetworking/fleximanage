@@ -58,7 +58,6 @@ const buildInterfaces = (deviceInterfaces, globalOSPF, deviceVersion) => {
       pathlabels,
       gateway,
       metric,
-      mtu,
       dhcp,
       deviceType,
       configuration,
@@ -74,14 +73,14 @@ const buildInterfaces = (deviceInterfaces, globalOSPF, deviceVersion) => {
     );
     // Skip interfaces with invalid IPv4 addresses.
     // Currently we allow empty IPv6 address
-    if (dhcp !== 'yes' && !isIPv4Address(IPv4, IPv4Mask) && deviceType !== 'wifi') continue;
+    if (dhcp !== 'yes' && type !== 'TRUNK' &&
+      !isIPv4Address(IPv4, IPv4Mask) && deviceType !== 'wifi') continue;
 
     const ifcInfo = {
       dev_id: devId,
       dhcp: dhcp || 'no',
       addr: `${(IPv4 && IPv4Mask ? `${IPv4}/${IPv4Mask}` : '')}`,
       addr6: `${(IPv6 && IPv6Mask ? `${IPv6}/${IPv6Mask}` : '')}`,
-      mtu,
       type,
       multilink: { labels: labels.map((label) => label._id.toString()) },
       deviceType,
@@ -130,6 +129,27 @@ const buildInterfaces = (deviceInterfaces, globalOSPF, deviceVersion) => {
       ifcInfo.bridge_addr = ifcInfo.addr;
     } else {
       ifcInfo.bridge_addr = null;
+    }
+
+    // do not send MTU for VLANs
+    if (!ifc.vlanTag) {
+      ifcInfo.mtu = ifc.mtu;
+    }
+
+    // Currently, when sending modify-x device the agent does smart replacement in a way
+    // that if only one field exists in a sub-object, it adds this field
+    // to the sub-object but it keeps the other existing fields.
+    // So, in WiFi we need to send both keys (2.4GHz, and 5GHz) always.
+    // Otherwise, if we will send only the enabled one, ans user changed the enabled band,
+    // in some case, at the agent both can be enabled which is not supported.
+    // Hence, we send both always.
+    if (ifcInfo.deviceType === 'wifi') {
+      if (!('2.4GHz' in ifcInfo.configuration)) {
+        ifcInfo.configuration['2.4GHz'] = { enable: false };
+      }
+      if (!('5GHz' in ifcInfo.configuration)) {
+        ifcInfo.configuration['5GHz'] = { enable: false };
+      }
     }
 
     interfaces.push(ifcInfo);

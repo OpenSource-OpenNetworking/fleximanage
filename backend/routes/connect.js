@@ -33,7 +33,7 @@ const url = require('url');
 const flexibilling = require('../flexibilling');
 const { mapLteNames, getCpuInfo } = require('../utils/deviceUtils');
 const geoip = require('geoip-lite');
-
+const validators = require('../models/validators.js');
 const connectRouter = express.Router();
 connectRouter.use(bodyParser.json());
 
@@ -147,16 +147,38 @@ connectRouter.route('/register')
               // Try to auto populate interfaces parameters
               const ifs = JSON.parse(req.body.interfaces);
 
+              if (!ifs || !Array.isArray(ifs) || ifs.length === 0) {
+                return next(createError(500, 'Device without interfaces is not allowed'));
+              }
+
+              // first filter out not supported interfaces and allow to register with the rest
+              const interfaces = ifs.filter((i, idx) => validators.validateDevId(i.devId));
+              if (ifs.length !== interfaces.length) {
+                logger.warn('Unsupported interfaces were filtered out',
+                  { params: { ifs, interfaces } });
+              }
+
+              if (interfaces.length === 0) {
+                return next(createError(500, 'The interfaces are not supported'));
+              }
+
               // Get an interface with gateway and the lowest metric
-              const defaultIntf = ifs ? ifs.reduce((res, intf) =>
+              const defaultIntf = interfaces.reduce((res, intf) =>
                 intf.gateway && (!res || +res.metric > +intf.metric)
-                  ? intf : res, undefined) : undefined;
+                  ? intf : res, undefined);
               const lowestMetric = defaultIntf && defaultIntf.metric
                 ? defaultIntf.metric : '0';
 
               let highestMetric = 0;
               const setAutoMetricIndexes = new Set();
-              ifs.forEach((intf, idx) => {
+              interfaces.forEach((intf, idx) => {
+                // VLAN identification by devId, example "vlan.10.pci:0000:00:08.00"
+                const idParts = intf.devId.split('.');
+                if (idParts.length > 2 && idParts[0] === 'vlan' && idParts[1]) {
+                  intf.vlanTag = idParts[1];
+                  intf.parentDevId = idParts.slice(2).join('.');
+                }
+                intf.locked = true;
                 intf.isAssigned = false;
                 intf.useStun = true;
                 intf.useFixedPublicPort = false;
@@ -212,7 +234,7 @@ connectRouter.route('/register')
               // This loop done at the end to avoid metric duplication
               setAutoMetricIndexes.forEach(i => {
                 highestMetric += 100;
-                ifs[i].metric = highestMetric;
+                interfaces[i].metric = highestMetric;
               });
 
               // Prepare device versions array
@@ -222,7 +244,10 @@ connectRouter.route('/register')
                 device: req.body.device_version || ''
               };
 
-              const cpuInfo = getCpuInfo(req.body.cpuInfo);
+              const requestCpuInfo = req.body.cpuInfo
+                ?.replaceAll('\'', '"').replaceAll('False', 'false').replaceAll('True', 'true');
+              const cpuInfo = getCpuInfo(requestCpuInfo ? JSON.parse(requestCpuInfo) : null);
+              const requestDistro = JSON.parse(req.body.distro?.replaceAll('\'', '"') || '{}');
 
               // Check that account didn't cross its device limit
               const account = decoded.account;
@@ -255,7 +280,7 @@ connectRouter.route('/register')
                   }
 
                   // Get device location
-                  let ll = getCoordinates(ifs, sourceIP);
+                  let ll = getCoordinates(interfaces, sourceIP);
                   if (!ll) ll = [40.416775, -3.703790]; // Default coordinate
 
                   // Create the device
@@ -269,12 +294,16 @@ connectRouter.route('/register')
                     machineId: req.body.machine_id,
                     serial: req.body.serial || '0',
                     fromToken: resp[0].name,
-                    interfaces: ifs,
+                    interfaces: interfaces,
                     deviceToken: deviceToken,
                     isApproved: false,
                     isConnected: false,
                     coords: ll,
                     cpuInfo: cpuInfo,
+                    distro: {
+                      version: requestDistro?.version ?? '',
+                      codename: requestDistro?.codename ?? ''
+                    },
                     versions: versions
                   }], { session: session })
                     .then(async (result) => {

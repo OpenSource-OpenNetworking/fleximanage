@@ -12,7 +12,7 @@ To contact us please drop us an email at yourfriends@flexiwan.com, or for any ge
 
 This repository contains the flexiManage backend component from flexiWAN. flexiManage service is used for managing [flexiEdge devices](https://docs.flexiwan.com/overview/arch.html#flexiedge). It allows users to create users and accounts and manage the entire network inventory of the organizations in the account.
 
-Our hosted service https://manage.flexiwan.com provides a free UI access to the flexiManage service where users can create an account and use up to 3 flexiEdge devices for free.
+Our hosted service https://manage.flexiwan.com provides a free access to the flexiManage service for a 30 days trial where users can create an account and use up to 5 flexiEdge devices during the free trial. Users may request extension of the trial by contacting our account team (team@flexiwan.com). One account is allowed per company and users are not allowed to open additional accounts in order to gain additional free trials.
 
 ## What is included in this repository
 

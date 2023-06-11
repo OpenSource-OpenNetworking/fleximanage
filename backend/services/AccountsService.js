@@ -19,6 +19,7 @@ const Service = require('./Service');
 
 const Accounts = require('../models/accounts');
 const Users = require('../models/users');
+const pick = require('lodash/pick');
 const { getToken } = require('../tokens');
 const {
   getUserAccounts,
@@ -27,14 +28,43 @@ const {
 
 class AccountsService {
   /**
+   * Select the API fields from mongo Account Object
+   *
+   * @param {mongo Account Object} item
+   */
+  static selectAccountParams (item, onlySubscriptionStatus = false) {
+    const items = [
+      '_id',
+      'isSubscriptionValid',
+      'trial_end',
+      'forceMfa'
+    ];
+    if (!onlySubscriptionStatus) {
+      items.push(...[
+        'companyType',
+        'companyDesc',
+        'enableNotifications',
+        'name',
+        'country'
+      ]);
+    }
+    const ret = pick(item, items);
+    ret._id = ret._id.toString();
+    return ret;
+  }
+
+  /**
    * Get all AccessTokens
    *
    * offset Integer The number of items to skip before starting to collect the result set (optional)
    * limit Integer The numbers of items to return (optional)
    * returns List
+   *
+   * Important Note: this API bypass account permission check, return only necessary info
    **/
   static async accountsGET ({ offset, limit }, { user }) {
     try {
+      // This API bypass account permission check, make sure to return only necessary info
       const accounts = await getUserAccounts(user, offset, limit);
       return Service.successResponse(accounts);
     } catch (e) {
@@ -59,17 +89,36 @@ class AccountsService {
         );
       }
       const account = await Accounts.findOne({ _id: id });
-      const {
-        logoFile,
-        organizations,
-        companySize,
-        serviceType,
-        numSites,
-        __v,
-        ...rest
-      } = account.toObject();
-      rest._id = rest._id.toString();
-      return Service.successResponse(rest);
+      const result = AccountsService.selectAccountParams(account);
+      return Service.successResponse(result);
+    } catch (e) {
+      return Service.rejectResponse(
+        e.message || 'Internal Server Error',
+        e.status || 500
+      );
+    }
+  }
+
+  /**
+   * Retrieve account subscription status information
+   *
+   * id String Numeric ID of the Account to retrieve information
+   * returns Account with only subscription status
+   *
+   * Important NOTE: This API bypass the account permission check, must return only necessary data
+   **/
+  static async accountsIdSubscriptionStatusGET ({ id }, { user }) {
+    try {
+      // Validate that user is accessing this API while he has access to this account
+      if (user?.defaultAccount?._id.toString() !== id) {
+        return Service.rejectResponse(
+          'No permission to access this account', 403
+        );
+      }
+      const account = await Accounts.findOne({ _id: id });
+      // This API bypass permissions, return only needed info
+      const result = AccountsService.selectAccountParams(account, true);
+      return Service.successResponse(result);
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
@@ -105,18 +154,8 @@ class AccountsService {
       const token = await getToken({ user }, { accountName: account.name });
       response.setHeader('Refresh-JWT', token);
 
-      // Return organization
-      const {
-        logoFile,
-        organizations,
-        companySize,
-        serviceType,
-        numSites,
-        __v,
-        ...rest
-      } = account.toObject();
-      rest._id = rest._id.toString();
-      return Service.successResponse(rest);
+      const result = AccountsService.selectAccountParams(account);
+      return Service.successResponse(result);
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
@@ -130,6 +169,8 @@ class AccountsService {
    *
    * selectAccountRequest SelectAccountRequest
    * returns Account
+   *
+   * Important Note: This API bypass account permission check, return only necessary info
    **/
   static async accountsSelectPOST ({ accountSelectRequest }, req, res) {
     const user = req.user;
@@ -142,7 +183,9 @@ class AccountsService {
 
       // If current account not changed, return OK
       if (user.defaultAccount._id.toString() === account) {
-        return Service.successResponse({ _id: user.defaultAccount._id.toString() }, 201);
+        // This API bypass permissions, return only needed info
+        const result = AccountsService.selectAccountParams(user.defaultAccount, true);
+        return Service.successResponse(result, 201);
       }
 
       const accounts = await getUserAccounts(user);
@@ -178,7 +221,10 @@ class AccountsService {
       user.defaultOrg = null;
 
       await orgUpdateFromNull(req, res);
-      return Service.successResponse({ _id: updUser.defaultAccount._id.toString() }, 201);
+      // This API bypass account permissions check, return only needed info
+      // Still it's returned only if user has any permission to access this account
+      const result = AccountsService.selectAccountParams(updUser.defaultAccount, true);
+      return Service.successResponse(result, 201);
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',

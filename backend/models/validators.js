@@ -24,7 +24,7 @@ const phoneUtil = require('google-libphonenumber').PhoneNumberUtil.getInstance()
 
 // Globals
 const protocols = ['OSPF', 'NONE', 'BGP', 'OSPF,BGP'];
-const interfaceTypes = ['WAN', 'LAN', 'NONE'];
+const interfaceTypes = ['WAN', 'LAN', 'TRUNK', 'NONE'];
 
 // Helper functions
 const isEmpty = (val) => { return val === null || val === undefined; };
@@ -71,9 +71,20 @@ const validateIPaddr = (ip) => { return validateIPv4(ip) || validateIPv6(ip); };
 const validateDevId = (devId) => {
   return (
     validatePciAddress(devId) ||
+    validateUsbAddress(devId) ||
+    validateVlanAddress(devId)
+  );
+};
+const validateParentDevId = (devId) => {
+  return (
+    validatePciAddress(devId) ||
     validateUsbAddress(devId)
   );
 };
+
+// specific validator for interfaces used in firewall rules
+const validateFirewallDevId = (devId) => validateDevId(devId) || devId.startsWith('app_');
+
 const validatePciAddress = pci => {
   return (
     pci === '' ||
@@ -90,7 +101,14 @@ const validateUsbAddress = usb => {
     /^usb:usb[0-9]\/[0-9]+-[0-9]+\/[0-9]+-[0-9]+.[0-9]+\/[0-9]+-[0-9]+.[0-9]:[0-9].[0-9]+$/i.test(usb)
   );
 };
-const validateIfcName = (name) => { return /^[a-zA-Z0-9_]{1,15}$/i.test(name || ''); };
+const validateVlanAddress = devId => {
+  return (
+    devId === '' ||
+    /* eslint-disable max-len */
+    /^vlan\.([1-9]|[1-9][0-9]{1,2}|[1-3][0-9]{1,3}|40([0-8][0-9]|9[0-4]))\.pci:([A-F0-9]{2,4}:)?([A-F0-9]{2}|[A-F0-9]{4}):[A-F0-9]{2}\.[A-F0-9]{2}$/i.test(devId)
+  );
+};
+const validateIfcName = (name) => { return /^[a-zA-Z0-9_/.]{1,64}$/i.test(name || ''); };
 const validateIsNumber = (str) => { return !isNaN(Number(str)); };
 const validateDriverName = (name) => { return /^[a-z0-9_-]{1,30}$/i.test(name || ''); };
 const validateMacAddress = mac => {
@@ -132,6 +150,7 @@ const isPort = (val) => {
   return !isEmpty(val) && !(val === '') && validateIsInteger(+val) && val >= 0 && val <= 65535;
 };
 const validatePort = port => port === '' || isPort(port);
+const validateVxlanPort = port => validatePort(port) && port !== '500' && port !== '4500';
 const validatePortRange = (range) => {
   if (range === '') return true;
   if (!(range || '').includes('-')) return isPort(range);
@@ -159,11 +178,11 @@ const validateUserName = name => {
 };
 const validateEmail = (mail) => { return !isEmpty(mail) && email.validate(mail); };
 
-const validateLabelName = (name) => { return /^[a-z0-9-_ .]{3,30}$/i.test(name || ''); };
+const validateLabelName = (name) => { return /^[a-z0-9-_ .:]{3,30}$/i.test(name || ''); };
 const validateLabelColor = (color) => { return /^#[0-9A-F]{6}$/i.test(color); };
 
-const validatePolicyName = (name) => { return /^[a-z0-9-_ .]{3,50}$/i.test(name || ''); };
-const validateRuleName = (name) => { return /^[a-z0-9-_ .]{3,15}$/i.test(name || ''); };
+const validatePolicyName = (name) => { return /^[a-z0-9-_ .:]{3,50}$/i.test(name || ''); };
+const validateRuleName = (name) => { return /^[a-z0-9-_ .:]{3,15}$/i.test(name || ''); };
 
 const validateMetric = (val) => val === '' || (val && validateIsInteger(val) && +val >= 0);
 const validateMtu = (val) => val && validateIsInteger(val) && +val >= 500 && +val <= 9999;
@@ -176,6 +195,7 @@ const validateApplicationIdentifier = str => { return /[A-Za-z_.-]/i.test(str ||
 const validateBGPASN = val => val && validateIsInteger(val) && +val >= 1;
 const validateBGPInterval = val => val && validateIsInteger(val) && +val >= 0 && +val < 65535;
 const validateCpuCoresNumber = val => val && validateIsInteger(val) && +val >= 1 && +val < 65535;
+const validateVlanTag = val => val === '' || (val && validateIsInteger(val) && +val >= 0 && +val <= 4096);
 
 module.exports = {
   validateDHCP,
@@ -185,6 +205,9 @@ module.exports = {
   validateIPaddr,
   validatePciAddress,
   validateDevId,
+  validateParentDevId,
+  validateFirewallDevId,
+  validateVlanTag,
   validateIfcName,
   validateIPv4Mask,
   validateIPv6Mask,
@@ -224,5 +247,6 @@ module.exports = {
   validateBGPASN,
   validateBGPInterval,
   validateIsNumber,
-  validateCpuCoresNumber
+  validateCpuCoresNumber,
+  validateVxlanPort
 };

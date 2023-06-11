@@ -40,6 +40,14 @@ const mongoConns = require('../mongoConns.js')();
 const pick = require('lodash/pick');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 const { getToken } = require('../tokens');
+const DeviceEvents = require('../deviceLogic/events');
+const { processModifyJob } = require('../deviceLogic/modifyDevice');
+const { forceDevicesSync } = require('../deviceLogic/sync');
+const { pendingTypes, getReason } = require('../deviceLogic/events/eventReasons');
+const { prepareTunnelAddJob, prepareTunnelRemoveJob } = require('../deviceLogic/tunnels');
+const { transformVxlanConfig } = require('../deviceLogic/jobParameters');
+const { validateFirewallRules } = require('../deviceLogic/validators');
+const { getMajorVersion, getMinorVersion } = require('../versioning');
 
 class OrganizationsService {
   /**
@@ -53,7 +61,8 @@ class OrganizationsService {
       '_id',
       'account',
       'group',
-      'encryptionMethod'
+      'encryptionMethod',
+      'vxlanPort'
     ]);
     retOrg._id = retOrg._id.toString();
     retOrg.account = retOrg.account.toString();
@@ -75,18 +84,7 @@ class OrganizationsService {
         return OrganizationsService.selectOrganizationParams(orgs[key]);
       });
 
-      const list = result.map(element => {
-        return {
-          _id: element._id.toString(),
-          name: element.name,
-          description: element.description,
-          account: element.account ? element.account.toString() : '',
-          group: element.group,
-          encryptionMethod: element.encryptionMethod
-        };
-      });
-
-      return Service.successResponse(list);
+      return Service.successResponse(result);
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
@@ -125,14 +123,7 @@ class OrganizationsService {
         });
         res.setHeader('Refresh-JWT', token);
 
-        const result = {
-          _id: updUser.defaultOrg._id.toString(),
-          name: updUser.defaultOrg.name,
-          description: updUser.defaultOrg.description,
-          account: updUser.defaultOrg.account ? updUser.defaultOrg.account.toString() : '',
-          group: updUser.defaultOrg.group,
-          encryptionMethod: updUser.defaultOrg.encryptionMethod
-        };
+        const result = OrganizationsService.selectOrganizationParams(updUser.defaultOrg);
         return Service.successResponse(result, 201);
       }
     } catch (e) {
@@ -266,20 +257,57 @@ class OrganizationsService {
       // Only allow to update current default org, this is required to make sure the API permissions
       // are set properly for updating this organization
       const orgList = await getAccessTokenOrgList(user, undefined, false);
-      if (orgList.includes(id)) {
-        const { name, description, group, encryptionMethod } = organizationRequest;
-        const resultOrg = await Organizations.findOneAndUpdate(
-          { _id: id },
-          { $set: { name, description, group, encryptionMethod } },
-          { upsert: false, multi: false, new: true, runValidators: true }
-        );
-        // Update token
-        const token = await getToken({ user }, { orgName: organizationRequest.name });
-        response.setHeader('Refresh-JWT', token);
-        return Service.successResponse(OrganizationsService.selectOrganizationParams(resultOrg));
-      } else {
+      if (!orgList.includes(id)) {
         throw new Error('Please select an organization to update it');
       }
+
+      const { name, description, group, encryptionMethod, vxlanPort } = organizationRequest;
+      const org = await Organizations.findOne({ _id: id });
+      if (!org) {
+        throw new Error('Organization ID is incorrect');
+      }
+      const origVxlanPort = org.vxlanPort;
+      let orgDevices = [];
+
+      // update org, don't save
+      org.name = name;
+      org.description = description;
+      org.group = group;
+      org.encryptionMethod = encryptionMethod;
+      org.vxlanPort = vxlanPort ?? origVxlanPort; // if not specified by user, set the orig value
+
+      const isVxlanPortChanged = origVxlanPort !== vxlanPort;
+      if (isVxlanPortChanged) {
+        // if vxlan port is changed, need to check the firewall ports before saving in db
+        orgDevices = await Devices.devices.find({ org: id })
+          .populate('org')
+          .populate('policies.firewall.policy', '_id name rules');
+
+        validateVxlanPortChange(orgDevices, org);
+      }
+
+      // now, save
+      const updatedOrg = await org.save({ validateBeforeSave: true });
+
+      // after save, send jobs to devices
+      if (isVxlanPortChanged) {
+        // only 6.2 and later support vxlan port change.
+        const devices = orgDevices.filter(d => {
+          const majorVersion = getMajorVersion(d.versions.agent);
+          const minorVersion = getMinorVersion(d.versions.agent);
+          return majorVersion > 6 || (majorVersion === 6 && minorVersion >= 2);
+        });
+
+        if (devices.length > 0) {
+          await handleVxlanPortChange(updatedOrg, vxlanPort, devices, user);
+        }
+      }
+
+      // Update token
+      const token = await getToken({ user }, { orgName: organizationRequest.name });
+      response.setHeader('Refresh-JWT', token);
+
+      return Service.successResponse(OrganizationsService.selectOrganizationParams(updatedOrg));
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
@@ -570,3 +598,306 @@ class OrganizationsService {
 }
 
 module.exports = OrganizationsService;
+
+const getTunnelsPipeline = (id, origVxlanPort) => {
+  // if VXLAN port is changed, we need to reconstruct all tunnels
+  // to use the new source port.
+  // but, since that change in source port may trigger public port change,
+  // the STUN may detect another public port and triggers another reconstruction of the same tunnel.
+  //
+  // So, the idea is to try to guess which tunnel will be reconstructed via STUN.
+  // If *one of the interfaces* will cause the tunnels to be reconstructed,
+  // there is no need to do a reconstruct right now but we can wait for STUN to fix it.
+  return [
+    // we don't use vxlan for peers, so filter those tunnels out.
+    { $match: { org: id, isActive: true, isPending: false, peer: null } },
+    {
+      $project: {
+        _id: 1,
+        num: 1,
+        org: 1,
+        deviceA: 1,
+        deviceB: 1,
+        interfaceA: 1,
+        interfaceB: 1,
+        isPending: 1,
+        pendingReason: 1,
+        peer: 1,
+        pathlabel: 1,
+        advancedOptions: 1,
+        encryptionMethod: 1
+      }
+    },
+    {
+      $lookup: {
+        from: 'devices',
+        let: { idA: '$deviceA', idB: '$deviceB', ifcA: '$interfaceA', ifcB: '$interfaceB' },
+        as: 'devices',
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$org', id] },
+                  { $or: [{ $eq: ['$_id', '$$idA'] }, { $eq: ['$_id', '$$idB'] }] }
+                ]
+              }
+            }
+          },
+          {
+            $project: {
+              _id: 1,
+              name: 1,
+              machineId: 1,
+              versions: 1,
+              hostname: 1,
+              'interfaces._id': 1,
+              tunnelInterface: {
+                $arrayElemAt: [{
+                  $filter: {
+                    input: '$interfaces',
+                    as: 'ifc',
+                    cond: {
+                      $and: [
+                        { $eq: ['$$ifc.type', 'WAN'] },
+                        {
+                          $or: [
+                            { $eq: ['$$ifc._id', '$$ifcA'] },
+                            { $eq: ['$$ifc._id', '$$ifcB'] }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }, 0]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      $addFields: {
+        deviceA: { $arrayElemAt: ['$devices', 0] },
+        deviceB: { $arrayElemAt: ['$devices', 1] },
+        interfaceA: {
+          $let: {
+            vars: { deviceA: { $arrayElemAt: ['$devices', 0] } },
+            in: '$$deviceA.tunnelInterface'
+          }
+        },
+        interfaceB: {
+          $let: {
+            vars: { deviceB: { $arrayElemAt: ['$devices', 1] } },
+            in: '$$deviceB.tunnelInterface'
+          }
+        }
+      }
+    },
+    {
+      $addFields: {
+        op: {
+          $cond: {
+            if: {
+              // $or because one interface that met the conditions
+              // is enough to decide whether the reconstruct or pending
+              $or: [
+                { $and: getInterfaceConditionsToBePending('interfaceA', origVxlanPort) },
+                { $and: getInterfaceConditionsToBePending('interfaceB', origVxlanPort) }
+              ]
+            },
+            then: 'pending',
+            else: 'reconstruct'
+          }
+        }
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        toPending: {
+          $push: {
+            $cond: {
+              if: { $eq: ['$op', 'pending'] },
+              then: '$$ROOT',
+              else: '$$REMOVE'
+            }
+          }
+        },
+        toReconstruct: {
+          $push: {
+            $cond: {
+              if: { $eq: ['$op', 'reconstruct'] },
+              then: '$$ROOT',
+              else: '$$REMOVE'
+            }
+          }
+        }
+      }
+    }
+  ];
+};
+
+const getInterfaceConditionsToBePending = (key, origVxlanPort) => {
+  return [
+    // uses STUN
+    { $eq: [`$${key}.useStun`, true] },
+    // doesn't use static public port
+    { $eq: [`$${key}.useFixedPublicPort`, false] },
+    // has public port and public IP
+    { $ne: [`$${key}.PublicIP`, ''] },
+    { $ne: [`$${key}.PublicPort`, ''] },
+    // if original source port equals to the public port,
+    // we can assume that new source port will be used
+    // as the new public port so we can reconstruct now.
+    { $ne: [`$${key}.PublicPort`, origVxlanPort] }
+  ];
+};
+
+const handleToPendingTunnels = async (tunnels) => {
+  if (tunnels.length === 0) return [];
+
+  const failedDevices = new Set();
+  const deviceIds = new Set();
+  const interfacesIds = new Set();
+
+  const events = new DeviceEvents();
+  const pendingType = pendingTypes.waitForStun;
+  const reason = getReason(pendingType);
+
+  for (const tunnel of tunnels) {
+    try {
+      await events.setOneTunnelAsPending(tunnel, reason, pendingType, tunnel.deviceA);
+
+      deviceIds.add(tunnel.deviceA._id.toString());
+      deviceIds.add(tunnel.deviceB._id.toString());
+      interfacesIds.add(tunnel.interfaceA._id.toString());
+      interfacesIds.add(tunnel.interfaceB._id.toString());
+    } catch (err) {
+      logger.error('Failed to set tunnel as pending', { params: { reason: err.message, tunnel } });
+      failedDevices.add(tunnel.deviceA._id.toString());
+      failedDevices.add(tunnel.deviceB._id.toString());
+    }
+  }
+
+  // remove public port from both interfaces
+  await Devices.devices.updateMany(
+    { _id: { $in: [...deviceIds] } },
+    { $set: { 'interfaces.$[elem].PublicPort': '' } },
+    { upsert: false, arrayFilters: [{ 'elem._id': { $in: [...interfacesIds] } }] }
+  );
+
+  return failedDevices;
+};
+
+const addDeviceTasks = (obj, device, task) => {
+  if (!task) return;
+
+  const deviceId = device._id.toString();
+
+  if (!(deviceId in obj)) {
+    obj[deviceId] = {
+      device: device,
+      tasks: []
+    };
+  }
+
+  if (Array.isArray(task)) {
+    obj[deviceId].tasks.push(...task);
+  } else {
+    obj[deviceId].tasks.push(task);
+  }
+};
+
+const handleVxlanPortChange = async (org, origVxlanPort, orgDevices, user) => {
+  const orgId = org._id;
+  const devicesJobs = {}; // mapping object [deviceId] = { device: {}, tasks: [] }
+  const desynchronizedDevices = new Set();
+
+  try {
+    const pipeline = getTunnelsPipeline(mongoose.Types.ObjectId(orgId), origVxlanPort);
+    const tunnels = await Tunnels.aggregate(pipeline).allowDiskUse(true);
+    // The expected output is array with one object with two keys:
+    //  [{ _id: null, toPending: [], toReconstruct: [] }]
+    //
+    const toPending = tunnels?.[0]?.toPending ?? [];
+    const toReconstruct = tunnels?.[0]?.toReconstruct ?? [];
+
+    // handle tunnels that should be pending. Do not send jobs
+    const failedDevicesIds = await handleToPendingTunnels(toPending);
+    failedDevicesIds.forEach(f => desynchronizedDevices.add(f));
+
+    // first prepare remove-tunnel tasks for each device
+    for (const removeTunnel of [...toPending, ...toReconstruct]) {
+      const [removeTasksDevA, removeTasksDevB] = await prepareTunnelRemoveJob(removeTunnel, true);
+      addDeviceTasks(devicesJobs, removeTunnel.deviceA, removeTasksDevA);
+      addDeviceTasks(devicesJobs, removeTunnel.deviceB, removeTasksDevB);
+    }
+
+    // now prepare the modify-vxlan-config task for each device
+    const params = transformVxlanConfig(org);
+    for (const orgDevice of orgDevices) {
+      addDeviceTasks(devicesJobs, orgDevice, { message: 'modify-vxlan-config', params });
+    }
+
+    // now prepare add-tunnel tasks for each device
+    for (const addTunnel of toReconstruct) {
+      const [addTasksDevA, addTasksDevB] = await prepareTunnelAddJob(addTunnel, org, true);
+      addDeviceTasks(devicesJobs, addTunnel.deviceA, addTasksDevA);
+      addDeviceTasks(devicesJobs, addTunnel.deviceB, addTasksDevB);
+    }
+
+    // finally, send one job to each device that contains all the tasks
+    for (const deviceId in devicesJobs) {
+      try {
+        const tasks = devicesJobs[deviceId].tasks;
+        const device = devicesJobs[deviceId].device;
+        await processModifyJob(tasks, device, orgId, user);
+      } catch (err) {
+        logger.error('Error in sending modify vxlan jobs to device', {
+          params: { reason: err.message, deviceId }
+        });
+
+        // send sync later but don't throw exception
+        desynchronizedDevices.add(deviceId);
+      }
+    }
+  } catch (err) {
+    logger.error('Error in handling vxlan change', {
+      params: {
+        reason: err.message,
+        origVxlanPort,
+        newVxlanPort: org.vxlanPort,
+        orgId: org._id
+      }
+    });
+
+    // here, no job was sent (it was handled by nested try and catch). hence we sync all devices
+    await forceDevicesSync(orgDevices.map(d => d._id));
+    desynchronizedDevices.clear();
+  }
+
+  if (desynchronizedDevices.size > 0) {
+    await forceDevicesSync(desynchronizedDevices);
+  }
+};
+
+const validateVxlanPortChange = (devices, org) => {
+  for (const device of devices) {
+    const { interfaces, firewall, policies } = device.toObject();
+    const deviceRules = firewall?.rules ?? [];
+    const globalRules = policies?.firewall?.status?.startsWith('install')
+      ? policies?.firewall?.policy?.rules ?? []
+      : [];
+    const rules = [...globalRules, ...deviceRules];
+
+    if (rules.length === 0) {
+      continue;
+    }
+
+    const { valid, err } = validateFirewallRules(rules, org, interfaces);
+    if (!valid) {
+      throw new Error(`VXLAN port is invalid: ${err}`);
+    }
+  }
+};

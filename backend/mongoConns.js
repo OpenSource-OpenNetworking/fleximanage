@@ -76,12 +76,26 @@ class MongoConns {
     try {
       session = await this.mainDB.startSession();
       await session.withTransaction(async () => {
-        // Prevent infinite loop, if more than 'times' transient errors (writeConflict), exit
+        // By default, "withTransaction" tries the function infinitely if the error is mongo error.
+        // It tries the function until it succeeds.
+        // Hance we have a protection to prevent infinite loop.
+        // If more than 'times' transient errors (writeConflict), exit with non-mongo error
         execNum += 1;
         if (execNum > times) {
           throw new Error(`Error writing to database, too many attempts (${times})`);
         }
-        await func(session);
+
+        try {
+          await func(session);
+        } catch (err) {
+          // print error to log and throw it back.
+          // As written above, the "withTransaction" will try the function again.
+          logger.error('Transaction failed', { params: { err: err.message } });
+          // throw the same error we get.
+          // If it is a mongo error, the "withTransaction" will try again up to "times".
+          // If it is not a mongo error, the "withTransaction" will abort the session and exit.
+          throw err;
+        }
       });
     } finally {
       // This creates an issue with some updates, need to understand why

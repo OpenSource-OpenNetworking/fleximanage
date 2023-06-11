@@ -42,7 +42,7 @@ const interfacesSchema = new Schema({
   name: {
     type: String,
     minlength: [1, 'Name length must be at least 1'],
-    maxlength: [50, 'Name length must be at most 50'],
+    maxlength: [64, 'Name length must be at most 64'],
     validate: {
       validator: validators.validateIfcName,
       message: 'name should be a valid interface name'
@@ -58,6 +58,30 @@ const interfacesSchema = new Schema({
       message: 'devId should be a valid devId address'
     },
     default: ''
+  },
+  // Parent device bus address, used for VLAN sub-interfaces
+  parentDevId: {
+    type: String,
+    maxlength: [50, 'Parent devId length must be at most 50'],
+    validate: {
+      validator: validators.validateParentDevId,
+      message: 'Parent devId should be a valid devId address'
+    },
+    default: ''
+  },
+  // true if the interface exists in the linux config, not allowed to remove in manage
+  locked: {
+    type: Boolean,
+    default: false
+  },
+  // VLAN Tag, used for VLAN sub-interfaces
+  vlanTag: {
+    type: String,
+    default: '',
+    validate: {
+      validator: validators.validateVlanTag,
+      message: 'VLAN Tag should be a number between 1 and 4094'
+    }
   },
   // driver name
   driver: {
@@ -595,12 +619,28 @@ const deviceApplicationSchema = new Schema({
  * Device routing filter schema
  */
 const deviceRoutingFilterRuleSchema = new Schema({
-  network: {
+  route: {
     type: String,
     validate: {
       validator: val => validators.validateIPv4WithMask(val),
-      message: 'network should be a valid IPv4/mask'
+      message: 'route should be a valid IPv4/mask'
     },
+    required: true
+  },
+  action: {
+    type: String,
+    enum: ['allow', 'deny'],
+    required: true
+  },
+  nextHop: {
+    type: String,
+    validate: {
+      validator: val => validators.validateIPv4(val),
+      message: 'nextHop should be a valid IPv4'
+    }
+  },
+  priority: {
+    type: Number,
     required: true
   }
 });
@@ -616,11 +656,6 @@ const deviceRoutingFiltersSchema = new Schema({
       validator: validators.validateStringNoSpaces,
       message: 'name cannot include spaces'
     }
-  },
-  defaultAction: {
-    type: String,
-    enum: ['deny', 'allow'],
-    default: 'deny'
   },
   description: {
     type: String,
@@ -784,6 +819,11 @@ const BGPNeighborSchema = new Schema({
   outboundFilter: {
     type: String,
     default: ''
+  },
+  sendCommunity: {
+    type: String,
+    enum: ['all', 'both', 'extended', 'large', 'standard', ''],
+    default: 'all'
   }
 }, {
   timestamps: true
@@ -1085,6 +1125,18 @@ const deviceSchema = new Schema({
     powerSaving: {
       type: Boolean,
       default: false
+    }
+  },
+  distro: {
+    version: {
+      type: String,
+      maxlength: [50, 'Version string must be lower than 30'],
+      default: ''
+    },
+    codename: {
+      type: String,
+      maxlength: [50, 'codename string must be lower than 30'],
+      default: ''
     }
   }
 },

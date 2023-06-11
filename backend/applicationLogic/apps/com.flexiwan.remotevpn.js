@@ -130,7 +130,7 @@ class RemoteVpn extends IApplication {
       if (!dev.firewall.rules) continue;
       const outbound = dev.firewall.rules.some(r => {
         return r.direction === 'outbound' &&
-          r.interfaces.some(ri => `app_${app.appStoreApp.identifier}`);
+          r.interfaces.some(ri => ri === `app_${app.appStoreApp.identifier}`);
       });
 
       if (outbound) {
@@ -166,6 +166,16 @@ class RemoteVpn extends IApplication {
         valid: false,
         err: 'Remote Worker VPN is supported from version 5.2.X,' +
           ' Some devices have lower version'
+      };
+    }
+
+    // this field indicates that application configured.
+    // There is no way to save only networkId without other configurations
+    if (!app.configuration?.networkId) {
+      return {
+        valid: false,
+        err: 'Remote Worker VPN is not configured properly. ' +
+        'Check the installed application configuration page.'
       };
     }
 

@@ -30,6 +30,10 @@ class AccountsController {
     await Controller.handleRequest(request, response, this.service.accountsIdGET);
   }
 
+  async accountsIdSubscriptionStatusGET (request, response) {
+    await Controller.handleRequest(request, response, this.service.accountsIdSubscriptionStatusGET);
+  }
+
   async accountsIdPUT (request, response) {
     await Controller.handleRequest(request, response, this.service.accountsIdPUT);
   }

@@ -34,6 +34,15 @@ const getUiServerUrl = req => {
   return uiServerUrl;
 };
 
+const getRedisAuthUrl = redisUrl => {
+  const urlInfo = new URL(redisUrl);
+  const redisAuth = urlInfo.username;
+  urlInfo.username = '';
+  const redisUrlNoAuth = urlInfo.href;
+  return { redisAuth, redisUrlNoAuth };
+};
+
 module.exports = {
-  getUiServerUrl
+  getUiServerUrl,
+  getRedisAuthUrl
 };

@@ -355,7 +355,7 @@ class DeviceStatus {
         const intfStats = stats[intf];
         for (const stat in intfStats) {
           if (!intfStats.hasOwnProperty(stat) || !this.statsFieldsMap.get(stat)) continue;
-          const key = 'stats.' + intf.replace('.', ':') + '.' + this.statsFieldsMap.get(stat);
+          const key = 'stats.' + intf.replaceAll('.', ':') + '.' + this.statsFieldsMap.get(stat);
           dbStats[key] = intfStats[stat] / statsEntry.period;
           shouldUpdate = true;
         }

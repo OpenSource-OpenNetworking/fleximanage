@@ -41,6 +41,8 @@ const flexibilling = require('../flexibilling');
 const { getUserOrganizations } = require('../utils/membershipUtils');
 const { generateSecret, verifyCode } = require('../otp');
 const SHA256 = require('crypto-js/sha256');
+const rateLimit = require('express-rate-limit');
+const RateLimitStore = require('../rateLimitStore');
 
 router.use(bodyParser.json());
 
@@ -116,8 +118,11 @@ router.route('/register')
           }
         });
       })
-      .then(customerId => {
+      .then(async customerId => {
         registerCustomerId = customerId;
+        const subscription = await flexibilling.getAllSubscriptionsForQuery({
+          'customer_id[is]': customerId
+        });
         return Account.create([{
           name: req.body.accountName,
           country: req.body.country,
@@ -125,7 +130,9 @@ router.route('/register')
           serviceType: req.body.serviceType,
           numSites: req.body.numberSites,
           logoFile: '',
-          billingCustomerId: customerId
+          billingCustomerId: customerId,
+          isSubscriptionValid: true,
+          trial_end: subscription?.[0]?.subscription?.trial_end ?? null
         }], { session: session });
       })
       .then((account) => {
@@ -543,65 +550,85 @@ router.route('/mfa/getMfaConfigUri')
     res.status(200).json({ configUri: secret.uri });
   });
 
+// 2fa token is changed every 30 seconds.
+// Hence allow 5 times in 30 seconds to verify,
+const inMemoryStore = new RateLimitStore(1000 * 30); // 30 seconds
+const verifyMfaRateLimit = rateLimit({
+  store: inMemoryStore,
+  max: 5, // Allow 5 times in token period. The 6th request will be blocked
+  message: { error: 'Too many attempts. Please wait and try again later' },
+  onLimitReached: (req, res, options) => {
+    logger.warn(
+      'MFA versification rate limit exceeded. blocking request for one second', {
+        params: { ip: req.ip },
+        req: req
+      });
+  }
+});
+
 // This endpoint verifies user code with his unique secret.
 router.route('/mfa/verify')
   .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .post(cors.corsWithOptions, auth.verifyUserOrLoginJWT, async (req, res, next) => {
-    if (!req.body.token) {
-      return next(createError(401, 'Token is required'));
-    }
-
-    let secrets = [];
-
-    // Check with which secret we need to verify the code.
-    if (req.user.mfa.secret) {
-      // if user already enabled and verified 2fa, verify code with this verified secret.
-      secrets.push(req.user.mfa.secret);
-    } else if (req.user.mfa.unverifiedSecrets.length > 0) {
-      // if user didn't enabled 2fa and wants to verify it on first time,
-      // verify code with this unverifiedSecrets secrets code.
-      secrets = req.user.mfa.unverifiedSecrets;
-    } else {
-      return next(createError(401, 'Multi-Factor is not configured'));
-    }
-
-    let validated = null;
-    for (const secret of secrets) {
-      const isValid = verifyCode(req.body.token, secret);
-      if (isValid) {
-        validated = secret;
-        break;
+  .post(
+    verifyMfaRateLimit,
+    cors.corsWithOptions,
+    auth.verifyUserOrLoginJWT,
+    async (req, res, next) => {
+      if (!req.body.token) {
+        return next(createError(401, 'Token is required'));
       }
-    }
 
-    if (!validated) {
-      return next(createError(403, 'Invalid Code'));
-    }
+      let secrets = [];
 
-    const updateQuery = { $set: {} };
-    if (!req.user.mfa.secret) {
-      updateQuery.$set['mfa.secret'] = validated;
-    }
+      // Check with which secret we need to verify the code.
+      if (req.user.mfa.secret) {
+        // if user already enabled and verified 2fa, verify code with this verified secret.
+        secrets.push(req.user.mfa.secret);
+      } else if (req.user.mfa.unverifiedSecrets.length > 0) {
+        // if user didn't enabled 2fa and wants to verify it on first time,
+        // verify code with this unverifiedSecrets secrets code.
+        secrets = req.user.mfa.unverifiedSecrets;
+      } else {
+        return next(createError(401, 'Multi-Factor is not configured'));
+      }
 
-    if (!req.user.mfa.enabled) {
-      updateQuery.$set['mfa.enabled'] = true;
-    }
+      let validated = null;
+      for (const secret of secrets) {
+        const isValid = verifyCode(req.body.token, secret);
+        if (isValid) {
+          validated = secret;
+          break;
+        }
+      }
 
-    if (req.user.mfa.unverifiedSecrets.length > 0) {
-      updateQuery.$set['mfa.unverifiedSecrets'] = [];
-    }
+      if (!validated) {
+        return next(createError(403, 'Invalid Code'));
+      }
 
-    if (Object.keys(updateQuery.$set).length > 0) {
-      // save secret for the user
-      await User.findOneAndUpdate(
-        { _id: req.user._id },
-        updateQuery,
-        { upsert: false }
-      );
-    }
+      const updateQuery = { $set: {} };
+      if (!req.user.mfa.secret) {
+        updateQuery.$set['mfa.secret'] = validated;
+      }
 
-    return await sendJwtToken(req, res, validated !== null);
-  });
+      if (!req.user.mfa.enabled) {
+        updateQuery.$set['mfa.enabled'] = true;
+      }
+
+      if (req.user.mfa.unverifiedSecrets.length > 0) {
+        updateQuery.$set['mfa.unverifiedSecrets'] = [];
+      }
+
+      if (Object.keys(updateQuery.$set).length > 0) {
+        // save secret for the user
+        await User.findOneAndUpdate(
+          { _id: req.user._id },
+          updateQuery,
+          { upsert: false }
+        );
+      }
+
+      return await sendJwtToken(req, res, validated !== null);
+    });
 
 // This function generates the JWT after the authentication process is complete.
 // With this token, the user can access and receive the organization's information.
@@ -622,14 +649,12 @@ router.route('/mfa/generateRecoveryCodes')
       return next(createError(403, 'Two-Factor authentication is not configured'));
     }
 
-    if (req?.user?.mfa?.recoveryCodes?.length > 0) {
-      const availableCodes = req?.user?.mfa?.recoveryCodes.filter(r => r.usedTime === null);
-      res.json({ codes: availableCodes.map(c => c.code) });
-      return;
-    }
-
     const codes = []; // send to user as clear text
     const hashed = []; // store hashed in DB
+
+    if (req?.user?.mfa?.recoveryCodes?.length > 0 && req.query.regenerate !== 'true') {
+      res.json({ codes });
+    }
 
     for (let i = 0; i < 10; i++) {
       const code = randomKey(40);

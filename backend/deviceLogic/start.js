@@ -39,24 +39,25 @@ const { buildInterfaces } = require('./interfaces');
  */
 const apply = async (devices, user, data) => {
   const { username } = user;
-  const { org } = data;
+  const { org: orgId } = data;
   const opDevices = await Promise.all(devices.map(d => d
     .populate('policies.firewall.policy', '_id name rules')
     .populate('interfaces.pathlabels', '_id name description color type')
+    .populate('org')
     .execPopulate()
   ));
 
   const errors = [];
   let orgSubnets = [];
   if (configs.get('forbidLanSubnetOverlaps', 'boolean')) {
-    orgSubnets = await getAllOrganizationSubnets(mongoose.Types.ObjectId(org));
+    orgSubnets = await getAllOrganizationSubnets(mongoose.Types.ObjectId(orgId));
   }
   const applyPromises = [];
   for (const device of opDevices) {
     const { machineId } = device;
     logger.info('Starting device:', { params: { machineId, user, data } });
 
-    const { valid, err } = validateDevice(device.toObject(), true, orgSubnets);
+    const { valid, err } = validateDevice(device.toObject(), device.org, true, orgSubnets);
     if (!valid) {
       logger.warn('Start command validation failed', { params: { device, err } });
       if (!errors.includes(err)) {
@@ -80,7 +81,7 @@ const apply = async (devices, user, data) => {
       .addJob(
         machineId,
         username,
-        org,
+        orgId,
         // Data
         { title: 'Start device ' + device.hostname, tasks: tasks },
         // Response data
@@ -88,7 +89,7 @@ const apply = async (devices, user, data) => {
           method: 'start',
           data: {
             device: device._id,
-            org: org
+            org: orgId
           }
         },
         // Metadata

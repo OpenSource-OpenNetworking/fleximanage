@@ -18,6 +18,7 @@
 const createError = require('http-errors');
 const pick = require('lodash/pick');
 const qosPoliciesModel = require('../models/qosPolicies');
+const { getMajorVersion } = require('../versioning');
 
 const {
   complete: appComplete,
@@ -57,7 +58,7 @@ const getDevicesQOSJobInfo = async (device) => {
     getQOSParameters(status.startsWith('install') ? qosPolicy : null, device, op);
   if (!policyParams) op = 'uninstall';
   // Extract QoS traffic map information
-  const trafficMap = await getDevicesTrafficMapJobInfo(device.org, [device._id]);
+  const trafficMap = await getDevicesTrafficMapJobInfo(device.org, [device._id], false, device);
   // Extract applications information
   const apps = await getDevicesAppIdentificationJobInfo(
     device.org,
@@ -773,6 +774,7 @@ const sync = async (deviceId, org) => {
   const device = await devices.findOne(
     { _id: deviceId },
     {
+      versions: 1,
       'interfaces.isAssigned': 1,
       'interfaces.type': 1,
       'interfaces.devId': 1,
@@ -792,6 +794,15 @@ const sync = async (deviceId, org) => {
   const requests = [];
   const completeCbData = [];
   let callComplete = false;
+
+  const majorAgentVersion = getMajorVersion(device.versions.agent);
+  if (majorAgentVersion < 6) {
+    return {
+      requests,
+      completeCbData,
+      callComplete
+    };
+  }
 
   // if no QOS global policy then interfaces specific policies will be sent
   const params = status.startsWith('install') ? getQOSParameters(policy, device) : null;
