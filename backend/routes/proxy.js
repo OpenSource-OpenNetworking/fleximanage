@@ -24,6 +24,24 @@ const logger = require('../logging/logging')({ module: module.filename, type: 'r
 const proxyRouter = express.Router();
 proxyRouter.use(bodyParser.json());
 
+const extractParametersAndValidate = (req) => {
+  const machineId = req.params.machineId;
+  const q = req.params.url + ((Object.keys(req.query).length !== 0)
+    ? ('?' + new URLSearchParams(req.query).toString()) : '');
+  if (!q) {
+    throw new Error('Query URL must be included');
+  }
+  const server =
+  `${req.protocol}://${req.header('host')}${req.baseUrl}/${req.params.machineId}`;
+  if (!server) {
+    throw new Error('Cannot determine target server');
+  }
+  if (!connections.isConnected(machineId)) {
+    throw new Error('Device not connected');
+  }
+  return { machineId, q, server };
+};
+
 /**
  * This route is allowed for proxy access to a device
  */
@@ -32,21 +50,7 @@ proxyRouter
   .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
   .get(cors.corsWithOptions, async (req, res, next) => {
     try {
-      const machineId = req.params.machineId;
-      const q = req.params.url + ((Object.keys(req.query).length !== 0)
-        ? ('?' + new URLSearchParams(req.query).toString()) : '');
-      if (!q) {
-        throw new Error('Query URL must be included');
-      }
-      const server =
-      `${req.protocol}://${req.header('host')}${req.baseUrl}/${req.params.machineId}`;
-      if (!server) {
-        throw new Error('Cannot determine target server');
-      }
-      if (!connections.isConnected(machineId)) {
-        throw new Error('Device not connected');
-      }
-
+      const { machineId, q, server } = extractParametersAndValidate(req);
       const request = {
         entity: 'agent',
         message: 'proxy',
@@ -75,6 +79,40 @@ proxyRouter
         // }, {});
         // res.setHeader('Content-Type', headersDict['Content-Type'] || 'plain/text');
         // res.setHeader('Content-Length', headersDict['Content-Length'] || 100);
+        result.message.headers.forEach((h) => res.setHeader(h[0], h[1]));
+        res.statusCode = result.message.status;
+        return res.send(Buffer.from(result.message.response, 'base64'));
+      } else {
+        throw new Error('Failed to get device response');
+      }
+    } catch (err) {
+      logger.error('Error processing GET request to proxy', { params: { error: err.message } });
+      return next(createError(500, 'Error processing GET request to proxy'));
+    }
+  })
+  .post(cors.corsWithOptions, async (req, res, next) => {
+    try {
+      const { machineId, q, server } = extractParametersAndValidate(req);
+      const request = {
+        entity: 'agent',
+        message: 'proxy',
+        params: {
+          url: q,
+          server: server,
+          type: 'POST',
+          headers: [],
+          body: req.body
+        }
+      };
+
+      const result = await connections.deviceSendMessage(
+        null,
+        machineId,
+        request,
+        100000 // 100 sec
+      );
+
+      if (result.ok) {
         result.message.headers.forEach((h) => res.setHeader(h[0], h[1]));
         res.statusCode = result.message.status;
         return res.send(Buffer.from(result.message.response, 'base64'));
