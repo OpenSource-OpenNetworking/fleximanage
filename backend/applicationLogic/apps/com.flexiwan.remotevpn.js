@@ -222,17 +222,17 @@ class RemoteVpn extends IApplication {
         if (cidr.overlap(orgSubnet.subnet, vpnServerNetwork)) {
           let overlapsWith = 'some network in your organization';
           if (orgSubnet.type === 'interface') {
-            overlapsWith = `device ${orgSubnet.name}`;
+            overlapsWith = `${orgSubnet.subnet} interface in device ${orgSubnet.name}`;
           } else if (orgSubnet.type === 'tunnel') {
-            overlapsWith = `tunnel #${orgSubnet.num}`;
+            overlapsWith = `${orgSubnet.subnet} flexiWAN tunnel loopback range`;
           } else if (orgSubnet.type === 'application') {
-            overlapsWith = `application ${orgSubnet.name} in device ${orgSubnet.deviceName}`;
+            // eslint-disable-next-line max-len
+            overlapsWith = `${orgSubnet.subnet} defined on application ${orgSubnet.name} in device ${orgSubnet.deviceName}`;
           }
 
           return {
             valid: false,
-            err: `VPN network ${vpnServerNetwork} overlaps
-            with ${orgSubnet.subnet} defined on ${overlapsWith}`
+            err: `VPN network ${vpnServerNetwork} overlaps with ${overlapsWith}`
           };
         }
       }

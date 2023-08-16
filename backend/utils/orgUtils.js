@@ -16,8 +16,6 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 const { devices } = require('../models/devices');
-const tunnelsModel = require('../models/tunnels');
-const { generateTunnelParams } = require('./tunnelUtils');
 const appsLogic = require('../applicationLogic/applications')();
 
 /**
@@ -62,27 +60,10 @@ const getAllOrganizationLanSubnets = async orgId => {
   return subnets;
 };
 
-const getTunnelsSubnets = async org => {
-  const tunnels = await tunnelsModel.find({
-    isActive: true,
-    org: org
-  }).lean();
-
-  const subnets = [];
-
-  for (const tunnel of tunnels) {
-    const { ip1 } = generateTunnelParams(tunnel.num);
-    subnets.push({ _id: tunnel._id, num: tunnel.num, subnet: `${ip1}/31`, type: 'tunnel' });
-  }
-
-  return subnets;
-};
-
 const getAllOrganizationSubnets = async orgId => {
   const lanSubnets = await getAllOrganizationLanSubnets(orgId);
-  const tunnelSubnets = await getTunnelsSubnets(orgId);
   const applicationSubnets = await appsLogic.getApplicationSubnets(orgId);
-  return [...lanSubnets, ...tunnelSubnets, ...applicationSubnets];
+  return [...lanSubnets, ...applicationSubnets, { type: 'tunnel', subnet: '10.100.0.0/16' }];
 };
 
 const getAllOrganizationBGPDevices = async orgId => {

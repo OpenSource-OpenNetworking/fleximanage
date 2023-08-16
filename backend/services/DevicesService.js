@@ -1505,10 +1505,6 @@ class DevicesService {
         const devStatus = deviceStatus.getDeviceStatus(origDevice.machineId);
         const isRunning = (devStatus && devStatus.state && devStatus.state === 'running');
 
-        let orgSubnets = [];
-        if (configs.get('forbidLanSubnetOverlaps', 'boolean')) {
-          orgSubnets = await getAllOrganizationSubnets(orgId);
-        }
         const orgBgp = await getAllOrganizationBGPDevices(orgId);
 
         const origTunnels = await tunnelsModel.find({
@@ -2097,6 +2093,10 @@ class DevicesService {
         deviceToValidate.distro = origDevice.distro;
         deviceRequest.cpuInfo = deviceToValidate.cpuInfo;
 
+        let orgSubnets = [];
+        if (configs.get('forbidLanSubnetOverlaps', 'boolean')) {
+          orgSubnets = await getAllOrganizationSubnets(orgId);
+        }
         const { valid, err, errCode = null } = validateDevice(
           deviceToValidate,
           origDevice.org,
