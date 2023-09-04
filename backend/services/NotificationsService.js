@@ -37,10 +37,11 @@ const { validateNotificationsSettings } = require('../models/validators');
 const mongoConns = require('../mongoConns.js')();
 
 class CustomError extends Error {
-  constructor ({ message, status, data }) {
+  constructor ({ message, status, data, orgId }) {
     super(message);
     this.status = status;
     this.data = data;
+    this.orgId = orgId;
   }
 }
 
@@ -426,15 +427,7 @@ class NotificationsService {
       criticalThreshold = currentRuleEventSettings.criticalThreshold;
     }
 
-    const validRule = validateNotificationsSettings({ [eventName]: { warningThreshold, criticalThreshold } });
-
-    if (!validRule.valid) {
-      throw new CustomError({
-        status: 400,
-        message: 'Invalid notification settings',
-        data: validRule.errors
-      });
-    }
+    return validateNotificationsSettings({ [eventName]: { warningThreshold, criticalThreshold } });
   }
 
   /**
@@ -454,7 +447,8 @@ class NotificationsService {
           throw new CustomError({
             status: 400,
             message: 'Invalid notification settings',
-            data: validNotifications.errors
+            data: validNotifications.errors,
+            orgId
           });
         }
       }
@@ -497,11 +491,20 @@ class NotificationsService {
               for (const event in newRules) {
                 const { warningThreshold, criticalThreshold } = newRules[event];
                 if (warningThreshold && criticalThreshold) {
-                  NotificationsService.validateThresholds(
+                  const validNotifications = NotificationsService.validateThresholds(
                     newRules[event],
                     currentRules.rules[event],
-                    event
+                    event,
+                    orgId
                   );
+                  if (!validNotifications.valid) {
+                    throw new CustomError({
+                      status: 400,
+                      message: 'Invalid notification settings',
+                      data: validNotifications.errors,
+                      orgId
+                    });
+                  }
                 }
 
                 Object.entries(newRules[event]).forEach(([field, value]) => {
@@ -548,6 +551,7 @@ class NotificationsService {
         );
       }
     } catch (e) {
+      logger.warn(`Exception caught while trying to update notifications settings: ${e.message}, status: ${e.status}, data: ${JSON.stringify(e.data)}, orgId: ${e.orgId}`);
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
         e.status || 500,
@@ -657,9 +661,12 @@ class NotificationsService {
 
       const userIds = emailsSigning.map(e => e._id);
       const userDataList = await users.find({ _id: { $in: userIds } });
+      const fetchedUserIds = userDataList.map(user => user._id.toString());
 
       // If one of the user ids does not exist in the db
       if (userIds.length !== userDataList.length) {
+        logger.warn(`Exception caught while trying to modify email notifications settings: Not all the user IDs exist in the database, received user ids list: ${userIds},
+        user data list: ${fetchedUserIds}`);
         return Service.rejectResponse('Not all the user IDs exist in the database');
       }
       const usersOrgAccess = {};

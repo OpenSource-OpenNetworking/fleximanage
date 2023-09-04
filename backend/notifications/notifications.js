@@ -239,8 +239,9 @@ class NotificationsManager {
   }
 
   async increaseCount (eventType, targets, org, resolved = false, severity = null) {
+    let query;
     try {
-      const query = await this.getQueryForExitingAlert(eventType, targets, false, severity, org);
+      query = await this.getQueryForExitingAlert(eventType, targets, false, severity, org);
 
       if (resolved) {
         // If resolved is true, only find the document
@@ -257,14 +258,18 @@ class NotificationsManager {
       }
     } catch (err) {
       logger.warn(`Failed to increase count of the notification ${eventType} in database`, {
-        params: { notifications: notifications, err: err.message }
+        params: {
+          query,
+          err: err.message
+        }
       });
     }
   }
 
   async resolveAnAlert (eventType, targets, severity, org) {
+    let query;
     try {
-      const query = await this.getQueryForExitingAlert(
+      query = await this.getQueryForExitingAlert(
         eventType, targets, false, severity, org);
       const updatedAlert = await notifications.findOneAndUpdate(
         query,
@@ -273,8 +278,11 @@ class NotificationsManager {
       );
       return updatedAlert;
     } catch (err) {
-      logger.warn(`Failed to resolve the notification ${eventType} in database`, {
-        params: { notifications: notifications, err: err.message }
+      logger.warn(`Failed to resolve the notification ${eventType} in database.`, {
+        params: {
+          query,
+          err: err.message
+        }
       });
     }
   }
