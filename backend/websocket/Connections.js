@@ -192,6 +192,9 @@ class Connections {
           // the device is alive, set info in memory if it does not exist
           if (!this.isConnected(machineId)) {
             this.devices.setDeviceInfo(machineId, info, false);
+            if (this.disconnectedDevices.hasOwnProperty(machineId)) {
+              delete this.disconnectedDevices[machineId];
+            }
           }
         }
       }
