@@ -432,9 +432,19 @@ class NotificationsManager {
             if (eventParents.length > 0) {
               const parentsQuery = await event.getQuery(deviceId || targets.deviceId, interfaceId ||
                    targets.interfaceId, targets.tunnelId);
-              const parentNotification = await notificationsDb.find(
+              // TODO generate a test
+              const parentNotificationInNotificationsList = notifications.find(
+                newNotification => parentsQuery.some(
+                  query => JSON.stringify(query) === JSON.stringify(newNotification)
+                )
+              );
+              if (parentNotificationInNotificationsList) {
+                continue;
+              }
+
+              const parentNotificationInDb = await notificationsDb.find(
                 { resolved, org, $or: parentsQuery });
-              if (parentNotification.length > 0) {
+              if (parentNotificationInDb.length > 0) {
                 continue; // Ignore since there is a parent event
               }
 
