@@ -25,6 +25,7 @@ const deviceQueues = require('../utils/deviceQueue')(
 const { devices } = require('../models/devices');
 const { getMajorVersion, getMinorVersion } = require('../versioning');
 const logger = require('../logging/logging')({ module: module.filename, type: 'job' });
+const notificationsConf = require('../models/notificationsConf');
 
 // Hold scripts to run before a version. Key = Major.Minor version, value = script to execute
 const perVersionJobs = {
@@ -34,6 +35,8 @@ const perVersionJobs = {
   // eslint-disable-next-line max-len
   6.2: 'apt install -y ca-certificates;sed -i \'/if \\[ -f "$UPGRADE_FAILURE_FILE" \\]; then/iif grep -qe "^success$" "$UPGRADE_FAILURE_FILE"; then rm "$UPGRADE_FAILURE_FILE"; fi\' /usr/share/flexiwan/agent/fwupgrade.sh'
 };
+
+const NOTIFICATIONS_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Queues upgrade jobs to a list of devices.
@@ -151,6 +154,8 @@ const apply = async (opDevices, user, data) => {
   const userName = user.username;
   const org = data.org;
   const jobResults = await queueUpgradeJobs(opDevices, userName, org, version);
+  // disable email & resolved notifications (will be enabled automatically using a timer)
+  disableOrEnableNotificationsAfterUpgrade(org);
   jobResults.forEach(job => {
     logger.info('Upgrade device job queued', {
       params: { jobId: job.id, version: version },
@@ -164,6 +169,94 @@ const apply = async (opDevices, user, data) => {
   const deviceIDs = opDevices.map(dev => { return dev._id; });
   await setQueuedUpgradeFlag(deviceIDs, org, true);
   return { ids: jobResults.map(job => job.id), status: 'completed', message: '' };
+};
+
+/**
+ * Retrieves the current notification settings for a specific organization.
+ * @async
+ * @param {String} org - Identifier of the organization.
+ * @return {Object|null} The current notification settings or null if an error occurs.
+ */
+const getNotificationSettings = async (org) => {
+  try {
+    return await notificationsConf.findOne({ org });
+  } catch (error) {
+    logger.error(`Error retrieving notifications settings: ${error}`);
+    return null;
+  }
+};
+
+/**
+ * Updates update-device related notification settings for a given organization.
+ * If disabling, sets all notifications to false. If enabling, restores to their original state.
+ * @async
+ * @param {Boolean} shouldDisable - Indicates whether to disable or enable) notifications.
+ * @param {String} org - Identifier of the organization.
+ * @param {Object|null} originalSettings - Original notification settings, used for restoring.
+ * @return {Object|null} The updated notification settings or null if an error occurs.
+ */
+const updateNotifications = async (shouldDisable, org, originalSettings = null) => {
+  const conditions = { org };
+
+  let update;
+  if (shouldDisable) {
+    update = {
+      $set: {
+        'rules.Running router.immediateEmail': false,
+        'rules.Running router.resolvedAlert': false,
+        'rules.Tunnel connection.immediateEmail': false,
+        'rules.Tunnel connection.resolvedAlert': false,
+        'rules.Device connection.immediateEmail': false,
+        'rules.Device connection.resolvedAlert': false
+      }
+    };
+  } else {
+    // Re-enable only the ones that were originally true
+    update = { $set: {} };
+    const notificationTypes = ['Running router', 'Tunnel connection', 'Device connection'];
+    const notificationRuleTypes = ['immediateEmail', 'resolvedAlert'];
+
+    notificationTypes.forEach(notificationType => {
+      notificationRuleTypes.forEach(ruleType => {
+        const rulePath = `rules.${notificationType}.${ruleType}`;
+        if (originalSettings && originalSettings.rules[notificationType] &&
+          originalSettings.rules[notificationType][ruleType] === true) {
+          update.$set[rulePath] = true;
+        }
+      });
+    });
+  }
+
+  try {
+    return await notificationsConf.findOneAndUpdate(conditions, update, { new: true });
+  } catch (error) {
+    logger.error(`Error updating notifications settings: ${error}`);
+    return null;
+  }
+};
+
+/**
+ * Disables and then re-enables the email notifications and resolved notifications
+ * for an organization while upgrading devices versions.
+ * Disabling sets all notifications to false, and re-enabling restores them to their original state.
+ * @async
+ * @param {String} org - Identifier of the organization.
+ * @return {Object|null} The result of the disable operation or null if an error occurs.
+ */
+const disableOrEnableNotificationsAfterUpgrade = async (org) => {
+  const originalSettings = await getNotificationSettings(org);
+  const disableResult = await updateNotifications(true, org);
+
+  if (disableResult) {
+    logger.info(
+      'Email & resolved Notifications disabled due to an update, re-enabling after 5 mins');
+    setTimeout(async () => {
+      await updateNotifications(false, org, originalSettings);
+      logger.info('Notifications re-enabled');
+    }, NOTIFICATIONS_TIMEOUT);
+  }
+
+  return disableResult;
 };
 
 /**
