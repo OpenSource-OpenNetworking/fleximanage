@@ -344,6 +344,7 @@ class NotificationsManager {
     orgNotificationsConf.webHookSettings;
     if ((severity === 'warning' && sendWarningAlerts) ||
     (severity === 'critical' && sendCriticalAlerts)) {
+      // TBD: check why do we get falsy value even when the webhook has been sent
       if (!await webHooks.sendToWebHook(webhookURL, webHookMessage, '')) {
         logger.error('Failed to send an immediate webhook notification', {
           params: { message: webHookMessage }
@@ -557,7 +558,7 @@ class NotificationsManager {
             }
           }
           if (rules[eventType].sendWebHook) {
-            await this.sendWebHook(title, details,
+            this.sendWebHook(title, details,
               severity || notification.severity, orgNotificationsConf);
           }
           const key = notification.org.toString();
