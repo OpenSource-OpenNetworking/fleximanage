@@ -23,6 +23,7 @@ const devicesModel = require('../models/devices').devices;
 const notificationsConf = require('../models/notificationsConf');
 const notifications = require('../models/notifications');
 const users = require('../models/users');
+const { devices } = require('../models/devices');
 const logger = require('../logging/logging')({ module: module.filename, type: 'notifications' });
 const mailer = require('../utils/mailer')(
   configs.get('mailerHost'),
@@ -31,19 +32,29 @@ const mailer = require('../utils/mailer')(
 );
 const mongoose = require('mongoose');
 const webHooks = require('../utils/webhooks')();
+const DELAY_BEFORE_SENDING_CHILD_NOTIFICATION = 120000; // 2 mins
 
 /**
  * Notification events hierarchy class
  */
 // Initialize the events hierarchy
 const hierarchyMap = {};
+const suppressedNotifications = {};
 
 class Event {
-  constructor (eventName, parents) {
+  constructor (eventName, parents, hasChildren) {
     this.eventName = eventName;
     this.parents = parents;
+    this.hasChildren = hasChildren;
 
     hierarchyMap[eventName] = this;
+  }
+
+  get notificationsMgr () {
+    if (!this._notificationsMgr) {
+      this._notificationsMgr = new NotificationsManager();
+    }
+    return this._notificationsMgr;
   }
 
   getAllParents () {
@@ -58,6 +69,10 @@ class Event {
   }
 
   getTarget (deviceId, interfaceId, tunnelId) {
+    // MUST BE IMPLEMENTED IN CHILD CLASSES
+  }
+
+  async checkForActiveEvent (notification) {
     // MUST BE IMPLEMENTED IN CHILD CLASSES
   }
 
@@ -82,6 +97,10 @@ class DeviceConnectionEventClass extends Event {
       'targets.deviceId': deviceId
     };
   }
+
+  //  Device connection won't be suppressed since it's in the top of the hierarchy
+  async checkForActiveEvent (notification) {
+  }
 }
 
 class RunningRouterEventClass extends Event {
@@ -90,6 +109,13 @@ class RunningRouterEventClass extends Event {
       eventType: this.eventName,
       'targets.deviceId': deviceId
     };
+  }
+
+  async checkForActiveEvent (notification) {
+    const { targets } = notification;
+    const deviceId = targets.deviceId;
+    const routerIsNotRunning = await devices.findOne({ _id: deviceId, status: 'stopped' });
+    return Boolean(routerIsNotRunning);
   }
 }
 
@@ -101,6 +127,16 @@ class InternetConnectionEventClass extends Event {
       'targets.interfaceId': interfaceId
     };
   }
+
+  async checkForActiveEvent (notification) {
+    const { targets } = notification;
+    const { deviceId, interfaceId } = targets;
+    const internetConnectionDown = await devices.findOne({
+      _id: deviceId,
+      interfaces: { $elemMatch: { _id: interfaceId, internetAccess: 'no' } }
+    });
+    return Boolean(internetConnectionDown);
+  }
 }
 
 class MissingInterfaceIPEventClass extends Event {
@@ -111,6 +147,16 @@ class MissingInterfaceIPEventClass extends Event {
       'targets.interfaceId': interfaceId
     };
   }
+
+  async checkForActiveEvent (notification) {
+    const { targets } = notification;
+    const { deviceId, interfaceId } = targets;
+    const missingInterfaceIp = await devices.findOne({
+      _id: deviceId,
+      interfaces: { $elemMatch: { _id: interfaceId, IPv4: '' } }
+    });
+    return Boolean(missingInterfaceIp);
+  }
 }
 
 class TunnelStateChangeEventClass extends Event {
@@ -119,6 +165,29 @@ class TunnelStateChangeEventClass extends Event {
       eventType: this.eventName,
       'targets.tunnelId': tunnelId
     };
+  }
+
+  async checkForActiveEvent (notification) {
+    const { targets, org } = notification;
+    const tunnelId = targets.tunnelId;
+    const tunnelIsDown = await tunnels.findOne({ num: tunnelId, org, status: 'down' });
+    return Boolean(tunnelIsDown);
+  }
+}
+
+class PendingTunnelEventClass extends Event {
+  getTarget (deviceId, interfaceId, tunnelId) {
+    return {
+      eventType: this.eventName,
+      'targets.tunnelId': tunnelId
+    };
+  }
+
+  async checkForActiveEvent (notification) {
+    const { targets, org } = notification;
+    const tunnelId = targets.tunnelId;
+    const tunnelIsPending = await tunnels.findOne({ num: tunnelId, org, isPending: true });
+    return Boolean(tunnelIsPending);
   }
 }
 
@@ -130,32 +199,44 @@ class LinkStatusEventClass extends Event {
       'targets.interfaceId': interfaceId
     };
   }
+
+  async checkForActiveEvent (notification) {
+    const { targets } = notification;
+    const { deviceId, interfaceId } = targets;
+    const linkDown = await devices.findOne({
+      _id: deviceId,
+      interfaces: { $elemMatch: { _id: interfaceId, linkStatus: 'down' } }
+    });
+
+    return Boolean(linkDown);
+  }
 }
 
-const DeviceConnectionEvent = new DeviceConnectionEventClass('Device connection', []);
-const RunningRouterEvent = new RunningRouterEventClass('Running router', [DeviceConnectionEvent]);
+const DeviceConnectionEvent = new DeviceConnectionEventClass('Device connection', [], true);
 const LinkStatusEvent = new LinkStatusEventClass('Link status', [
-  RunningRouterEvent
-]);
+  DeviceConnectionEvent], true
+);
+const RunningRouterEvent = new RunningRouterEventClass(
+  'Running router', [LinkStatusEvent], true);
 const InterfaceIpChangeEvent = new MissingInterfaceIPEventClass('Missing interface ip', [
-  LinkStatusEvent
-]);
+  RunningRouterEvent], true
+);
 const InternetConnectionEvent = new InternetConnectionEventClass('Internet connection', [
-  InterfaceIpChangeEvent
-]);
+  InterfaceIpChangeEvent], true
+);
 // eslint-disable-next-line no-unused-vars
-const PendingTunnelEvent = new TunnelStateChangeEventClass('Pending tunnel', [
-  InterfaceIpChangeEvent
-]);
+const PendingTunnelEvent = new PendingTunnelEventClass('Pending tunnel', [
+  InterfaceIpChangeEvent], false
+);
 const TunnelConnectionEvent = new TunnelStateChangeEventClass('Tunnel connection', [
-  InternetConnectionEvent
-]);
+  InternetConnectionEvent], true
+);
 // eslint-disable-next-line no-unused-vars
 const RttEvent = new Event('Link/Tunnel round trip time',
-  [TunnelConnectionEvent]);
+  [TunnelConnectionEvent], false);
 // eslint-disable-next-line no-unused-vars
 const DropRateEvent = new Event('Link/Tunnel default drop rate',
-  [TunnelConnectionEvent]);
+  [TunnelConnectionEvent], false);
 
 /**
  * Notification Manager class
@@ -316,6 +397,58 @@ class NotificationsManager {
     }
   }
 
+  /**
+ * Checks for active child notifications after a parent notification has been resolved.
+ *
+ * This function iterates through all suppressed notifications to check if any are associated
+ * with the resolved parent notification (identified by its ID). If a child notification no longer
+ * has any blocking parents after the resolution of a parent, it triggers the respective event
+ * to send the suppressed notification if needed.
+ *
+ * @param {string} resolvedParentId - The unique identifier of the resolved parent notification.
+ */
+  async checkForActiveChildrenAfterParentResolution (resolvedParentId) {
+    for (const [alertUniqueKey, suppressedNotification] of
+      Object.entries(suppressedNotifications)) {
+      const { blockingParents, notification } = suppressedNotification;
+      if (blockingParents.has(resolvedParentId)) {
+        blockingParents.delete(resolvedParentId);
+        if (blockingParents.size === 0) {
+          const event = hierarchyMap[notification.eventType];
+          setTimeout(async () => {
+            try {
+              const shouldSendChildNotification = await event.checkForActiveEvent(
+                notification, alertUniqueKey
+              );
+              if (shouldSendChildNotification) {
+                logger.debug('Found active child event after parent resolution',
+                  {
+                    params: {
+                      resolvedParentNotification: resolvedParentId,
+                      suppressedNotification: notification
+                    }
+                  });
+                this.sendNotifications([notification]);
+              } else {
+                logger.debug(
+                  'Did not find active child event. Deleting from suppressed notifications list.',
+                  {
+                    params: {
+                      resolvedParentNotification: resolvedParentId,
+                      suppressedNotification: notification
+                    }
+                  });
+                delete suppressedNotifications[alertUniqueKey];
+              }
+            } catch (error) {
+              logger.error('Error sending suppressed notification:', { params: { error } });
+            }
+          }, DELAY_BEFORE_SENDING_CHILD_NOTIFICATION);
+        }
+      }
+    }
+  }
+
   async resolveAnAlert (eventType, targets, severity, org) {
     try {
       const query = await this.getQueryForExistingAlert(
@@ -327,6 +460,10 @@ class NotificationsManager {
       );
       logger.debug('Resolved existing notification',
         { params: { idOfResolvedNotification: updatedAlert._id } });
+      const event = hierarchyMap[eventType];
+      if (event && event.hasChildren) { // If this is a parent, check for active children events
+        this.checkForActiveChildrenAfterParentResolution(updatedAlert._id);
+      }
     } catch (err) {
       logger.error(`Failed to resolve the notification ${eventType} in database`, {
         params: { notifications: notifications, err: err.message }
@@ -464,17 +601,29 @@ class NotificationsManager {
               const parentsQuery = event.getQuery(deviceId || targets.deviceId, interfaceId ||
                    targets.interfaceId, targets.tunnelId);
               const queryKey = JSON.stringify({ org, parentsQuery });
-              let parentNotification;
+              let parentNotifications; // We might have more than one parent (foreign events)
 
               if (parentsQueryToNotification.has(queryKey)) {
-                parentNotification = parentsQueryToNotification.get(queryKey);
+                parentNotifications = parentsQueryToNotification.get(queryKey);
               } else {
-                parentNotification = await notificationsDb.find(
+                parentNotifications = await notificationsDb.find(
                   { resolved: false, org, $or: parentsQuery });
-                parentsQueryToNotification.set(queryKey, parentNotification);
+                parentsQueryToNotification.set(queryKey, parentNotifications);
               }
 
-              if (parentNotification.length > 0) {
+              if (parentNotifications.length > 0) {
+                if (!suppressedNotifications[alertUniqueKey]) {
+                  suppressedNotifications[alertUniqueKey] = {
+                    notification: null,
+                    blockingParents: new Set()
+                  };
+                }
+
+                suppressedNotifications[alertUniqueKey].notification = notification;
+                for (const parentNotification of parentNotifications) {
+                  suppressedNotifications[alertUniqueKey].blockingParents.add(
+                    parentNotification._id);
+                }
                 logger.debug('Step 3: Parent notifications found. Skipping notification sending.',
                   { params: { notification } });
                 continue; // Ignore since there is a parent event
