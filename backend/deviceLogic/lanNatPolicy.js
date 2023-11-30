@@ -35,7 +35,7 @@ const getLanNatJobInfo = (device, isSync = false) => {
   }
   const lanNatRules = device.firewall?.rules?.filter(
     r => r.enabled && r.direction === 'lanNat'
-  ).map(rule => {
+  ).sort((r1, r2) => r1.priority - r2.priority).map(rule => {
     return {
       source: rule.classification?.source?.lanNat,
       destination: rule.classification?.destination?.lanNat

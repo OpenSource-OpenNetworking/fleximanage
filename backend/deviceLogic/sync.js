@@ -453,7 +453,7 @@ const updateSyncStatus = async (org, deviceId, machineId, deviceHash) => {
     const pendingJobs = await deviceQueues.getOPendingJobsCount(machineId);
     if (pendingJobs > 0) {
       logger.error('Full sync skipped due to pending jobs', {
-        params: { deviceId, pendingJobs, newState, trials }
+        params: { deviceId, machineId, pendingJobs, newState, trials }
       });
       return;
     }

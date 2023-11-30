@@ -239,7 +239,7 @@ const complete = async (jobId, res) => {
     await setQueuedUpgradeFlag([res.device], res.org, false);
   } catch (err) {
     logger.warn('Failed to update jobQueued field in database', {
-      params: { result: res, jobId: jobId }
+      params: { result: res, jobId: jobId, err: err.message }
     });
   }
 };
@@ -268,7 +268,7 @@ const error = async (jobId, res) => {
     await setQueuedUpgradeFlag([res.device], res.org, false);
   } catch (err) {
     logger.warn('Failed to update jobQueued field in database', {
-      params: { result: res, jobId: jobId }
+      params: { result: res, jobId: jobId, err: err.message }
     });
   }
 };

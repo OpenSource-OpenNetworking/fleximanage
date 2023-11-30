@@ -325,9 +325,12 @@ class DeviceQueues {
         }
         return resolve();
       };
+      this.deviceQueues[deviceId].waitPause = false;
       this.getCount('active', deviceId).then((count) => {
         this.deviceQueues[deviceId].waitPause = true;
         if (count > 0) {
+          logger.debug('Active jobs exist, queue pause is delayed',
+            { params: { deviceId, count }, count, queue: this.deviceQueues[deviceId] });
           setTimeout(pause, jobTimeout);
         } else {
           pause();
@@ -620,7 +623,8 @@ class DeviceQueues {
       'active'
     ]) {
       await this.iterateJobs(state, (job) => {
-        count += 1;
+        // the actual state may differ from that returned by rangeByType
+        if (['inactive', 'active'].includes(job._state)) count += 1;
       }, deviceId, 0, -1, 'asc');
     }
     return count;
@@ -793,7 +797,7 @@ class DeviceQueues {
        */
   callErrorRegisteredCallback (name, job) {
     if (this.errorCallbacks.hasOwnProperty(name)) {
-      return this.errorCallbacks[name](job);
+      return this.errorCallbacks[name](job.id, job.data.response);
     }
   }
 

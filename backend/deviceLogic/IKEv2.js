@@ -307,7 +307,7 @@ const complete = async (jobId, res) => {
       await setIKEv2QueuedFlag([res.deviceId], false);
     } catch (err) {
       logger.warn('Failed to update jobQueued field in database', {
-        params: { result: res, jobId: jobId }
+        params: { result: res, jobId: jobId, err: err.message }
       });
     }
   }
@@ -327,7 +327,7 @@ const error = async (jobId, res) => {
     await setIKEv2QueuedFlag([res.deviceId], false);
   } catch (err) {
     logger.warn('Failed to update IKEv2 jobQueued field in database', {
-      params: { result: res, jobId: jobId }
+      params: { result: res, jobId: jobId, err: err.message }
     });
   }
 };

@@ -1361,25 +1361,26 @@ class Connections {
         const sequenceKey = `${sequencePrefix}:${key}`;
         this.redisClient.setex(sequenceKey, sequenceExpireTime, hostId, (error, result) => {
           if (error || !result) {
-            reject(new Error('Failed to set redis sequence key'));
-            return;
-          }
-          if (this.isSocketAlive(info?.socket)) {
-            // the device is connected to this server directly
-            info.socket.send(messageToDevice);
-          } else if (jobid !== '') {
-            // do not send the 'job' message, increase attempts in broker instead
-            reject(new Error('Socket Connection Error'));
-          } else {
-            // publish the message on the `dev:{machineId}` channel
-            // another host starts listening to this channel when device is connected
-            // the message will be sent to the device socket connection on that server
-            this.redisClient.publish(`${deviceChannelPrefix}:${device}`, messageToDevice);
-            logger.debug('Message published on devices channel', {
-              params: { deviceID: device, sequenceKey, hostId }
+            logger.error('Failed to set redis sequence key', {
+              params: { deviceID: device, jobid }
             });
           }
         });
+        if (this.isSocketAlive(info?.socket)) {
+          // the device is connected to this server directly
+          info.socket.send(messageToDevice);
+        } else if (jobid !== '') {
+          // do not send the 'job' message, increase attempts in broker instead
+          reject(new Error('Socket Connection Error'));
+        } else {
+          // publish the message on the `dev:{machineId}` channel
+          // another host starts listening to this channel when device is connected
+          // the message will be sent to the device socket connection on that server
+          this.redisClient.publish(`${deviceChannelPrefix}:${device}`, messageToDevice);
+          logger.debug('Message published on devices channel', {
+            params: { deviceID: device, sequenceKey, hostId }
+          });
+        }
       } else reject(new Error('Send General Error'));
     });
     return p;
