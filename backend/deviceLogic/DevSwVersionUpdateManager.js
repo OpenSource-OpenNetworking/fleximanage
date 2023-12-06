@@ -19,16 +19,9 @@ const fetchUtils = require('../utils/fetchUtils');
 const logger = require('../logging/logging')({ module: module.filename, type: 'periodic' });
 const notificationsMgr = require('../notifications/notifications')();
 const deviceSwVersion = require('../models/deviceSwVersions');
-const Accounts = require('../models/accounts');
 const { devices } = require('../models/devices');
-const { membership } = require('../models/membership');
 const { verifyAgentVersion } = require('../versioning');
 const configs = require('../configs')();
-const mailer = require('../utils/mailer')(
-  configs.get('mailerHost'),
-  configs.get('mailerPort'),
-  configs.get('mailerBypassCert', 'boolean')
-);
 
 const dummyVersionObject = {
   versions: {
@@ -128,51 +121,6 @@ class SwVersionUpdateManager {
         periodic: { task: this.taskInfo }
       }
       );
-    }
-    // Send new release emails
-    // TODO - remove after fixing the bug in the notifications infrastructure
-    try {
-      // eslint-disable-next-line no-template-curly-in-string
-      const emailUrl = this.notificationEmailUri.replace('${version}', versions.device);
-      let { subject, body } = await fetchUtils.fetchWithRetry(emailUrl, 3);
-      body = unescape(body);
-
-      // Fetch all relevant memberships and send the notification email to their users.
-      const accounts = await Accounts.find();
-      for (const account of accounts) {
-        try {
-          const memberships = await membership.find({
-            account: account._id,
-            to: 'account',
-            role: 'owner'
-          },
-          'user')
-            .populate('user');
-
-          // Send a reminder email to all email addresses that belong to the account
-          const emailAddresses = memberships.map(doc => { return doc.user.email; });
-          await mailer.sendMailHTML(
-            configs.get('mailerEnvelopeFromAddress'),
-            configs.get('mailerFromAddress'),
-            emailAddresses,
-            subject,
-            body);
-          logger.info('Version update email sent', {
-            params: { emailAddresses: emailAddresses },
-            periodic: { task: this.taskInfo }
-          });
-        } catch (errAccount) {
-          logger.error('Version update email failed to send', {
-            params: { err: errAccount.message, accountId: account._id },
-            periodic: { task: this.taskInfo }
-          });
-        }
-      }
-    } catch (err) {
-      logger.error('Failed to send version notification email to users', {
-        params: { err: err.message },
-        periodic: { task: this.taskInfo }
-      });
     }
   }
 

@@ -307,14 +307,14 @@ class NotificationsManager {
 
     // Use the URL object to extract the domain from the URL, excluding the port.
     const urlSchema = new URL(uiServerUrl[0]);
-    const urlToDisplay = `${urlSchema.protocol}//${urlSchema.hostname}`;
+    const urlToDisplay = `${urlSchema.protocol}//${urlSchema.hostname}/notifications`;
 
-    const serverInfo = uiServerUrl.length > 1 ? '' : `<p><b>Server:</b>
-      <a href="${uiServerUrl[0]}">${urlToDisplay}</a></p>`;
+    const notificationsPageInfo = uiServerUrl.length > 1 ? '' : `<p><b>Notifications page:</b>
+      <a href="${uiServerUrl[0]}/notifications">${urlToDisplay}</a></p>`;
     const orgWithAccount = await this.getOrgWithAccount(orgId);
     const orgInfo = `<p><b>Organization:</b> ${orgWithAccount[0].name}</p>`;
     const accountInfo = `<p><b>Account:</b> ${orgWithAccount[0].accountDetails.name}</p>`;
-    return { serverInfo, orgInfo, accountInfo };
+    return { notificationsPageInfo, orgInfo, accountInfo };
   }
 
   async sendEmailNotification (title, orgNotificationsConf, severity, alertDetails) {
@@ -325,7 +325,7 @@ class NotificationsManager {
       const emailAddresses = await this.getUsersEmail(userIds);
       if (emailAddresses.length === 0) return null;
 
-      const { serverInfo, orgInfo, accountInfo } = await this.getInfoForEmail(
+      const { notificationsPageInfo, orgInfo, accountInfo } = await this.getInfoForEmail(
         orgNotificationsConf.org);
 
       const notificationLink = uiServerUrl.length > 1 ? ' Notifications '
@@ -334,7 +334,7 @@ class NotificationsManager {
       const emailBody = `
         <h2>${configs.get('companyName')} new notification</h2>
         <p><b>Notification details:</b> ${alertDetails}</p>
-        ${serverInfo}
+        ${notificationsPageInfo}
         ${accountInfo}
         ${orgInfo}
         <p>To make changes to the notification settings in flexiManage,
@@ -384,7 +384,7 @@ class NotificationsManager {
     return query;
   }
 
-  async checkAlertExistence (eventType, targets, org, severity) {
+  async checkUnresolvedAlertExistence (eventType, targets, org, severity) {
     try {
       const query = await this.getQueryForExistingAlert(eventType, targets, false, severity, org);
       const existingAlert = await notifications.findOne(query);
@@ -524,11 +524,11 @@ class NotificationsManager {
         }
         let existingUnresolvedAlert = false;
         const alertUniqueKey = eventType + '_' + org + '_' + JSON.stringify(targets) +
-              '_' + severity;
+          '_' + severity;
         if (existingAlertSet.has(alertUniqueKey)) {
           existingUnresolvedAlert = true;
         } else {
-          existingUnresolvedAlert = await this.checkAlertExistence(
+          existingUnresolvedAlert = await this.checkUnresolvedAlertExistence(
             eventType, targets, org, severity || currentSeverity);
           if (existingUnresolvedAlert) {
             existingAlertSet.add(alertUniqueKey);
@@ -544,10 +544,12 @@ class NotificationsManager {
         // 1. This isn't a resolved alert and there is no existing alert
         // 2. This is a resolved alert, there is unresolved alert in the db,
         // and the user has defined to send resolved alerts
+        // 3. This is an info alert
         const conditionToSend = ((!resolved && !existingUnresolvedAlert) ||
-              (resolved && sendResolvedAlert && existingUnresolvedAlert));
+          (resolved && sendResolvedAlert && existingUnresolvedAlert) ||
+          (isInfo));
         logger.debug('Step 1: Initial check for sending alert. Decision: ' +
-              (conditionToSend ? 'proceed to step 2' : 'do not send'), {
+          (conditionToSend ? 'proceed to step 2' : 'do not send'), {
           params: {
             details: {
               'Notification content': notification,
@@ -798,7 +800,7 @@ class NotificationsManager {
         const existingDevicesMessages = messages.filter(message => message.targets.deviceId);
 
         const uiServerUrl = configs.get('uiServerUrl', 'list');
-        const { serverInfo, orgInfo, accountInfo } = await this.getInfoForEmail(
+        const { notificationsPageInfo, orgInfo, accountInfo } = await this.getInfoForEmail(
           orgID);
 
         const emailBody = `
@@ -816,7 +818,7 @@ class NotificationsManager {
               `).join('')}
             </ul>
           </small></i>
-          ${serverInfo}
+          ${notificationsPageInfo}
           ${accountInfo}
           ${orgInfo}
           <p style="font-size:16px"> Further to this email,

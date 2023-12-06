@@ -716,7 +716,7 @@ class Connections {
               if (i.isAssigned) {
                 interfaces.push({ ...i.toObject(), locked: false });
               }
-              return;
+              continue;
             }
             logger.warn('Missing interface configuration in the get-device-info message', {
               params: {
@@ -726,7 +726,7 @@ class Connections {
               }
             });
             interfaces.push(i.toObject());
-            return;
+            continue;
           }
           const { org, _id: deviceId, name } = origDevice;
           const linkStatusChanged = (updatedConfig.link === 'up' && i.linkStatus !== 'up') ||
