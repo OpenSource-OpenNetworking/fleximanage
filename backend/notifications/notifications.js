@@ -33,13 +33,114 @@ const mailer = require('../utils/mailer')(
 const mongoose = require('mongoose');
 const webHooks = require('../utils/webhooks')();
 const DELAY_BEFORE_SENDING_CHILD_NOTIFICATION = 120000; // 2 mins
+const { createClient } = require('redis');
+const { getRedisAuthUrl } = require('../utils/httpUtils');
+const { redisAuth, redisUrlNoAuth } = getRedisAuthUrl(configs.get('redisUrl'));
 
 /**
  * Notification events hierarchy class
  */
 // Initialize the events hierarchy
 const hierarchyMap = {};
-const suppressedNotifications = {};
+const redisClient = createClient({ url: redisUrlNoAuth });
+if (redisAuth) redisClient.auth(redisAuth);
+
+async function addOrUpdateSuppressedNotification (uniqueKey, notification) {
+  const notificationData = {
+    ...notification,
+    blockingParents: Array.from(notification.blockingParents)
+  };
+  return new Promise((resolve, reject) => {
+    redisClient.hset('suppressedNotifications', uniqueKey, JSON.stringify(notificationData),
+      (err, res) => {
+        if (err) {
+          redisClient.get('suppressedNotifications',
+            (getError, suppressedNotificationsValue) => {
+              logger.error(`Error saving key ${uniqueKey} to suppressedNotifications object: ${err}.
+              suppressedNotifications: ${suppressedNotificationsValue}`);
+              reject(err);
+            });
+        }
+        logger.debug(`Updated key ${uniqueKey} in suppressedNotifications `,
+          { params: { suppressed: redisClient.hget('suppressedNotifications') } });
+        resolve(res);
+      });
+  });
+}
+
+async function removeSuppressedNotificationFromRedis (uniqueKey) {
+  return new Promise((resolve, reject) => {
+    redisClient.hdel('suppressedNotifications', uniqueKey, (err, result) => {
+      if (err) {
+        redisClient.get('suppressedNotifications',
+          (getError, suppressedNotificationsValue) => {
+            logger.error(`Error removing key ${uniqueKey} from suppressedNotifications object:
+             ${err}. suppressedNotifications: ${suppressedNotificationsValue}`);
+            reject(err);
+          });
+        reject(err);
+      } else {
+        resolve(result);
+      }
+    });
+  });
+}
+
+async function getNotification (uniqueKey) {
+  return new Promise((resolve, reject) => {
+    redisClient.hget('suppressedNotifications', uniqueKey, (err, result) => {
+      if (err) {
+        redisClient.get(
+          'suppressedNotifications', (getError, suppressedNotificationsValue) => {
+            const errorMessage = `Error retrieving key ${uniqueKey} from suppressedNotifications:
+             ${err}. suppressedNotifications: ${suppressedNotificationsValue}`;
+            logger.error(errorMessage);
+            reject(new Error(errorMessage));
+          });
+      } else {
+        if (result) {
+          try {
+            const notificationData = JSON.parse(result);
+            notificationData.blockingParents = new Set(notificationData.blockingParents);
+            resolve(notificationData);
+          } catch (parseError) {
+            const parseErrorMessage = `Error parsing result for key ${uniqueKey}: ${parseError}`;
+            logger.error(parseErrorMessage);
+            reject(new Error(parseErrorMessage));
+          }
+        } else {
+          resolve(null);
+        }
+      }
+    });
+  });
+}
+
+async function getAllNotifications () {
+  return new Promise((resolve, reject) => {
+    redisClient.hgetall('suppressedNotifications', (err, allSerialized) => {
+      if (err) {
+        logger.error('Error retrieving all notifications from Redis:', err);
+        reject(err);
+      } else {
+        const allNotifications = {};
+        try {
+          for (const [key, serializedData] of Object.entries(allSerialized)) {
+            const notificationData = JSON.parse(serializedData);
+            allNotifications[key] = {
+              ...notificationData,
+              blockingParents: new Set(notificationData.blockingParents)
+            };
+          }
+          resolve(allNotifications);
+        } catch (error) {
+          logger.error('Error parsing notifications data:', error);
+          reject(error);
+        }
+      }
+    });
+  });
+}
 
 class Event {
   constructor (eventName, parents, hasChildren) {
@@ -213,13 +314,13 @@ class LinkStatusEventClass extends Event {
 }
 
 const DeviceConnectionEvent = new DeviceConnectionEventClass('Device connection', [], true);
-const LinkStatusEvent = new LinkStatusEventClass('Link status', [
-  DeviceConnectionEvent], true
-);
 const RunningRouterEvent = new RunningRouterEventClass(
-  'Running router', [LinkStatusEvent], true);
-const InterfaceIpChangeEvent = new MissingInterfaceIPEventClass('Missing interface ip', [
+  'Running router', [DeviceConnectionEvent], true);
+const LinkStatusEvent = new LinkStatusEventClass('Link status', [
   RunningRouterEvent], true
+);
+const InterfaceIpChangeEvent = new MissingInterfaceIPEventClass('Missing interface ip', [
+  LinkStatusEvent], true
 );
 const InternetConnectionEvent = new InternetConnectionEventClass('Internet connection', [
   InterfaceIpChangeEvent], true
@@ -307,14 +408,14 @@ class NotificationsManager {
 
     // Use the URL object to extract the domain from the URL, excluding the port.
     const urlSchema = new URL(uiServerUrl[0]);
-    const urlToDisplay = `${urlSchema.protocol}//${urlSchema.hostname}/notifications`;
+    const urlToDisplay = `${urlSchema.protocol}//${urlSchema.hostname}`;
 
-    const notificationsPageInfo = uiServerUrl.length > 1 ? '' : `<p><b>Notifications page:</b>
-      <a href="${uiServerUrl[0]}/notifications">${urlToDisplay}</a></p>`;
+    const serverInfo = uiServerUrl.length > 1 ? '' : `<p><b>Server:</b>
+      <a href="${uiServerUrl[0]}">${urlToDisplay}</a></p>`;
     const orgWithAccount = await this.getOrgWithAccount(orgId);
     const orgInfo = `<p><b>Organization:</b> ${orgWithAccount[0].name}</p>`;
     const accountInfo = `<p><b>Account:</b> ${orgWithAccount[0].accountDetails.name}</p>`;
-    return { notificationsPageInfo, orgInfo, accountInfo };
+    return { serverInfo, orgInfo, accountInfo };
   }
 
   async sendEmailNotification (title, orgNotificationsConf, severity, alertDetails) {
@@ -325,7 +426,7 @@ class NotificationsManager {
       const emailAddresses = await this.getUsersEmail(userIds);
       if (emailAddresses.length === 0) return null;
 
-      const { notificationsPageInfo, orgInfo, accountInfo } = await this.getInfoForEmail(
+      const { serverInfo, orgInfo, accountInfo } = await this.getInfoForEmail(
         orgNotificationsConf.org);
 
       const notificationLink = uiServerUrl.length > 1 ? ' Notifications '
@@ -334,7 +435,7 @@ class NotificationsManager {
       const emailBody = `
         <h2>${configs.get('companyName')} new notification</h2>
         <p><b>Notification details:</b> ${alertDetails}</p>
-        ${notificationsPageInfo}
+        ${serverInfo}
         ${accountInfo}
         ${orgInfo}
         <p>To make changes to the notification settings in flexiManage,
@@ -384,7 +485,7 @@ class NotificationsManager {
     return query;
   }
 
-  async checkUnresolvedAlertExistence (eventType, targets, org, severity) {
+  async checkAlertExistence (eventType, targets, org, severity) {
     try {
       const query = await this.getQueryForExistingAlert(eventType, targets, false, severity, org);
       const existingAlert = await notifications.findOne(query);
@@ -408,6 +509,7 @@ class NotificationsManager {
  * @param {string} resolvedParentId - The unique identifier of the resolved parent notification.
  */
   async checkForActiveChildrenAfterParentResolution (resolvedParentId) {
+    const suppressedNotifications = await getAllNotifications();
     for (const [alertUniqueKey, suppressedNotification] of
       Object.entries(suppressedNotifications)) {
       const { blockingParents, notification } = suppressedNotification;
@@ -438,12 +540,14 @@ class NotificationsManager {
                       suppressedNotification: notification
                     }
                   });
-                delete suppressedNotifications[alertUniqueKey];
+                removeSuppressedNotificationFromRedis(alertUniqueKey);
               }
             } catch (error) {
               logger.error('Error sending suppressed notification:', { params: { error } });
             }
           }, DELAY_BEFORE_SENDING_CHILD_NOTIFICATION);
+        } else {
+          await addOrUpdateSuppressedNotification(alertUniqueKey, notification);
         }
       }
     }
@@ -524,11 +628,11 @@ class NotificationsManager {
         }
         let existingUnresolvedAlert = false;
         const alertUniqueKey = eventType + '_' + org + '_' + JSON.stringify(targets) +
-          '_' + severity;
+              '_' + severity;
         if (existingAlertSet.has(alertUniqueKey)) {
           existingUnresolvedAlert = true;
         } else {
-          existingUnresolvedAlert = await this.checkUnresolvedAlertExistence(
+          existingUnresolvedAlert = await this.checkAlertExistence(
             eventType, targets, org, severity || currentSeverity);
           if (existingUnresolvedAlert) {
             existingAlertSet.add(alertUniqueKey);
@@ -544,12 +648,10 @@ class NotificationsManager {
         // 1. This isn't a resolved alert and there is no existing alert
         // 2. This is a resolved alert, there is unresolved alert in the db,
         // and the user has defined to send resolved alerts
-        // 3. This is an info alert
         const conditionToSend = ((!resolved && !existingUnresolvedAlert) ||
-          (resolved && sendResolvedAlert && existingUnresolvedAlert) ||
-          (isInfo));
+              (resolved && sendResolvedAlert && existingUnresolvedAlert));
         logger.debug('Step 1: Initial check for sending alert. Decision: ' +
-          (conditionToSend ? 'proceed to step 2' : 'do not send'), {
+              (conditionToSend ? 'proceed to step 2' : 'do not send'), {
           params: {
             details: {
               'Notification content': notification,
@@ -616,17 +718,19 @@ class NotificationsManager {
               }
 
               if (parentNotifications.length > 0) {
-                if (!suppressedNotifications[alertUniqueKey]) {
-                  suppressedNotifications[alertUniqueKey] = {
-                    notification: null,
+                let notificationObj;
+                const exists = await getNotification(alertUniqueKey);
+                if (!exists) {
+                  notificationObj = {
+                    notification,
                     blockingParents: new Set()
                   };
-                }
 
-                suppressedNotifications[alertUniqueKey].notification = notification;
-                for (const parentNotification of parentNotifications) {
-                  suppressedNotifications[alertUniqueKey].blockingParents.add(
-                    parentNotification._id);
+                  for (const parentNotification of parentNotifications) {
+                    notificationObj.blockingParents.add(
+                      parentNotification._id);
+                  }
+                  addOrUpdateSuppressedNotification(alertUniqueKey, notificationObj);
                 }
                 logger.debug('Step 3: Parent notifications found. Skipping notification sending.',
                   { params: { notification } });
@@ -800,7 +904,7 @@ class NotificationsManager {
         const existingDevicesMessages = messages.filter(message => message.targets.deviceId);
 
         const uiServerUrl = configs.get('uiServerUrl', 'list');
-        const { notificationsPageInfo, orgInfo, accountInfo } = await this.getInfoForEmail(
+        const { serverInfo, orgInfo, accountInfo } = await this.getInfoForEmail(
           orgID);
 
         const emailBody = `
@@ -818,7 +922,7 @@ class NotificationsManager {
               `).join('')}
             </ul>
           </small></i>
-          ${notificationsPageInfo}
+          ${serverInfo}
           ${accountInfo}
           ${orgInfo}
           <p style="font-size:16px"> Further to this email,
