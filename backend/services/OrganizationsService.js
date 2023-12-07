@@ -628,8 +628,9 @@ class OrganizationsService {
    * returns Organization
    **/
   static async organizationsPOST (organizationRequest, { user }, response) {
+    let session = null;
     try {
-      const session = await mongoConns.getMainDB().startSession();
+      session = await mongoConns.getMainDB().startSession();
       await session.startTransaction();
       const orgBody = { ...organizationRequest, account: user.defaultAccount };
       const _org = await Organizations.create([orgBody], { session: session });
@@ -730,6 +731,7 @@ class OrganizationsService {
 
       return Service.successResponse(OrganizationsService.selectOrganizationParams(org), 201);
     } catch (e) {
+      if (session) session.abortTransaction();
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
         e.status || 500

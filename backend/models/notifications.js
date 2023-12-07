@@ -151,6 +151,10 @@ const notificationsSchema = new Schema({
   isInfo: {
     type: Boolean,
     default: false
+  },
+  lastResolvedStatusChange: {
+    type: Date,
+    default: new Date()
   }
 }, {
   timestamps: true

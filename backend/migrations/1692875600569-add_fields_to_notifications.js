@@ -48,7 +48,8 @@ async function up () {
               }
             ]
           },
-          isInfo: false
+          isInfo: false,
+          lastResolvedStatusChange: { $ifNull: ['$lastResolvedStatusChange', '$updatedAt'] }
         }
       },
       {

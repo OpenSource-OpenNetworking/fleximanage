@@ -39,6 +39,12 @@ const { redisAuth, redisUrlNoAuth } = getRedisAuthUrl(configs.get('redisUrl'));
 
 /**
  * Notification events hierarchy class
+ * Represents a general event with a name and associated parent events.
+ * It includes methods to retrieve all parent names and construct queries based on event targets.
+ * This class is intended to be extended by specific event types.
+ *
+ * @param {string} eventName - The name of the event.
+ * @param {array} parents - An array of parent events.
  */
 // Initialize the events hierarchy
 const hierarchyMap = {};
@@ -344,12 +350,13 @@ const DropRateEvent = new Event('Link/Tunnel default drop rate',
  */
 class NotificationsManager {
   /**
-     * Saves notifications in the database
-     * @async
-     * @param  {Array} notifications an array of notification objects
-     * @return {void}
-     */
-
+   * Retrieves default notification settings for a specified account. If the account does not have
+   * specific settings, it retrieves the system's default notification settings.
+   *
+   * @param {String} account - The account identifier for which to retrieve notification settings.
+   * @returns {Object} - An object containing sorted notification rules
+   *  for the specified account or the system default settings.
+  */
   async getDefaultNotificationsSettings (account) {
     let response;
     if (account) {
@@ -373,11 +380,24 @@ class NotificationsManager {
     }
   }
 
+  /**
+   * Fetches email addresses for a given list of user IDs.
+   *
+   * @param {Array} userIds - An array of user IDs for which email addresses are to be retrieved.
+   * @returns {Array} - An array of email addresses corresponding to the provided user IDs.
+  */
   async getUsersEmail (userIds) {
     const usersData = await users.find({ _id: { $in: userIds } });
     return usersData.map(u => u.email);
   }
 
+  /**
+   * Retrieves organization details along with associated account information
+   * for a given organization ID.
+   *
+   * @param {String} orgId - The ID of the organization for which details are needed.
+   * @returns {Object} - An object containing organization details and associated account info.
+  */
   async getOrgWithAccount (orgId) {
     const orgDetails = await organizations.aggregate([
       {
@@ -403,6 +423,12 @@ class NotificationsManager {
     return orgDetails;
   }
 
+  /**
+   * Compiles information necessary for constructing an email.
+   *
+   * @param {String} orgId - The ID of the organization for which the email information is required.
+   * @returns {Object} - An object containing server, organization, and account info for the email.
+  */
   async getInfoForEmail (orgId) {
     const uiServerUrl = configs.get('uiServerUrl', 'list');
 
@@ -410,14 +436,22 @@ class NotificationsManager {
     const urlSchema = new URL(uiServerUrl[0]);
     const urlToDisplay = `${urlSchema.protocol}//${urlSchema.hostname}`;
 
-    const serverInfo = uiServerUrl.length > 1 ? '' : `<p><b>Server:</b>
-      <a href="${uiServerUrl[0]}">${urlToDisplay}</a></p>`;
+    const notificationsPageInfo = uiServerUrl.length > 1 ? '' : `<p><b>Notifications page:</b>
+    <a href="${uiServerUrl[0]}/notifications">${urlToDisplay}</a></p>`;
     const orgWithAccount = await this.getOrgWithAccount(orgId);
     const orgInfo = `<p><b>Organization:</b> ${orgWithAccount[0].name}</p>`;
     const accountInfo = `<p><b>Account:</b> ${orgWithAccount[0].accountDetails.name}</p>`;
-    return { serverInfo, orgInfo, accountInfo };
+    return { notificationsPageInfo, orgInfo, accountInfo };
   }
 
+  /**
+   * Sends an email notification based on given parameters
+   * @param {String} title - The title of the notification.
+   * @param {Object} orgNotificationsConf - The notifications settings of the organization
+   * @param {String} severity - The severity level of the alert (e.g., 'warning', 'critical').
+   * @param {String} alertDetails - The detailed information about the alert.
+   * @returns {Date} - The date and time when the email was sent, or null if no email was sent.
+  */
   async sendEmailNotification (title, orgNotificationsConf, severity, alertDetails) {
     try {
       const uiServerUrl = configs.get('uiServerUrl', 'list');
@@ -438,6 +472,8 @@ class NotificationsManager {
         ${serverInfo}
         ${accountInfo}
         ${orgInfo}
+        <b>Note: This event will not be reported again unless
+         it remains unobserved for at least 1 hour.</b>
         <p>To make changes to the notification settings in flexiManage,
         please access the ${notificationLink} page in your flexiMange account.</p>
       `;
@@ -462,13 +498,28 @@ class NotificationsManager {
     }
   }
 
-  async getQueryForExistingAlert (eventType, targets, resolved, severity, org) {
+  /**
+   * Constructs a query to find an existing alert based on given parameters.
+   *
+   * @param {String} eventType - The name of the alert.
+   * @param {Object} targets - The targets of the alert (deviceId, tunnelId etc.)
+   * @param {Boolean} resolved - The resolution status of the alert.
+   * @param {String} severity - The severity level of the event.
+   * @param {String} org - The organization associated with the alert.
+   * @returns {Object} - A query object for searching the alert in the database.
+  */
+  async getQueryForExistingAlert (
+    eventType, targets, resolved, severity, org, includeResolved = true) {
     const query = {
       eventType,
-      resolved,
       org: mongoose.Types.ObjectId(org),
       severity
     };
+
+    if (includeResolved) {
+      query.resolved = resolved;
+    }
+
     // Different devices can trigger an alert for the same tunnel
     // So we want to include only the tunnelId and organization when searching for tunnel alerts
     if (targets.tunnelId) {
@@ -485,11 +536,48 @@ class NotificationsManager {
     return query;
   }
 
+  /**
+  * Checks the existence of an alert in the database based on specific criteria
+  *
+  * @param {String} eventType - The name of the notification.
+  * @param {Object} targets - The targets of the notification (deviceId, tunnelId etc.)
+  * @param {String} org - The organization associated with the notification.
+  * @param {String} severity - The severity level of the event.
+  * @returns {Boolean} - True if the alert exists, false otherwise.
+  */
   async checkAlertExistence (eventType, targets, org, severity) {
     try {
-      const query = await this.getQueryForExistingAlert(eventType, targets, false, severity, org);
+      let query = await this.getQueryForExistingAlert(
+        eventType, targets, false, severity, org, false);
+      // Extend query to include recently resolved notifications
+      const notificationWindowStart = new Date(
+        Date.now() - configs.get('notificationCoolDownPeriod'));
+      query = {
+        ...query,
+        $or: [
+          { resolved: false },
+          {
+            resolved: true,
+            lastResolvedStatusChange: { $gte: notificationWindowStart },
+            title: { $not: /^(\[resolved\])/i }
+          }
+        ]
+      };
+
+      // The query searches for alerts that are either unresolved or have been recently resolved.
+      // It is assumed that under normal circumstances, there won't be two documents
+      // that meet these criteria. This is the reason for using 'findOne' instead of 'find'.
+      // If future requirements demand handling scenarios where
+      // both an unresolved alert and a recently resolved alert match the criteria,
+      // this can be addressed by replacing 'findOne' with 'find' and applying 'limit(2)'.
+      // This adjustment will resolve the issue, as we know that the first condition in the "or",
+      // combined with the query conditions, can only match one document in the DB at a given time.
       const existingAlert = await notifications.findOne(query);
-      return Boolean(existingAlert);
+      if (existingAlert) {
+        const { _id, resolved, count } = existingAlert;
+        return { exists: true, resolved, _id, count };
+      }
+      return { exists: false };
     } catch (err) {
       logger.warn(`Failed to search for notification ${eventType} in database`, {
         params: { notifications: notifications, err: err.message }
@@ -553,13 +641,47 @@ class NotificationsManager {
     }
   }
 
+
+
+  /**
+ * Activate and Increases the count of a given notification
+ *
+ * @param {String} notificationId - The notification to activate and increase count
+ * @returns {Promise<boolean>} - Returns true if the count was increased, false otherwise.
+ */
+  async increaseCount (notificationId) {
+    try {
+      const update = {
+        $set: { resolved: false },
+        $inc: { count: 1 },
+        lastResolvedStatusChange: Date.now()
+      };
+
+      const increasedCount = await notifications.updateOne(
+        { _id: notificationId }, update, { lean: true });
+
+      return Boolean(increasedCount);
+    } catch (error) {
+      logger.error('Error in increasing count process:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Resolves a notification in the db
+   *
+   * @param {String} eventType - The name of the notification.
+   * @param {Object} targets - The targets of the notification (deviceId, tunnelId etc.)
+   * @param {String} org - The organization associated with the notification.
+   * @param {String} severity - The severity level of the event.
+  */
   async resolveAnAlert (eventType, targets, severity, org) {
     try {
       const query = await this.getQueryForExistingAlert(
         eventType, targets, false, severity, org);
       const updatedAlert = await notifications.findOneAndUpdate(
         query,
-        { $set: { resolved: true } },
+        { $set: { resolved: true, lastResolvedStatusChange: Date.now() } },
         { new: true }
       );
       logger.debug('Resolved existing notification',
@@ -575,6 +697,17 @@ class NotificationsManager {
     }
   }
 
+  /**
+   * Sends a webhook notification with provided details if needed.
+   * It checks the organization's notification configuration to determine if a webhook
+   * should be sent based on the severity of the event.
+   *
+   * @param {String} title - The title of the notification.
+   * @param {String} details - The details of the notification.
+   * @param {String} severity - The severity level of the event (e.g., 'warning', 'critical').
+   * @param {object} orgNotificationsConf - The organization's notification configuration
+   *  (including webhook settings).
+ */
   async sendWebHook (title, details, severity, orgNotificationsConf) {
     const webHookMessage = {
       title,
@@ -599,6 +732,13 @@ class NotificationsManager {
     }
   }
 
+  /**
+   * Processes and sends notifications based on a set of rules and conditions.
+   * This function handles a variety of tasks including checking for existing alerts,
+   * resolving alerts, sending webhooks and emails, and storing notifications in the database.
+   *
+   * @param {Array} notifications - An array of notification objects to be processed.
+  */
   async sendNotifications (notifications) {
     try {
       const parentsQueryToNotification = new Map();
@@ -626,16 +766,28 @@ class NotificationsManager {
           currentSeverity = rules[eventType].severity;
           notification.severity = currentSeverity;
         }
+        let existingAlert;
         let existingUnresolvedAlert = false;
         const alertUniqueKey = eventType + '_' + org + '_' + JSON.stringify(targets) +
               '_' + severity;
         if (existingAlertSet.has(alertUniqueKey)) {
           existingUnresolvedAlert = true;
         } else {
-          existingUnresolvedAlert = await this.checkAlertExistence(
+          existingAlert = await this.checkAlertExistence(
             eventType, targets, org, severity || currentSeverity);
-          if (existingUnresolvedAlert) {
-            existingAlertSet.add(alertUniqueKey);
+          if (existingAlert?.exists) {
+            if (!existingAlert.resolved) {
+              existingUnresolvedAlert = true;
+              existingAlertSet.add(alertUniqueKey);
+            } else if (!resolved && existingAlert.resolved) {
+              const activatedLastResolved = await this.increaseCount(existingAlert._id);
+              if (activatedLastResolved) {
+                logger.debug(
+                  'Found, activated and increased count of the last resolved notification',
+                  { params: { notification } });
+                continue;
+              }
+            }
           }
         }
 
@@ -646,10 +798,12 @@ class NotificationsManager {
 
         // Send an alert only if one of the both is true:
         // 1. This isn't a resolved alert and there is no existing alert
-        // 2. This is a resolved alert, there is unresolved alert in the db,
-        // and the user has defined to send resolved alerts
+        // 2. This is a resolved alert, there was an unresolved alert in the db,
+        // the user has defined to send resolved alerts and the unresolved alert's count = 1
+        // 3. This is an info alert
         const conditionToSend = ((!resolved && !existingUnresolvedAlert) ||
-              (resolved && sendResolvedAlert && existingUnresolvedAlert));
+          (resolved && sendResolvedAlert && existingUnresolvedAlert && existingAlert.count === 1) ||
+          (isInfo));
         logger.debug('Step 1: Initial check for sending alert. Decision: ' +
               (conditionToSend ? 'proceed to step 2' : 'do not send'), {
           params: {
@@ -870,7 +1024,7 @@ class NotificationsManager {
   }
 
   /**
-     * Sends emails to notify users with
+     * Sends daily emails to notify subscribed users with
      * pending unread notifications.
      * @async
      * @return {void}

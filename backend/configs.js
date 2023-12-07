@@ -229,6 +229,9 @@ const configEnv = {
     emailRateLimitPerDevice: 60,
     // Device disconnection time before triggering an alert in milliseconds (1 minute)
     deviceDisconnectionAlertTimeout: 60000,
+    // Notification cool down period (3600000ms = 1 hour).
+    // Aggregates similar event counts to minimize repetitive notifications within this time frame.
+    notificationCoolDownPeriod: 3600000,
     /****************************************************/
     /*         Client Fields                            */
     /****************************************************/
