@@ -880,13 +880,15 @@ class NotificationsManager {
                     notification,
                     blockingParents: new Set()
                   };
-
-                  for (const parentNotification of parentNotifications) {
-                    notificationObj.blockingParents.add(
-                      parentNotification._id);
-                  }
-                  addOrUpdateSuppressedNotification(alertUniqueKey, notificationObj);
+                } else {
+                  notificationObj = exists;
                 }
+
+                for (const parentNotification of parentNotifications) {
+                  notificationObj.blockingParents.add(
+                    parentNotification._id);
+                }
+                addOrUpdateSuppressedNotification(alertUniqueKey, notificationObj);
                 logger.debug('Step 3: Parent notifications found. Skipping notification sending.',
                   { params: { notification } });
                 continue; // Ignore since there is a parent event
