@@ -68,7 +68,7 @@ async function addOrUpdateSuppressedNotification (uniqueKey, notification) {
             });
         }
         logger.debug(`Updated key ${uniqueKey} in suppressedNotifications `,
-          { params: { suppressed: redisClient.hget('suppressedNotifications') } });
+          { params: { suppressed: redisClient.hgetall('suppressedNotifications') } });
         resolve(res);
       });
   });
@@ -618,6 +618,7 @@ class NotificationsManager {
                       suppressedNotification: notification
                     }
                   });
+                // TBD: make sure that there is a trigger to resolve this notification when needed
                 this.sendNotifications([notification]);
               } else {
                 logger.debug(
@@ -628,8 +629,10 @@ class NotificationsManager {
                       suppressedNotification: notification
                     }
                   });
-                removeSuppressedNotificationFromRedis(alertUniqueKey);
               }
+              // Remove the suppressed notification from Redis after all the parent events
+              // have been resolved and the child events have been handled
+              removeSuppressedNotificationFromRedis(alertUniqueKey);
             } catch (error) {
               logger.error('Error sending suppressed notification:', { params: { error } });
             }
@@ -640,8 +643,6 @@ class NotificationsManager {
       }
     }
   }
-
-
 
   /**
  * Activate and Increases the count of a given notification
