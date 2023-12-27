@@ -3736,6 +3736,7 @@ class DevicesService {
       const status = deviceStatus.getDeviceStatus(machineId) || {};
       const lteStatus = status.lteStatus;
       const wifiStatus = status.wifiStatus;
+      const dhcpStatus = status.dhcp;
 
       return Service.successResponse({
         sync,
@@ -3743,7 +3744,8 @@ class DevicesService {
         connection: `${isConnected ? '' : 'dis'}connected`,
         interfaces,
         lteStatus,
-        wifiStatus
+        wifiStatus,
+        dhcp: dhcpStatus
       });
     } catch (e) {
       return Service.rejectResponse(

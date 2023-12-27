@@ -185,7 +185,17 @@ class DeviceStatus {
           state: Joi.string(),
           peerState: Joi.string()
         }))
-      }).allow({}).optional()
+      }).allow({}).optional(),
+      dhcp: Joi.object({
+        leases: Joi.array().items(Joi.object({
+          MAC: Joi.string(),
+          IP: Joi.string(),
+          HOSTNAME: Joi.string(),
+          BEGIN: Joi.string(),
+          END: Joi.string(),
+          MANUFACTURER: Joi.string()
+        })).optional()
+      }).optional()
     });
 
     for (const updateEntry of msg) {
@@ -980,6 +990,23 @@ class DeviceStatus {
   }
 
   /**
+    * Store DHCP status in memory
+    * @param  {string} machineId  device machine id
+    * @param  {Object} status DHCP status
+    * @return {void}
+    */
+  setDeviceDhcpStatus (machineId, status) {
+    if (!this.status[machineId]) {
+      this.status[machineId] = {};
+    }
+    if (!this.status[machineId].dhcp) {
+      this.status[machineId].dhcp = {};
+    }
+    const time = new Date().getTime();
+    Object.assign(this.status[machineId].dhcp, { ...status, time });
+  }
+
+  /**
     * Store BGP status in memory
     * @param  {string} machineId  device machine id
     * @param  {string} vrid VRID
@@ -1143,6 +1170,11 @@ class DeviceStatus {
     // Set VRRP status in memory for now
     for (const vrId in rawStats?.vrrp ?? {}) {
       this.setDeviceVrrpStatus(machineId, vrId, rawStats.vrrp[vrId]);
+    }
+
+    // Set DHCP status in memory for now
+    if (Object.entries(rawStats?.dhcp ?? {}).length > 0) {
+      this.setDeviceDhcpStatus(machineId, rawStats.dhcp);
     }
 
     // Set BGP status in memory for now.
