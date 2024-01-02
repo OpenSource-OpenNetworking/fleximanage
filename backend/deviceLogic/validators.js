@@ -218,6 +218,22 @@ const validateDevice = async (
         };
       }
     }
+
+    if (ifc.monitorInternet) {
+      if (!ifc.monitorInternetServers || !ifc.monitorInternetProbeTimeout) {
+        return {
+          valid: false,
+          err: `[${ifc.name}]: Internet Monitoring requires servers and probe timeout`
+        };
+      }
+
+      if (ifc.monitorInternetServers.length === 0) {
+        return {
+          valid: false,
+          err: `[${ifc.name}]: Internet Monitoring requires at least one server in the list`
+        };
+      }
+    }
   }
 
   // Assigned interfaces must not be on the same subnet

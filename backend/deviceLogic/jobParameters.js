@@ -17,7 +17,7 @@
 
 const pick = require('lodash/pick');
 
-const { getMajorVersion, getMinorVersion } = require('../versioning');
+const { getMajorVersion, getMinorVersion, isVersionGreaterEquals } = require('../versioning');
 const { generateTunnelParams } = require('../utils/tunnelUtils');
 const tunnelsModel = require('../models/tunnels');
 const configs = require('../configs')();
@@ -57,6 +57,8 @@ const transformInterfaces = (interfaces, globalOSPF, deviceVersion) => {
       ifcObg.metric = ifc.metric;
       ifcObg.useStun = ifc.useStun;
       ifcObg.monitorInternet = ifc.monitorInternet;
+      ifcObg.monitorInternetServers = ifc.monitorInternetServers;
+      ifcObg.monitorInternetProbeTimeout = ifc.monitorInternetProbeTimeout;
       ifcObg.dnsServers = ifc.dnsServers;
       ifcObg.dnsDomains = ifc.dnsDomains;
 
@@ -387,12 +389,46 @@ const transformDHCP = (dhcp, deviceId, vrrpGroups = []) => {
   return res;
 };
 
-const transformLte = lteInterface => {
-  return {
-    ...lteInterface.configuration,
-    dev_id: lteInterface.devId,
-    metric: lteInterface.metric
+const transformLte = (ifc, agentVersion) => {
+  const isSupportsDualSim = isVersionGreaterEquals(agentVersion, '6.4.0');
+
+  const params = {
+    metric: ifc.metric,
+    dev_id: ifc.devId
   };
+
+  if (isSupportsDualSim) {
+    params.primarySlot = ifc.configuration.primarySlot;
+    params.automaticSwitchover = ifc.configuration.automaticSwitchover;
+    params.tryPrimaryAfter = ifc.configuration.tryPrimaryAfter;
+    params.slots = {};
+  } else {
+    params.enable = ifc.configuration.enable;
+  }
+
+  for (const slot in ifc.configuration.slots) {
+    if (!ifc.configuration.slots[slot].enable) {
+      continue;
+    }
+
+    if (isSupportsDualSim) {
+      params.slots[slot] = {
+        apn: ifc.configuration.slots[slot].apn,
+        pin: ifc.configuration.slots[slot].pin,
+        auth: ifc.configuration.slots[slot].auth,
+        user: ifc.configuration.slots[slot].authUser,
+        password: ifc.configuration.slots[slot].authPassword
+      };
+    } else {
+      params.apn = ifc.configuration.slots[slot].apn;
+      params.pin = ifc.configuration.slots[slot].pin;
+      params.auth = ifc.configuration.slots[slot].auth;
+      params.user = ifc.configuration.slots[slot].authUser;
+      params.password = ifc.configuration.slots[slot].authPassword;
+    }
+  }
+
+  return params;
 };
 
 const transformVrrp = (device, vrrpGroup) => {

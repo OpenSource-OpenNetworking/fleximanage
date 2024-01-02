@@ -200,6 +200,33 @@ connectRouter.route('/register')
                   intf.dhcp = intf.dhcp || 'no';
                   if (intf.deviceType === 'lte') {
                     intf.deviceParams = mapLteNames(intf.deviceParams);
+                    const currentActiveSlot = intf.deviceParams?.activeSimSlot?.toString() ?? '1';
+                    const defaultApn = intf.deviceParams?.defaultSettings?.apn ?? '1';
+                    // set initial LTE config
+                    intf.configuration = {
+                      enable: false,
+                      primarySlot: currentActiveSlot,
+                      automaticSwitchover: false,
+                      tryPrimaryAfter: '',
+                      slots: {
+                        1: {
+                          enable: currentActiveSlot === '1',
+                          apn: currentActiveSlot === '1' ? defaultApn : '',
+                          pin: '',
+                          auth: '',
+                          authUser: '',
+                          authPassword: ''
+                        },
+                        2: {
+                          enable: currentActiveSlot === '2',
+                          apn: currentActiveSlot === '2' ? defaultApn : '',
+                          pin: '',
+                          auth: '',
+                          authUser: '',
+                          authPassword: ''
+                        }
+                      }
+                    };
                     intf.metric = null;
                   } else {
                     intf.metric = (!intf.metric && intf.gateway === req.body.default_route)

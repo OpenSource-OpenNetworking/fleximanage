@@ -27,6 +27,7 @@ const connections = require('../websocket/Connections')();
 const deviceStatus = require('../periodic/deviceStatus')();
 const statusesInDb = require('../periodic/statusesInDb')();
 const { deviceStats } = require('../models/analytics/deviceStats');
+const { lteLastStats } = require('../models/analytics/lteStats');
 const mongoConns = require('../mongoConns.js')();
 const mongoose = require('mongoose');
 const validator = require('validator');
@@ -196,6 +197,8 @@ class DevicesService {
           'useFixedPublicPort',
           'internetAccess',
           'monitorInternet',
+          'monitorInternetServers',
+          'monitorInternetProbeTimeout',
           'linkStatus',
           'gateway',
           'metric',
@@ -237,6 +240,14 @@ class DevicesService {
 
         retIf.isPublicAddressRateLimited =
           await publicAddrInfoLimiter.isBlocked(`${deviceId}:${retIf._id}`);
+
+        if (retIf.deviceType === 'lte') {
+          const lastStatus = await lteLastStats.findOne(
+            { org: retDevice.org, device: deviceId, interfaceDevId: retIf.devId }
+          );
+
+          retIf.lastStatus = lastStatus?.stats ?? {};
+        }
 
         return retIf;
       }));
@@ -993,6 +1004,8 @@ class DevicesService {
           message: 'get-lte-info',
           defaultResponse: {
             connectivity: false,
+            // slotsNum: '',
+            activeSimSlot: '',
             simStatus: '',
             signals: {},
             hardwareInfo: {},
@@ -1010,14 +1023,10 @@ class DevicesService {
             response = parseLteStatus(response);
 
             const apnIsDiff = !isEqual(ifc.deviceParams.defaultSettings, response.defaultSettings);
-            const pinStateIsDiff = !isEqual(ifc.deviceParams.initial_pin1_state, response.pinState);
 
             const update = {};
             if (apnIsDiff) {
               update['interfaces.$.deviceParams.defaultSettings'] = response.defaultSettings;
-            }
-            if (pinStateIsDiff) {
-              update['interfaces.$.deviceParams.initial_pin1_state'] = response.pinState;
             }
 
             if (Object.keys(update).length > 0) {
@@ -1028,11 +1037,19 @@ class DevicesService {
             }
 
             // update server stats cache, so the UI will have the most updated data
-            deviceStatus.setDeviceLteStatus(deviceObject.machineId, ifc.devId, response);
+            await deviceStatus.setDeviceLteStatus(
+              deviceObject.machineId, ifc.devId, response, true, orgList[0], id
+            );
             response = deviceStatus.getDeviceLteStatus(deviceObject.machineId, ifc.devId);
             return response;
           },
-          getCached: () => deviceStatus.getDeviceLteStatus(deviceObject.machineId, ifc.devId)
+          getCached: async isConnected => {
+            if (isConnected) {
+              return deviceStatus.getDeviceLteStatus(deviceObject.machineId, ifc.devId);
+            }
+
+            return ifc?.lastStatus ?? {};
+          }
         },
         wifi: {
           message: 'get-wifi-info',
@@ -1044,7 +1061,7 @@ class DevicesService {
             response = mapWifiNames(response);
             return response;
           },
-          getCached: () => deviceStatus.getDeviceWifiStatus(deviceObject.machineId, ifc.devId)
+          getCached: async () => deviceStatus.getDeviceWifiStatus(deviceObject.machineId, ifc.devId)
         }
       };
 
@@ -1053,16 +1070,17 @@ class DevicesService {
         throw new Error('Status request is supported for WiFi or LTE interfaces');
       }
 
+      const isDeviceConnected = connections.isConnected(deviceObject.machineId);
       // default is to take cached data
       if (getEdgeData === 'false' && message.getCached) {
         return Service.successResponse({
           error: null,
           deviceStatus: 'unknown',
-          status: message.getCached()
+          status: await message.getCached(isDeviceConnected)
         });
       }
 
-      if (!connections.isConnected(deviceObject.machineId)) {
+      if (!isDeviceConnected) {
         return Service.successResponse({
           error: null,
           deviceStatus: 'disconnected',
@@ -3550,6 +3568,10 @@ class DevicesService {
             message: 'reset-lte',
             title: 'Reset LTE modem'
           },
+          'slot-activation': {
+            job: false,
+            message: 'activate-sim-slot'
+          },
           pin: {
             job: false,
             message: 'modify-lte-pin',
@@ -3689,7 +3711,7 @@ class DevicesService {
               error = await agentAction.onError(null, fullErrMsg, error);
             }
 
-            return Service.rejectResponse(error, 500);
+            return Service.rejectResponse(error ?? fullErrMsg, 500);
           }
 
           if (agentAction.onComplete) {
@@ -4002,14 +4024,14 @@ const deviceApplicationFilters = [{
 
 async function updatePin (data, device, interfaceId, lteInterface) {
   // update pin in database
-  await devices.updateOne(
-    { _id: device.id, org: device.org, 'interfaces._id': interfaceId },
-    {
-      $set: {
-        'interfaces.$.deviceParams.initial_pin1_state': data
-      }
-    }
-  );
+  // await devices.updateOne(
+  //   { _id: device.id, org: device.org, 'interfaces._id': interfaceId },
+  //   {
+  //     $set: {
+  //       'interfaces.$.deviceParams.initial_pin1_state': data
+  //     }
+  //   }
+  // );
 
   // update pin in stats cache
   const devId = lteInterface.devId;
@@ -4020,7 +4042,7 @@ async function updatePin (data, device, interfaceId, lteInterface) {
     ...data
   };
 
-  deviceStatus.setDeviceLteStatus(machineId, devId, updated);
+  deviceStatus.setDeviceLteStatus(machineId, devId, updated, false);
 }
 
 module.exports = DevicesService;

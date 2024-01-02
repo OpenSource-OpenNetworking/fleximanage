@@ -51,6 +51,8 @@ const buildInterfaces = (deviceInterfaces, globalOSPF, deviceVersion) => {
       IPv6Mask,
       useStun,
       monitorInternet,
+      monitorInternetServers,
+      monitorInternetProbeTimeout,
       bandwidthMbps,
       routing,
       type,
@@ -97,6 +99,8 @@ const buildInterfaces = (deviceInterfaces, globalOSPF, deviceVersion) => {
       ifcInfo.metric = metric;
       ifcInfo.useStun = useStun;
       ifcInfo.monitorInternet = monitorInternet;
+      ifcInfo.monitorInternetServers = monitorInternetServers;
+      ifcInfo.monitorInternetProbeTimeout = monitorInternetProbeTimeout;
       ifcInfo.dnsServers = dnsServers;
       ifcInfo.dnsDomains = dnsDomains;
 
@@ -158,7 +162,7 @@ const buildInterfaces = (deviceInterfaces, globalOSPF, deviceVersion) => {
 };
 
 const lteOperationSchema = Joi.object().keys({
-  op: Joi.string().valid('reset', 'pin').required(),
+  op: Joi.string().valid('reset', 'pin', 'slot-activation').required(),
   params: Joi.object().optional()
 });
 

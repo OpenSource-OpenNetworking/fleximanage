@@ -764,6 +764,12 @@ class Connections {
             hasIpOnDevice: updatedConfig.IPv4 !== ''
           };
 
+          // update slots info
+          // if (i.deviceType === 'lte') {
+          //   updInterface.deviceParams.slotsNum = updatedConfig.deviceParams.slotsNum;
+          //   updInterface.deviceParams.activeSlot = updatedConfig.deviceParams.activeSlot;
+          // }
+
           // allow to modify the interface type dpdk/pppoe for unassigned interfaces
           if (!i.isAssigned && ['dpdk', 'pppoe'].includes(updatedConfig.deviceType)) {
             // don't allow to change LTE or WiFi deviceType dynamically

@@ -266,6 +266,21 @@ const interfacesSchema = new Schema({
     type: Boolean,
     default: true
   },
+  monitorInternetServers: {
+    type: [String],
+    default: [],
+    validate: {
+      validator: val => {
+        return val.every((server) => validators.validateIPv4(server, false));
+      },
+      message: 'Internet monitoring server must be a valid IPv4'
+    }
+  },
+  monitorInternetProbeTimeout: {
+    type: Number,
+    min: [1000, 'monitorInternetProbeTimeout should be a number between 1000 - 10000'],
+    max: [10000, 'monitorInternetProbeTimeout should be a number between 1000 - 10000']
+  },
   // true if there is an internet access on the WAN interface
   internetAccess: {
     type: String,

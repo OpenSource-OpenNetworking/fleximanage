@@ -112,6 +112,8 @@ const prepareIfcParams = (interfaces, newDevice) => {
         delete newIfc.metric;
         delete newIfc.useStun;
         delete newIfc.monitorInternet;
+        delete newIfc.monitorInternetServers;
+        delete newIfc.monitorInternetProbeTimeout;
         delete newIfc.dnsServers;
         delete newIfc.dnsDomains;
       }
@@ -1080,34 +1082,37 @@ const prepareModifyDHCP = async (origDevice, newDevice) => {
 };
 
 const prepareAddRemoveLte = (origDevice, updatedDevice) => {
-  const oldLteInterfaces = origDevice.interfaces.filter(item => item.deviceType === 'lte');
-  const newLteInterfaces = updatedDevice.interfaces.filter(item => item.deviceType === 'lte');
+  const updatedInterfaces = updatedDevice.interfaces;
+  const origInterfaces = origDevice.interfaces;
 
-  const result = { add: [], remove: [] };
+  const [newLte, origLte] = [
+    updatedInterfaces.filter(i => i.deviceType === 'lte' && i.configuration.enable).map(i => {
+      return transformLte(i, updatedDevice.versions.agent);
+    }),
 
-  const lteInterfacesDiff = differenceWith(
-    newLteInterfaces,
-    oldLteInterfaces,
-    (origIfc, newIfc) => {
-      // no need to send job if LTE configuration changed but LTE is disable
-      if (!origIfc.configuration.enable && !newIfc.configuration.enable) {
-        return true;
+    origInterfaces.filter(i => i.deviceType === 'lte' && i.configuration.enable).map(i => {
+      return transformLte(i, origDevice.versions.agent);
+    })
+  ];
+
+  const [lteAdd, lteRemove] = [
+    differenceWith(
+      newLte,
+      origLte,
+      (origLte, newLte) => {
+        return isEqual(origLte, newLte);
       }
+    ),
+    differenceWith(
+      origLte,
+      newLte,
+      (origLte, newLte) => {
+        return isEqual(origLte, newLte);
+      }
+    )
+  ];
 
-      return isEqual(origIfc.configuration, newIfc.configuration) &&
-        isEqual(origIfc.metric, newIfc.metric);
-    }
-  );
-
-  lteInterfacesDiff.forEach(lteIfc => {
-    if (lteIfc.configuration.enable) {
-      result.add.push(transformLte(lteIfc));
-    } else {
-      result.remove.push(transformLte(lteIfc));
-    }
-  });
-
-  return result;
+  return { add: lteAdd, remove: lteRemove };
 };
 
 /**
@@ -1629,7 +1634,7 @@ const sync = async (deviceId, orgId) => {
       deviceConfRequests.push({
         entity: 'agent',
         message: 'add-lte',
-        params: transformLte(lte)
+        params: transformLte(lte, versions.agent)
       });
     });
   }

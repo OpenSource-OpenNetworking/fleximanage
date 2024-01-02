@@ -21,6 +21,7 @@ const { deviceStats, deviceAggregateStats } = require('../models/analytics/devic
 const notifications = require('../models/notifications');
 const notificationsConf = require('../models/notificationsConf');
 const applicationStats = require('../models/analytics/applicationStats');
+const { lteStats } = require('../models/analytics/lteStats');
 const Joi = require('joi');
 const logger = require('../logging/logging')({ module: module.filename, type: 'periodic' });
 const notificationsMgr = require('../notifications/notifications')();
@@ -915,7 +916,7 @@ class DeviceStatus {
     * @param  {Object} lteStatus   LTE status
     * @return {void}
     */
-  setDeviceLteStatus (machineId, devId, lteStatus) {
+  async setDeviceLteStatus (machineId, devId, lteStatus, updateDb = true, orgId, deviceId) {
     if (!this.status[machineId]) {
       this.status[machineId] = {};
     }
@@ -927,6 +928,18 @@ class DeviceStatus {
     }
     const time = new Date().getTime();
     Object.assign(this.status[machineId].lteStatus[devId], { ...lteStatus, time });
+
+    if (updateDb) {
+      // update the analytics db.
+      // use "create" in order to have the "post('save')" middleware (see in schema file)
+      await lteStats.create({
+        org: orgId,
+        device: deviceId,
+        interfaceDevId: devId,
+        time,
+        stats: lteStatus
+      });
+    }
   }
 
   getDeviceLteStatus (machineId, devId) {
@@ -1089,7 +1102,7 @@ class DeviceStatus {
     }
 
     await this.setDeviceState(machineId, devStatus, false);
-    const { org, deviceObj: deviceId } = deviceInfo;
+    const { org: orgId, deviceObj: deviceId } = deviceInfo;
 
     // Interface statistics
     const timeDelta = rawStats.period;
@@ -1125,7 +1138,7 @@ class DeviceStatus {
       }
       for (const devId in lteStatus) {
         const mappedLteStatus = parseLteStatus(lteStatus[devId]);
-        this.setDeviceLteStatus(machineId, devId, mappedLteStatus);
+        await this.setDeviceLteStatus(machineId, devId, mappedLteStatus, true, orgId, deviceId);
       }
     };
 
@@ -1167,7 +1180,7 @@ class DeviceStatus {
         // Update changed tunnel status in memory by org
         if ((firstTunnelUpdate ||
           tunnelState.status !== this.status[machineId].tunnelStatus[tunnelID].status)) {
-          this.setTunnelsStatusByOrg(org, tunnelID, machineId, tunnelState.status);
+          this.setTunnelsStatusByOrg(orgId, tunnelID, machineId, tunnelState.status);
         }
 
         // Generate a notification if tunnel status has changed since
@@ -1184,10 +1197,10 @@ class DeviceStatus {
           const resolved = tunnelState.status === 'up';
           const notificationName = 'Tunnel connection';
           const notificationKey = await this.generateTunnelNotificationKey(
-            notificationName, targets, resolved, org);
+            notificationName, targets, resolved, orgId);
 
           const notification = {
-            org: org,
+            org: orgId,
             title: tunnelState.status === 'up' ? '[resolved] Tunnel connection change'
               : 'Tunnel connection change',
             details: 'Tunnel ' + tunnelID + ' state changed to ' + (tunnelState.status === 'down'

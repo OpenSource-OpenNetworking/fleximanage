@@ -10770,6 +10770,8 @@ components:
           useStun: useStun
           useFixedPublicPort: useFixedPublicPort
           monitorInternet : monitorInternet
+          monitorInternetServers : [8.8.8.8, 1.1.1.1]
+          monitorInternetProbeTimeout: 1000
           IPv4: IPv4
           gateway: gateway
           metric: 0
@@ -10799,6 +10801,8 @@ components:
           NatType: NatType
           useStun: useStun
           monitorInternet: monitorInternet
+          monitorInternetServers : [8.8.8.8, 1.1.1.1]
+          monitorInternetProbeTimeout: 1000
           IPv4: IPv4
           type: WAN
           MAC: MAC
@@ -10823,6 +10827,8 @@ components:
           NatType: NatType
           useStun: useStun
           monitorInternet: monitorInternet
+          monitorInternetServers : [8.8.8.8, 1.1.1.1]
+          monitorInternetProbeTimeout: 1000
           IPv4: IPv4
           type: WAN
           MAC: MAC
@@ -11012,6 +11018,8 @@ components:
           useStun: true
           useFixedPublicPort: false
           monitorInternet: true
+          monitorInternetServers : [8.8.8.8, 1.1.1.1]
+          monitorInternetProbeTimeout: 1000
           internetAccess: 'yes'
           linkStatus: 'up'
           IPv4: IPv4
@@ -11037,6 +11045,8 @@ components:
           useStun: true
           useFixedPublicPort: false
           monitorInternet: true
+          monitorInternetServers : [8.8.8.8, 1.1.1.1]
+          monitorInternetProbeTimeout: 1000
           internetAccess: 'no'
           linkStatus: 'down'
           IPv4: IPv4
@@ -11209,6 +11219,8 @@ components:
         NatType: NatType
         useStun: useStun
         monitorInternet: true
+        monitorInternetServers : [8.8.8.8, 1.1.1.1]
+        monitorInternetProbeTimeout: 1000
         internetAccess: 'yes'
         linkStatus: 'up'
         IPv4: IPv4
@@ -11268,6 +11280,12 @@ components:
           type: boolean
         monitorInternet:
           type: boolean
+        monitorInternetServers:
+          type: array
+          items:
+            type: string
+        monitorInternetProbeTimeout:
+          type: number
         internetAccess:
           enum:
           - ''
@@ -13435,6 +13453,17 @@ components:
         - type: object
           required:
           - op
+          - slot
+          properties:
+            op:
+              type: string
+              enum:
+                - sim-activation
+            slot:
+              type: string
+        - type: object
+          required:
+          - op
           - params
           properties:
               op:
@@ -13448,6 +13477,7 @@ components:
                   - enable
                   - newPin
                   - puk
+                  - slot
                 properties:
                   currentPin:
                     type: string
@@ -13463,6 +13493,8 @@ components:
                     type: string
                     pattern: ^(\d{8}|)$
                     description: PUK (Personal unblocking key) Code. 8 digits
+                  slot:
+                    type: string
     WifiClient:
       type: object
       required:
@@ -13589,17 +13621,63 @@ components:
               type: string
     LteConfiguration:
       required:
-        - apn
         - enable
+        - primarySlot
+        - slots
       properties:
-        apn:
-          type: string
         enable:
           type: boolean
-        password:
+        primarySlot:
           type: string
-        user:
-          type: string
+          pattern: '[0-9]'
+        automaticSwitchover:
+            type: boolean
+        tryPrimaryAfter:
+            type: string
+            pattern: '^[0-9]*$'
+        slots:
+          type: object
+          properties:
+            1:
+              type: object
+              properties:
+                enable:
+                  type: boolean
+                apn:
+                  type: string
+                auth:
+                  type: string
+                  enum:
+                  - MSCHAPV2
+                  - PAP
+                  - CHAP
+                  - ''
+                authPassword:
+                  type: string
+                authUser:
+                  type: string
+                pin:
+                  type: string
+            2:
+              type: object
+              properties:
+                enable:
+                  type: boolean
+                apn:
+                  type: string
+                auth:
+                  type: string
+                  enum:
+                  - MSCHAPV2
+                  - PAP
+                  - CHAP
+                  - ''
+                authPassword:
+                  type: string
+                authUser:
+                  type: string
+                pin:
+                  type: string
       type: object
     WifiBand:
       type: object

@@ -207,13 +207,74 @@ const getCpuInfo = cpuInfo => {
   };
 };
 
+const validateLTEConfig = (config, ifc) => {
+  const primary = config.primarySlot;
+  if (!config.slots[primary]) {
+    return { valid: false, err: `Slot number ${primary} must be set` };
+  }
+
+  if (!config.slots[primary].enable) {
+    return { valid: false, err: `Primary Slot (${primary}) must be enabled` };
+  }
+
+  for (const slot in config.slots) {
+    const slotObj = config.slots[slot];
+    if (config.automaticSwitchover && (!slotObj.apn || slotObj.apn === '')) {
+      return { valid: false, err: 'APN must be set for all slots' };
+    }
+
+    if (config.automaticSwitchover && !slotObj.enable) {
+      return { valid: false, err: `Slot number ${slot} must be enabled` };
+    }
+
+    if (
+      config.enable &&
+      !config.automaticSwitchover &&
+      slot === primary &&
+      (!slotObj.apn || slotObj.apn === '')
+    ) {
+      return { valid: false, err: 'APN must be set for the primary slot' };
+    }
+  }
+
+  if (config.automaticSwitchover && !ifc.monitorInternet) {
+    return { valid: false, err: 'Enable Internet monitoring to enable automatic switchover' };
+  }
+
+  return { valid: true, err: null };
+};
+
 const lteConfigurationSchema = Joi.object().keys({
   enable: Joi.boolean().required(),
-  apn: Joi.string().required(),
-  auth: Joi.string().valid('MSCHAPV2', 'PAP', 'CHAP').allow(null, ''),
-  user: Joi.string().allow(null, ''),
-  password: Joi.string().allow(null, ''),
-  pin: Joi.string().allow(null, '')
+  primarySlot: Joi.string().regex(/^\d+$/).error(errors => {
+    errors.forEach(err => {
+      switch (err.code) {
+        case 'string.pattern.base':
+          err.message = `${err.local.value} is not a valid number`;
+          break;
+        default:
+          break;
+      }
+    });
+  }).required(),
+  automaticSwitchover: Joi.boolean().required(),
+  // tryPrimaryAfter: Joi.number().min(30).max(604800).required().allow(''), // one week
+
+  tryPrimaryAfter: Joi.alternatives().conditional('automaticSwitchover', {
+    is: true,
+    then: Joi.number().min(600).max(604800).required().allow(0), // one week
+    otherwise: Joi.string().allow(null, '', 0)
+  }).required(),
+
+  // tryPrimaryAfter: Joi.number().min(30).max(604800).required().allow(''), // one week
+  slots: Joi.object().pattern(/^\d+/, Joi.object({
+    enable: Joi.boolean().required(),
+    apn: Joi.string().required().allow(''),
+    auth: Joi.string().valid('MSCHAPV2', 'PAP', 'CHAP').allow(null, ''),
+    authUser: Joi.string().allow(null, ''),
+    authPassword: Joi.string().allow(null, ''),
+    pin: Joi.string().allow(null, '')
+  }))
 });
 
 const allowedSecurityModes = ['open', 'wpa-psk', 'wpa2-psk'];
@@ -356,6 +417,13 @@ const validateConfiguration = (deviceInterface, configurationReq) => {
         valid: false,
         err: `${result.error.details[result.error.details.length - 1].message}`
       };
+    }
+
+    if (intType === 'lte') {
+      const { err } = validateLTEConfig(configurationReq, deviceInterface);
+      if (err) {
+        return { valid: false, err: err };
+      }
     }
 
     if (intType === 'wifi') {
