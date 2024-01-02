@@ -7,3 +7,6 @@
 [submodule "vpnportal"]
 	path = vpnportal
 	url = git@gitlab.com:flexiwangroup/flexivpnportal.git
+[submodule "backend/ai"]
+	path = backend/ai
+	url = git@gitlab.com:flexiwangroup/flexiai.git

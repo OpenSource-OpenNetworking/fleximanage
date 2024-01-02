@@ -9624,6 +9624,66 @@ paths:
       x-swagger-router-controller: Vrrp
       x-openapi-router-controller: VrrpController
       x-openapi-router-service: VrrpService
+  /ai/chat/query:
+    post:
+      operationId: aiChatQueryPOST
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiChatQueryReq'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiChatQueryResponse'
+          description: Successful operation
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequestError'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The specified resource was not found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal server error
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unexpected error
+      security:
+      - apiKey: []
+      - bearerAuth: []
+      summary: Perform AI Chat Query
+      tags:
+      - Chat
+      x-swagger-router-controller: ai
+      x-openapi-router-controller: AiController
+      x-openapi-router-service: AiService
 
 components:
   responses:
@@ -13744,6 +13804,32 @@ components:
           type: string
         params:
           type: object
+    AiChatQueryReq:
+      type: object
+      required:
+      - session
+      - query
+      properties:
+        session:
+          type: string
+        query:
+          type: string
+      example:
+        session: '1234567'
+        query: 'What is flexiWAN?'
+    AiChatQueryResponse:
+      type: object
+      required:
+      - session
+      - response
+      properties:
+        session:
+          type: string
+        response:
+          type: string
+      example:
+        session: '1234567'
+        response: 'flexiWAN is an SD-WAN solution'
     VrrpDeviceInterfacesResponse:
       type: object
       properties:

@@ -35,6 +35,7 @@ const FirewallPoliciesController = require('./FirewallPoliciesController');
 const QOSPoliciesController = require('./QOSPoliciesController');
 const PeersController = require('./PeersController');
 const VrrpController = require('./VrrpController');
+const AiController = require('./AiController');
 
 module.exports = {
   AccessTokensController,
@@ -56,5 +57,6 @@ module.exports = {
   FirewallPoliciesController,
   QOSPoliciesController,
   PeersController,
-  VrrpController
+  VrrpController,
+  AiController
 };

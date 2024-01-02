@@ -66,6 +66,7 @@ const Permissions = new Schema({
   applications: { type: Number, min: [0, 'Permission too low'], max: [15, 'Permission too high'] },
   qospolicies: { type: Number, min: [0, 'Permission too low'], max: [15, 'Permission too high'] },
   vrrp: { type: Number, min: [0, 'Permission too low'], max: [15, 'Permission too high'] },
+  ai: { type: Number, min: [0, 'Permission too low'], max: [15, 'Permission too high'] },
   firewallpolicies: {
     type: Number, min: [0, 'Permission too low'], max: [15, 'Permission too high']
   }
@@ -92,7 +93,8 @@ const preDefinedPermissions = {
     applications: setPermission(0, 0, 0, 0),
     qospolicies: setPermission(0, 0, 0, 0),
     firewallpolicies: setPermission(0, 0, 0, 0),
-    vrrp: setPermission(0, 0, 0, 0)
+    vrrp: setPermission(0, 0, 0, 0),
+    ai: setPermission(0, 0, 0, 0)
   },
   account_owner: {
     jobs: setPermission(1, 1, 1, 1),
@@ -113,7 +115,8 @@ const preDefinedPermissions = {
     applications: setPermission(1, 1, 1, 1),
     qospolicies: setPermission(1, 1, 1, 1),
     firewallpolicies: setPermission(1, 1, 1, 1),
-    vrrp: setPermission(1, 1, 1, 1)
+    vrrp: setPermission(1, 1, 1, 1),
+    ai: setPermission(1, 1, 1, 1)
   },
   account_manager: {
     jobs: setPermission(1, 1, 1, 1),
@@ -134,7 +137,8 @@ const preDefinedPermissions = {
     applications: setPermission(1, 1, 1, managerDelPermission()),
     qospolicies: setPermission(1, 1, 1, managerDelPermission()),
     firewallpolicies: setPermission(1, 1, 1, managerDelPermission()),
-    vrrp: setPermission(1, 1, 1, managerDelPermission())
+    vrrp: setPermission(1, 1, 1, managerDelPermission()),
+    ai: setPermission(1, 1, 1, 1)
   },
   account_viewer: {
     jobs: setPermission(1, 0, 0, 0),
@@ -155,7 +159,8 @@ const preDefinedPermissions = {
     applications: setPermission(1, 0, 0, 0),
     qospolicies: setPermission(1, 0, 0, 0),
     firewallpolicies: setPermission(1, 0, 0, 0),
-    vrrp: setPermission(1, 0, 0, 0)
+    vrrp: setPermission(1, 0, 0, 0),
+    ai: setPermission(1, 1, 1, 1)
   },
   group_manager: {
     jobs: setPermission(1, 1, 1, 1),
@@ -176,7 +181,8 @@ const preDefinedPermissions = {
     applications: setPermission(1, 1, 1, 1),
     qospolicies: setPermission(1, 1, 1, managerDelPermission()),
     firewallpolicies: setPermission(1, 1, 1, managerDelPermission()),
-    vrrp: setPermission(1, 1, 1, managerDelPermission())
+    vrrp: setPermission(1, 1, 1, managerDelPermission()),
+    ai: setPermission(1, 1, 1, 1)
   },
   group_viewer: {
     jobs: setPermission(1, 0, 0, 0),
@@ -197,7 +203,8 @@ const preDefinedPermissions = {
     applications: setPermission(1, 0, 0, 0),
     qospolicies: setPermission(1, 0, 0, 0),
     firewallpolicies: setPermission(1, 0, 0, 0),
-    vrrp: setPermission(1, 0, 0, 0)
+    vrrp: setPermission(1, 0, 0, 0),
+    ai: setPermission(1, 1, 1, 1)
   },
   organization_manager: {
     jobs: setPermission(1, 1, 1, 1),
@@ -218,7 +225,8 @@ const preDefinedPermissions = {
     applications: setPermission(1, 1, 1, 1),
     qospolicies: setPermission(1, 1, 1, managerDelPermission()),
     firewallpolicies: setPermission(1, 1, 1, managerDelPermission()),
-    vrrp: setPermission(1, 1, 1, managerDelPermission())
+    vrrp: setPermission(1, 1, 1, managerDelPermission()),
+    ai: setPermission(1, 1, 1, 1)
   },
   organization_viewer: {
     jobs: setPermission(1, 0, 0, 0),
@@ -239,7 +247,8 @@ const preDefinedPermissions = {
     applications: setPermission(1, 0, 0, 0),
     qospolicies: setPermission(1, 0, 0, 0),
     firewallpolicies: setPermission(1, 0, 0, 0),
-    vrrp: setPermission(1, 0, 0, 0)
+    vrrp: setPermission(1, 0, 0, 0),
+    ai: setPermission(1, 1, 1, 1)
   }
 };
 
