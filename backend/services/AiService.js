@@ -1,5 +1,3 @@
-/* eslint-disable no-multi-str */
-/* eslint-disable no-template-curly-in-string */
 // flexiWAN SD-WAN software - flexiEdge, flexiManage.
 // For more information go to https://flexiwan.com
 // Copyright (C) 2024  flexiWAN Ltd.
@@ -18,6 +16,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 const Service = require('./Service');
+const FlexiAi = require('../flexiai');
 const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 
 class AiService {
@@ -30,7 +29,7 @@ class AiService {
     try {
       // const orgList = await getAccessTokenOrgList(user, org, false);
 
-      const response = `This is a server response to your query: ${query}`;
+      const response = await FlexiAi.chatQuery(session, query);
 
       return Service.successResponse({ session, response });
     } catch (e) {

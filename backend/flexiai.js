@@ -21,6 +21,15 @@
  * flexiAiStub class
  */
 class FlexiAi {
+  /**
+   * Singleton instance
+   */
+  static GetInstance () {
+    if (!this.Instance) {
+      this.Instance = new FlexiAi();
+    }
+    return this.Instance;
+  }
 }
 
 // check if flexibilling is required

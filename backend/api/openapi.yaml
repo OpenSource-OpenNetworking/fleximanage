@@ -13826,7 +13826,14 @@ components:
         session:
           type: string
         response:
-          type: string
+          type: object
+          properties:
+            answer:
+              type: string
+            sources:
+              items:
+                type: string
+              type: array
       example:
         session: '1234567'
         response: 'flexiWAN is an SD-WAN solution'
