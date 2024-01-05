@@ -17,7 +17,8 @@
 
 const Service = require('./Service');
 const FlexiAi = require('../flexiai');
-const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
+const aiChatLog = require('../models/analytics/aiChatLog');
+const { getAccessTokenOrgList } = require('../utils/membershipUtils');
 
 class AiService {
   /**
@@ -25,13 +26,55 @@ class AiService {
    *
    * returns response for the given session
    **/
-  static async aiChatQueryPOST ({ session, query }, { user }) {
+  static async aiChatQueryPOST ({ session, query, org }, { user }) {
     try {
-      // const orgList = await getAccessTokenOrgList(user, org, false);
+      const orgList = await getAccessTokenOrgList(user, org, true);
 
       const response = await FlexiAi.chatQuery(session, query);
+      // const response = { answer: 'test', sources: [] };
 
-      return Service.successResponse({ session, response });
+      const log = await aiChatLog.create({
+        org: orgList[0],
+        session,
+        query,
+        answer: response.answer,
+        sources: response.sources
+      });
+
+      return Service.successResponse({
+        _id: log.id,
+        session,
+        response
+      });
+    } catch (e) {
+      return Service.rejectResponse(
+        e.message || 'Internal Server Error',
+        e.status || 500
+      );
+    }
+  }
+
+  /**
+   * AI Chat Update User Input
+   *
+   * returns response after change
+   **/
+  static async aiChatQueryPUT ({ session, org, _id, useful }, { user }) {
+    try {
+      const orgList = await getAccessTokenOrgList(user, org, true);
+
+      const log = await aiChatLog.findOneAndUpdate({
+        org: orgList[0],
+        session,
+        _id
+      }, { $set: { useful: useful } },
+      { useFindAndModify: false, upsert: false, new: true });
+
+      return Service.successResponse({
+        _id: log.id,
+        session,
+        useful: log.useful
+      });
     } catch (e) {
       return Service.rejectResponse(
         e.message || 'Internal Server Error',

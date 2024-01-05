@@ -21,6 +21,11 @@
  * flexiAiStub class
  */
 class FlexiAi {
+  async chatQuery (session, query) {
+    const response = { answer: 'AI System Not Running', sources: [] };
+    return response;
+  }
+
   /**
    * Singleton instance
    */
@@ -34,7 +39,7 @@ class FlexiAi {
 
 // check if flexibilling is required
 let flexiAi;
-const useFlexiAi = true;
+const useFlexiAi = require('./configs')().get('useFlexiAi', 'boolean');
 
 if (useFlexiAi) {
   flexiAi = require('./ai');

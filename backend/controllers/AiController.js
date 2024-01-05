@@ -25,6 +25,10 @@ class AiController {
   async aiChatQueryPOST (request, response) {
     await Controller.handleRequest(request, response, this.service.aiChatQueryPOST);
   }
+
+  async aiChatQueryPUT (request, response) {
+    await Controller.handleRequest(request, response, this.service.aiChatQueryPUT);
+  }
 }
 
 module.exports = AiController;
