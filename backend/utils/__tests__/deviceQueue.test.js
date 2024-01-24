@@ -42,6 +42,7 @@ describe('Initialization', () => {
           }
         });
         expect(rjob.id).toBe(job.id);
+        return true;
       });
     } catch (e) {
       err = e;
@@ -74,6 +75,7 @@ describe('Initialization', () => {
           }
         });
         expect(rjob.id).toBe(job.id);
+        return true;
       });
     } catch (e) {
       err = e;
@@ -116,6 +118,7 @@ describe('Initialization', () => {
     try {
       await deviceQueues.startQueue('DDD', async (rjob) => {
         logger.verbose('Processing job ID=' + rjob.id + ', data=' + JSON.stringify(rjob.data));
+        return true;
       });
     } catch (e) {
       err = e;
@@ -251,6 +254,7 @@ describe('Initialization', () => {
           }
         });
         expect(rjob.id).toBe(job.id);
+        return true;
       });
     } catch (e) {
       err = e;

@@ -534,8 +534,8 @@ const validateDevice = async (
     if (inboundFilter && !(inboundFilter in routingFilterNames)) {
       return {
         valid: false,
-        err: `BGP neighbor ${bgpNeighbor.ip} uses an  \
-        unrecognized routing filter name ("${inboundFilter}")`
+        err: `BGP neighbor ${bgpNeighbor.ip} uses a non-existent \
+        routing filter (${inboundFilter}). Please create the filter before assigning it`
       };
     }
 

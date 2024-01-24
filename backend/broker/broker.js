@@ -41,6 +41,8 @@ exports.deviceConnectionOpened = async (deviceId) => {
     await deviceQueues.startQueue(deviceId, deviceProcessor);
   } catch (err) {
     logger.error('Broker starting queue error', { params: { err: err.message } });
+    // the device should be reconnected if the queue was not started
+    connections.deviceDisconnect(deviceId);
   }
 };
 
@@ -102,9 +104,6 @@ const deviceProcessor = async (job) => {
           job.save();
           logger.info('The device message is not sent, the job state set as pending',
             { params: { sendAttempts }, job: job });
-          // it is assumed that the device was disconnected before sending the message
-          // if the device was re-connected, the queue must be restarted to set job as active
-          connections.deviceDisconnect(mId);
           return resolve(false);
         } else if (remaining <= 1) {
           dispatcher.error(job.id, job.data.response);

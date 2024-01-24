@@ -214,7 +214,7 @@ class NotificationsService {
             ...element,
             _id: element._id.toString(),
             time: element.time.toISOString(),
-            lastResolvedStatusChange: element.lastResolvedStatusChange.toISOString(),
+            lastResolvedStatusChange: element.lastResolvedStatusChange?.toISOString(),
             targets: { ...element.targets, deviceId: deviceObj, interfaceId: interfaceObj }
           };
         });

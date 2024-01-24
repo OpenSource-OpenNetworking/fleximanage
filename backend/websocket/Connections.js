@@ -298,42 +298,41 @@ class Connections {
   pingCheck () {
     this.getAllDevices().forEach(deviceID => {
       const { socket } = this.devices.getDeviceInfo(deviceID);
-      if (!socket) {
-        // check if connection status set in redis is expired
-        const connectDeviceKey = `${connectDevicePrefix}:${deviceID}`;
-        this.redisClient.get(connectDeviceKey, (error, remoteHostId) => {
-          if (error) {
-            logger.warn('Failed to get device connection state in redis', {
-              params: { deviceId: deviceID }
-            });
+      const connectDeviceKey = `${connectDevicePrefix}:${deviceID}`;
+      this.redisClient.get(connectDeviceKey, (error, remoteHostId) => {
+        if (error) {
+          logger.warn('Failed to get device connection state in redis', {
+            params: { deviceId: deviceID }
+          });
+          return;
+        }
+        if (!remoteHostId) {
+          // connection state expired, the device is not connected to any host
+          // the device info data should be removed
+          this.devices.removeDeviceInfo(deviceID);
+          logger.debug('The device connection state expired in redis', {
+            params: { deviceId: deviceID }
+          });
+        }
+        if (socket) {
+          const { readyState, CLOSING, CLOSED } = socket;
+          // Don't try to ping a closing or already closed socket
+          if (remoteHostId !== hostId || [CLOSING, CLOSED].includes(readyState)) {
+            this.closeConnection(deviceID);
             return;
           }
-          if (!remoteHostId) {
-            // connection state expired that means it is not connected to any host
-            // the device info data should be removed
-            this.devices.removeDeviceInfo(deviceID);
-            logger.debug('The device connection state expired in redis', {
+          if (socket.isAlive <= 0) {
+            logger.warn('Terminating device due to ping failure', {
               params: { deviceId: deviceID }
             });
+            return socket.terminate();
           }
-        });
-        return;
-      };
-      // Don't try to ping a closing, or already closed socket
-      if ([socket.CLOSING, socket.CLOSED].includes(socket.readyState)) {
-        this.closeConnection(deviceID);
-        return;
-      }
-      if (socket.isAlive <= 0) {
-        logger.warn('Terminating device due to ping failure', {
-          params: { deviceId: deviceID }
-        });
-        return socket.terminate();
-      }
-      // Decrement is Alive, if after few retries it reaches zero,
-      // ping fails and we terminate connection
-      socket.isAlive -= 1;
-      socket.ping();
+          // Decrement is Alive, if after few retries it reaches zero,
+          // ping fails and we terminate connection
+          socket.isAlive -= 1;
+          socket.ping();
+        }
+      });
     });
   }
 

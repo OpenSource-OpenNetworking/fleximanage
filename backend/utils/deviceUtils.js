@@ -483,10 +483,7 @@ const validateFirewallRules = (rules, org, interfaces = undefined) => {
         }
       }
       if (direction === 'lanNat') {
-        if (!lanNat) {
-          return { valid: false, err: 'LAN NAT parameters must be set' };
-        }
-        const { match, action, interface: devId } = lanNat;
+        const { match, action, interface: devId } = lanNat || {};
         if (side === 'source') {
           if (!devId) {
             return { valid: false, err: 'Interface must be set for source' };
