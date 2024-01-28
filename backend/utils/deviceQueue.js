@@ -313,7 +313,7 @@ class DeviceQueues {
       // hence there should be a delay to prevent unnecessary pause/resume process
       // also the waiting pause timeout should be always less than the job timeout
       // to prevent processing the next job if the current one is failed
-      const waitPauseTimeout = configs.get('jobTimeout', 'number') / 2;
+      const waitPauseTimeout = configs.get('jobTimeout', 'number') * 0.9;
       const pause = () => {
         if (this.deviceQueues[deviceId].waitPause) {
           this.deviceQueues[deviceId].context.pause(0, (err) => {
