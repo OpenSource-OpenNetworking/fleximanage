@@ -71,8 +71,10 @@ class DeviceStatus {
     this.deviceConnectionClosed = this.deviceConnectionClosed.bind(this);
 
     this.devicesStatusByOrg = {};
+    this.devicesStatusReasonByOrg = {};
     this.setDevicesStatusByOrg = this.setDevicesStatusByOrg.bind(this);
     this.getDevicesStatusByOrg = this.getDevicesStatusByOrg.bind(this);
+    this.getDevicesStatusReasonByOrg = this.getDevicesStatusReasonByOrg.bind(this);
     this.clearDevicesStatusByOrg = this.clearDevicesStatusByOrg.bind(this);
 
     this.tunnelsStatusByOrg = {};
@@ -870,7 +872,7 @@ class DeviceStatus {
    * @param  {string} state       device state
    * @return {void}
    */
-  async setDeviceState (machineId, newState, needToPublish = true) {
+  async setDeviceState (machineId, newState, needToPublish = true, reason = '') {
     // Generate a notification if there was a transition in the device's status
     const deviceInfo = connections.getDeviceInfo(machineId);
     if (!deviceInfo) {
@@ -899,9 +901,11 @@ class DeviceStatus {
 
       this.handleNotificationSending(notification);
 
-      this.setDevicesStatusByOrg(org, deviceId, newState);
+      this.setDevicesStatusByOrg(org, deviceId, newState, reason);
     }
     this.setDeviceStatsField(machineId, 'state', newState);
+    console.log('-----After calling setDeviceStatsField', reason);
+    this.status[machineId].reason = !reason || JSON.parse(reason);
     // status updated in memory, publish it to other hosts
     if (needToPublish) {
       connections.publishStatus(machineId, this.status[machineId]);
@@ -1088,7 +1092,12 @@ class DeviceStatus {
       devStatus = rawStats.running === true ? 'running' : 'stopped';
     }
 
-    await this.setDeviceState(machineId, devStatus, false);
+    let stateReason = '';
+    if (rawStats.hasOwnProperty('stateReason')) { // Agent v1.X.X
+      stateReason = rawStats.stateReason;
+    }
+
+    await this.setDeviceState(machineId, devStatus, false, stateReason);
     const { org, deviceObj: deviceId } = deviceInfo;
 
     // Interface statistics
@@ -1393,12 +1402,17 @@ class DeviceStatus {
    * @param  {string} status    status
    * @return {void}
    */
-  setDevicesStatusByOrg (org, deviceID, status) {
+  setDevicesStatusByOrg (org, deviceID, status, reason = '') {
     if (org && deviceID && status !== undefined) {
       if (!this.devicesStatusByOrg.hasOwnProperty(org)) {
         this.devicesStatusByOrg[org] = {};
       }
       this.devicesStatusByOrg[org][deviceID] = status;
+
+      if (!this.devicesStatusReasonByOrg.hasOwnProperty(org)) {
+        this.devicesStatusReasonByOrg[org] = {};
+      }
+      this.devicesStatusReasonByOrg[org][deviceID] = reason;
     }
   }
 
@@ -1418,6 +1432,10 @@ class DeviceStatus {
    */
   getDevicesStatusByOrg (org) {
     return this.devicesStatusByOrg[org];
+  }
+
+  getDevicesStatusReasonByOrg (org) {
+    return this.devicesStatusReasonByOrg[org];
   }
 
   /**
