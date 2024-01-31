@@ -186,7 +186,8 @@ class DeviceStatus {
           state: Joi.string(),
           peerState: Joi.string()
         }))
-      }).allow({}).optional()
+      }).allow({}).optional(),
+      wan_monitoring: Joi.object().optional()
     });
 
     for (const updateEntry of msg) {
@@ -625,7 +626,7 @@ class DeviceStatus {
             // Update device status according to the last update entry in the list
             const lastUpdateEntry = msg.message[msg.message.length - 1];
             await this.setDeviceStatus(deviceID, deviceInfo, lastUpdateEntry);
-            this.updateAnalyticsInterfaceStats(deviceID, deviceInfo, msg.message);
+            this.updateAnalyticsStats(deviceID, deviceInfo, msg.message);
             this.updateAnalyticsApplicationsStats(deviceID, deviceInfo, msg.message);
             this.updateUserDeviceStats(deviceInfo.org, deviceID, msg.message);
 
@@ -783,13 +784,13 @@ class DeviceStatus {
   }
 
   /**
-     * Updates the interface stats per device in the database
+     * Updates the analytics database with stats of interfaces, tunnels, wan monitoring and more
      * @param  {string} deviceID   device UUID
      * @param  {Object} stats      contains the per-interface stats: rx/tx bps/pps
      * @param  {Object} deviceInfo device info stored per connection (org, mongo device id, socket)
      * @return {void}
      */
-  updateAnalyticsInterfaceStats (deviceID, deviceInfo, statsList) {
+  updateAnalyticsStats (deviceID, deviceInfo, statsList) {
     statsList.forEach((statsEntry) => {
       // Update the database once per update time configuration (default: 5min)
       const msgTime = Math.floor(statsEntry.utc / configs.get('analyticsUpdateTime', 'number')) *
@@ -833,6 +834,13 @@ class DeviceStatus {
       const healthStats = statsEntry.health;
       for (const param in healthStats) {
         dbStats['health.' + param] = healthStats[param];
+        shouldUpdate = true;
+      }
+
+      // Update wan monitoring stats
+      const wanMonitoring = statsEntry?.wan_monitoring ?? {}; // only for version 6.4 and above
+      for (const devId in wanMonitoring) {
+        dbStats['wanMonitoring.' + devId.replaceAll('.', ':')] = wanMonitoring[devId];
         shouldUpdate = true;
       }
 
@@ -993,6 +1001,27 @@ class DeviceStatus {
   }
 
   /**
+    * Store WAN Monitoring status in memory
+    * @param  {string} machineId  device machine id
+    * @param  {string} devId Interface id
+    * @param  {Object} stats WAN Monitoring status object
+    * @return {void}
+    */
+  setDeviceWanMonitoringStatus (machineId, devId, stats) {
+    if (!this.status[machineId]) {
+      this.status[machineId] = {};
+    }
+    if (!this.status[machineId].wanMonitoring) {
+      this.status[machineId].wanMonitoring = {};
+    }
+    if (!this.status[machineId].wanMonitoring[devId]) {
+      this.status[machineId].wanMonitoring[devId] = {};
+    }
+    const time = new Date().getTime();
+    Object.assign(this.status[machineId].wanMonitoring[devId] = { ...stats, time });
+  }
+
+  /**
     * Store BGP status in memory
     * @param  {string} machineId  device machine id
     * @param  {string} vrid VRID
@@ -1093,20 +1122,14 @@ class DeviceStatus {
      * @return {void}
      */
   async setDeviceStatus (machineId, deviceInfo, rawStats) {
-    let devStatus = 'failed';
-    if (rawStats.hasOwnProperty('state')) { // Agent v1.X.X
-      devStatus = rawStats.state;
-    // v0.X.X TBD: remove when v0.X.X is not supported, e.g. mgmt=2.X.X
-    } else if (rawStats.hasOwnProperty('running')) {
-      devStatus = rawStats.running === true ? 'running' : 'stopped';
-    }
-
+    const devStatus = rawStats?.state ?? 'failed';
     await this.setDeviceState(machineId, devStatus, false);
+
     const { org: orgId, deviceObj: deviceId } = deviceInfo;
 
     // Interface statistics
     const timeDelta = rawStats.period;
-    const ifStats = rawStats.hasOwnProperty('stats') ? rawStats.stats : {};
+    const ifStats = rawStats?.stats ?? {};
     const devStats = {};
 
     const appStatus = rawStats.application_stats;
@@ -1240,6 +1263,12 @@ class DeviceStatus {
 
     if (Object.entries(devStats).length !== 0) {
       this.setDeviceStatsField(machineId, 'ifStats', devStats);
+    }
+
+    // Set wan monitoring stats in memory
+    const wanMonitoringStats = rawStats?.wan_monitoring ?? {};
+    for (const devId in wanMonitoringStats) {
+      this.setDeviceWanMonitoringStatus(machineId, devId, wanMonitoringStats[devId]);
     }
   }
 

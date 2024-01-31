@@ -43,7 +43,8 @@ const deviceStatsSchema = new Schema({
   // Free form, not schema based
   stats: Schema.Types.Mixed,
   tunnels: Schema.Types.Mixed,
-  health: Schema.Types.Mixed
+  health: Schema.Types.Mixed,
+  wanMonitoring: Schema.Types.Mixed
 }, {
   timestamps: true
 });

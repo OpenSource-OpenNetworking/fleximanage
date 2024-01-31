@@ -2741,9 +2741,17 @@ class DevicesService {
 
     const pipeline = [
       { $match: match },
-      { $project: { time: 1, stats: { $objectToArray: '$stats' } } },
+      {
+        $project: {
+          time: 1,
+          stats: { $objectToArray: '$stats' },
+          wanMonitoring: { $objectToArray: '$wanMonitoring' }
+        }
+      },
       { $unwind: '$stats' },
       ...(ifNum ? [{ $match: { 'stats.k': ifNum.replaceAll('.', ':') } }] : []),
+      { $unwind: '$wanMonitoring' },
+      ...(ifNum ? [{ $match: { 'wanMonitoring.k': ifNum.replaceAll('.', ':') } }] : []),
       {
         $group:
               {
@@ -2751,7 +2759,9 @@ class DevicesService {
                 rx_bps: { $sum: '$stats.v.rx_bps' },
                 tx_bps: { $sum: '$stats.v.tx_bps' },
                 rx_pps: { $sum: '$stats.v.rx_pps' },
-                tx_pps: { $sum: '$stats.v.tx_pps' }
+                tx_pps: { $sum: '$stats.v.tx_pps' },
+                wanMonitoringRtt: { $max: '$wanMonitoring.v.rtt' },
+                wanMonitoringDropRate: { $max: '$wanMonitoring.v.drop_rate' }
               }
       },
       {
@@ -2762,7 +2772,9 @@ class DevicesService {
           rx_bps: '$rx_bps',
           tx_bps: '$tx_bps',
           rx_pps: '$rx_pps',
-          tx_pps: '$tx_pps'
+          tx_pps: '$tx_pps',
+          wanMonitoringRtt: '$wanMonitoringRtt',
+          wanMonitoringDropRate: '$wanMonitoringDropRate'
         }
       },
       { $sort: { time: -1 } }
@@ -3758,6 +3770,7 @@ class DevicesService {
       const status = deviceStatus.getDeviceStatus(machineId) || {};
       const lteStatus = status.lteStatus;
       const wifiStatus = status.wifiStatus;
+      const wanMonitoring = status.wanMonitoring;
 
       return Service.successResponse({
         sync,
@@ -3765,7 +3778,8 @@ class DevicesService {
         connection: `${isConnected ? '' : 'dis'}connected`,
         interfaces,
         lteStatus,
-        wifiStatus
+        wifiStatus,
+        wanMonitoring
       });
     } catch (e) {
       return Service.rejectResponse(
