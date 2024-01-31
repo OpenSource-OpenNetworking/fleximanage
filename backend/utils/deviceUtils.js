@@ -20,6 +20,7 @@ const path = require('path');
 const apnsJson = require(path.join(__dirname, 'mcc_mnc_apn.json'));
 const wifiChannels = require('./wifi-channels');
 const { getOrgDefaultTunnelPort } = require('../utils/tunnelUtils');
+const SHA1 = require('crypto-js/sha1');
 
 /**
  * Get the default gateway of the device
@@ -449,6 +450,7 @@ const validateConfiguration = (deviceInterface, configurationReq) => {
 const validateFirewallRules = (rules, org, interfaces = undefined) => {
   const inboundRuleTypes = ['edgeAccess', 'portForward', 'nat1to1'];
 
+  const rulesHashes = [];
   const tunnelPort = +getOrgDefaultTunnelPort(org);
   const usedInboundPorts = [];
   let inboundPortsCount = 0;
@@ -551,10 +553,7 @@ const validateFirewallRules = (rules, org, interfaces = undefined) => {
         }
       }
       if (direction === 'lanNat') {
-        if (!lanNat) {
-          return { valid: false, err: 'LAN NAT parameters must be set' };
-        }
-        const { match, action, interface: devId } = lanNat;
+        const { match, action, interface: devId } = lanNat || {};
         if (side === 'source') {
           if (!devId) {
             return { valid: false, err: 'Interface must be set for source' };
@@ -585,6 +584,18 @@ const validateFirewallRules = (rules, org, interfaces = undefined) => {
         }
       }
     }
+    // check duplicated rules
+    const ruleHash = SHA1(direction + inbound +
+      JSON.stringify(classification) +
+      JSON.stringify(rule.interfaces)
+    ).toString();
+    if (rulesHashes.includes(ruleHash)) {
+      return {
+        valid: false,
+        err: `Duplicated ${direction} rules detected`
+      };
+    }
+    rulesHashes.push(ruleHash);
   };
 
   if (inboundPortsCount > 1000) {

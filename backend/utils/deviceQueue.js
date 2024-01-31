@@ -50,6 +50,7 @@ class DeviceQueues {
     this.addJob = this.addJob.bind(this);
     this.pauseQueue = this.pauseQueue.bind(this);
     this.resumeQueue = this.resumeQueue.bind(this);
+    this.restartQueue = this.restartQueue.bind(this);
     this.removeJobs = this.removeJobs.bind(this);
     this.removeJobIdsByOrg = this.removeJobIdsByOrg.bind(this);
     this.getLastJob = this.getLastJob.bind(this);
@@ -124,7 +125,7 @@ class DeviceQueues {
      * @return {void}
      */
   async startQueue (deviceId, processor) {
-    if (this.deviceQueues[deviceId]) {
+    if (this.deviceQueues[deviceId]?.context) {
       // Queue for that device already exist, resume queue
       this.resumeQueue(deviceId);
       return;
@@ -312,7 +313,7 @@ class DeviceQueues {
       // hence there should be a delay to prevent unnecessary pause/resume process
       // also the waiting pause timeout should be always less than the job timeout
       // to prevent processing the next job if the current one is failed
-      const waitPauseTimeout = configs.get('jobTimeout', 'number') / 2;
+      const waitPauseTimeout = configs.get('jobTimeout', 'number') * 0.9;
       const pause = () => {
         if (this.deviceQueues[deviceId].waitPause) {
           this.deviceQueues[deviceId].context.pause(0, (err) => {
@@ -358,6 +359,27 @@ class DeviceQueues {
     }
     this.deviceQueues[deviceId].context.resume();
     this.deviceQueues[deviceId].paused = false;
+  }
+
+  /**
+    * Restarts a queue for a given device ID
+    * @param  {string} deviceId UUID of the device
+    * @return {void}
+    */
+  restartQueue (deviceId) {
+    if (!this.deviceQueues[deviceId]?.context) {
+      logger.error('Restarting a queue with no context', { params: { deviceId } });
+      return;
+    }
+    this.deviceQueues[deviceId].context.pause(0, (err) => {
+      if (err) {
+        logger.error('Restarting queue error', { params: { deviceId, err } });
+        return;
+      };
+      this.deviceQueues[deviceId].context.resume();
+      logger.debug('Queue restarted',
+        { params: { deviceId: deviceId }, queue: this.deviceQueues[deviceId] });
+    });
   }
 
   /**
@@ -619,17 +641,19 @@ class DeviceQueues {
    * @return {Promise}         a list of job ids of pending jobs
    */
   async getOPendingJobsCount (deviceId) {
-    let count = 0;
-    for (const state of [
-      'inactive',
-      'active'
-    ]) {
-      await this.iterateJobs(state, (job) => {
-        // the actual state may differ from that returned by rangeByType
-        if (['inactive', 'active'].includes(job._state)) count += 1;
-      }, deviceId, 0, -1, 'asc');
+    let activeCount = 0;
+    let inactiveCount = 0;
+    await this.iterateJobs('active', () => activeCount++, deviceId);
+    await this.iterateJobs('inactive', () => inactiveCount++, deviceId);
+    // this function is called when updating the sync status of connected devices
+    // no active job with existing inactive jobs means the queue stuck
+    if (activeCount === 0 && inactiveCount > 0) {
+      logger.info('Restart the queue after stuck', {
+        params: { deviceId, inactiveCount }
+      });
+      this.restartQueue(deviceId);
     }
-    return count;
+    return activeCount + inactiveCount;
   }
 
   /**

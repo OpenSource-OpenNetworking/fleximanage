@@ -292,7 +292,10 @@ class OrganizationsService {
       }
       const origVxlanPort = org.vxlanPort;
       const origTunnelRange = org.tunnelRange;
-      let orgDevices = [];
+      const orgDevices = await Devices.devices
+        .find({ org: id })
+        .populate('org')
+        .populate('policies.firewall.policy', '_id name rules');
 
       // update org, don't save
       org.name = name;
@@ -305,12 +308,6 @@ class OrganizationsService {
       const isVxlanPortChanged = origVxlanPort !== vxlanPort;
       const isTunnelRangeChanged = origTunnelRange !== tunnelRange;
       if (isVxlanPortChanged) {
-        // if vxlan port is changed, need to check the firewall ports before saving in db
-        orgDevices = await Devices.devices
-          .find({ org: id })
-          .populate('org')
-          .populate('policies.firewall.policy', '_id name rules');
-
         validateVxlanPortChange(orgDevices, org);
       }
 
@@ -396,7 +393,8 @@ class OrganizationsService {
             vxlanPort,
             devices,
             user,
-            isVxlanPortChanged
+            isVxlanPortChanged,
+            isTunnelRangeChanged
           );
         }
       } else if (isTunnelRangeChanged) {
@@ -405,7 +403,8 @@ class OrganizationsService {
           vxlanPort,
           orgDevices,
           user,
-          isVxlanPortChanged
+          isVxlanPortChanged,
+          isTunnelRangeChanged
         );
       }
 
@@ -795,6 +794,7 @@ const getTunnelsPipeline = (id, origVxlanPort) => {
               versions: 1,
               hostname: 1,
               IKEv2: 1,
+              bgp: 1,
               'interfaces._id': 1,
               tunnelInterface: {
                 $arrayElemAt: [
@@ -961,7 +961,8 @@ const handleVxlanPortTunnelRangeChange = async (
   origVxlanPort,
   orgDevices,
   user,
-  isVxlanPortChange
+  isVxlanPortChanged,
+  isTunnelRangeChanged
 ) => {
   const orgId = org._id;
   const devicesJobs = {}; // mapping object [deviceId] = { device: {}, tasks: [] }
@@ -976,11 +977,13 @@ const handleVxlanPortTunnelRangeChange = async (
     const toPending = tunnels?.[0]?.toPending ?? [];
     const toReconstruct = tunnels?.[0]?.toReconstruct ?? [];
 
-    if (isVxlanPortChange) {
+    if (isVxlanPortChanged) {
       // handle tunnels that should be pending. Do not send jobs
       const failedDevicesIds = await handleToPendingTunnels(toPending);
       failedDevicesIds.forEach((f) => desynchronizedDevices.add(f));
-    } else toReconstruct.push(...toPending);
+    } else if (isTunnelRangeChanged) {
+      toReconstruct.push(...toPending);
+    }
 
     // first prepare remove-tunnel tasks for each device
     for (const removeTunnel of [...toPending, ...toReconstruct]) {
@@ -990,9 +993,11 @@ const handleVxlanPortTunnelRangeChange = async (
     }
 
     // now prepare the modify-vxlan-config task for each device
-    const params = transformVxlanConfig(org);
-    for (const orgDevice of orgDevices) {
-      addDeviceTasks(devicesJobs, orgDevice, { message: 'modify-vxlan-config', params });
+    if (isVxlanPortChanged) {
+      const params = transformVxlanConfig(org);
+      for (const orgDevice of orgDevices) {
+        addDeviceTasks(devicesJobs, orgDevice, { message: 'modify-vxlan-config', params });
+      }
     }
 
     // now prepare add-tunnel tasks for each device
@@ -1018,7 +1023,7 @@ const handleVxlanPortTunnelRangeChange = async (
       }
     }
   } catch (err) {
-    logger.error('Error in handling vxlan change', {
+    logger.error('Error in handling vxlan or tunnel range change', {
       params: {
         reason: err.message,
         origVxlanPort,

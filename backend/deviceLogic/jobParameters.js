@@ -216,7 +216,7 @@ const transformVxlanConfig = org => {
  */
 const transformBGP = async (device) => {
   let { bgp, interfaces, org, _id, versions } = device;
-  interfaces = interfaces.filter(i => i.isAssigned);
+  interfaces = interfaces.filter(i => i.isAssigned && i.routing.includes('BGP') && i.IPv4);
 
   const majorVersion = getMajorVersion(versions.agent);
   const minorVersion = getMinorVersion(versions.agent);
@@ -292,7 +292,7 @@ const transformBGP = async (device) => {
   }
 
   const networks = [];
-  interfaces.filter(i => i.routing.includes('BGP')).forEach(i => {
+  interfaces.forEach(i => {
     networks.push({
       ipv4: `${i.IPv4}/${i.IPv4Mask}`
     });

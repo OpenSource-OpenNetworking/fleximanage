@@ -651,7 +651,7 @@ class DevicesService {
         const pendingNotificationsArr = await notificationsModel.aggregate([
           {
             $match: {
-              org: org
+              org: { $in: orgList.map(o => mongoose.Types.ObjectId(o)) }
             }
           },
           {
@@ -660,6 +660,7 @@ class DevicesService {
           {
             $match: {
               status: 'unread',
+              $or: [{ resolved: false }, { isInfo: true }],
               'targets.deviceId': {
                 $in: paginated[0].records.map(d => mongoose.Types.ObjectId(d._id)),
                 $exists: true,

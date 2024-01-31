@@ -384,7 +384,8 @@ class ApplicationLogic extends IApplication {
     const org = await organizationsModel.findOne({ _id: application.org }).lean();
     const { valid, err } = validateFirewallRules(
       [...deviceSpecific, ...globalRules],
-      org
+      org,
+      device.interfaces
     );
     if (!valid) {
       let prefix = '';
