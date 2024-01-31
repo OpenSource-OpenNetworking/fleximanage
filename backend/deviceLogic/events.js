@@ -588,6 +588,10 @@ class Events {
         await this.handleMissingIP(origDevice, updatedIfc, origIfc);
 
         await this.handleExistsIP(origDevice, updatedIfc, origIfc);
+
+        if (origIfc.deviceType === 'lte') {
+          await this.handleLteSwitchover(origDevice, updatedIfc, origIfc);
+        }
       }
     } catch (err) {
       logger.error('events check failed', { params: { err: err.message } });
@@ -617,6 +621,30 @@ class Events {
     if (this.isIpMissing(updatedIfc)) {
       await this.interfaceIpMissing(origDevice, origIfc, updatedIfc);
     }
+  }
+
+  /**
+   * Check and handle LTE Switchover
+   * @param  {object} origDevice original device object
+   * @param  {string} updatedIfc updated interface object
+   * @param  {string} origIfc original interface object
+  */
+  async handleLteSwitchover (origDevice, updatedIfc, origIfc) {
+    if (updatedIfc?.deviceParams?.activeSimSlot === origIfc?.deviceParams?.activeSimSlot) {
+      return;
+    }
+
+    const pendingType = pendingTypes.waitForStun;
+    const reason = getReason(pendingType);
+
+    await this.setDeviceTunnelsAsPending(origDevice, origIfc, reason, pendingType);
+
+    // remove public port from both interfaces
+    await devices.updateOne(
+      { _id: origDevice._id },
+      { $set: { 'interfaces.$[elem].PublicPort': '' } },
+      { upsert: false, arrayFilters: [{ 'elem._id': origIfc._id }] }
+    );
   }
 
   /**

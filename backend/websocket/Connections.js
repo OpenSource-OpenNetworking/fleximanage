@@ -765,10 +765,9 @@ class Connections {
           };
 
           // update slots info
-          // if (i.deviceType === 'lte') {
-          //   updInterface.deviceParams.slotsNum = updatedConfig.deviceParams.slotsNum;
-          //   updInterface.deviceParams.activeSlot = updatedConfig.deviceParams.activeSlot;
-          // }
+          if (i.deviceType === 'lte' && updatedConfig?.deviceParams?.activeSimSlot) {
+            updInterface.deviceParams.activeSimSlot = updatedConfig.deviceParams.activeSimSlot;
+          }
 
           // allow to modify the interface type dpdk/pppoe for unassigned interfaces
           if (!i.isAssigned && ['dpdk', 'pppoe'].includes(updatedConfig.deviceType)) {
