@@ -904,7 +904,6 @@ class DeviceStatus {
       this.setDevicesStatusByOrg(org, deviceId, newState, reason);
     }
     this.setDeviceStatsField(machineId, 'state', newState);
-    console.log('-----After calling setDeviceStatsField', reason);
     this.status[machineId].reason = !reason || JSON.parse(reason);
     // status updated in memory, publish it to other hosts
     if (needToPublish) {
