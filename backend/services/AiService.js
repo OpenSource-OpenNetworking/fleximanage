@@ -26,11 +26,11 @@ class AiService {
    *
    * returns response for the given session
    **/
-  static async aiChatQueryPOST ({ session, query, org }, { user }) {
+  static async aiChatQueryPOST ({ session, query, history, org }, { user }) {
     try {
       const orgList = await getAccessTokenOrgList(user, org, true);
 
-      const response = await FlexiAi.chatQuery(session, query);
+      const response = await FlexiAi.chatQuery(session, query, history);
       // const response = { answer: 'test', sources: [] };
 
       const log = await aiChatLog.create({

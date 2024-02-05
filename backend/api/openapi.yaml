@@ -13883,14 +13883,19 @@ components:
       required:
       - session
       - query
+      - history
       properties:
         session:
           type: string
         query:
           type: string
+        history:
+          items:
+            type: string
       example:
         session: '1234567'
         query: 'What is flexiWAN?'
+        history: ['previous query', 'previous answer']
     AiChatQueryResponse:
       type: object
       required:

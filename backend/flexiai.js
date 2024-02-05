@@ -21,7 +21,7 @@
  * flexiAiStub class
  */
 class FlexiAi {
-  async chatQuery (session, query) {
+  async chatQuery (session, query, history) {
     const response = { answer: 'AI System Not Running', sources: [] };
     return response;
   }
