@@ -17,16 +17,30 @@
 
 var configs = require('../configs.js')();
 const cors = require('cors');
+// TODO: const createError = require('http-errors');
 
 // Whitelist of origins allowed to access resources
 const whitelist = configs.get('corsWhiteList', 'list');
+// TODO: const originIsRequired = configs.get('originHttpHeaderRequired', 'boolean');
 
 // CORS handler
 var corsOptionsCheck = (req, callback) => {
   var corsOptions = { exposedHeaders: ['Refresh-JWT', 'refresh-token', 'records-total'] };
-  if (req.header('Origin') && whitelist.indexOf(req.header('Origin')) !== -1) {
-    // In whitelist, allow the request to be accepted
+  const origin = req.header('Origin');
+  // Cross-Origin Resource Sharing (CORS) is a security feature in web browsers
+  // that limits cross-origin HTTP requests.
+  // Note that the "Origin" HTTP request header is not mandatory for all requests,
+  // which means that non-browser clients can send requests without it.
+  // Additionally, it is possible for a browser to not send the header.
+  // Additionally, some browser extensions may bypass CORS restrictions.
+  // To address these issues, a new config called "originHttpHeaderRequired" has been introduced.
+  // When set to true, the server will throw an error if the "Origin" header is not present,
+  // preventing the request from proceeding.
+  //
+  if (origin && whitelist.indexOf(origin) !== -1) {
+    // In whitelist, allow the origin to be accepted
     corsOptions.origin = true;
+    corsOptions.maxAge = 60; // prevent the preflight request for 1 minute.
   } else {
     // Not in whitelist, don't include allow-origin
     corsOptions.origin = false;
@@ -34,8 +48,4 @@ var corsOptionsCheck = (req, callback) => {
   callback(null, corsOptions);
 };
 
-// Operations allowed for * origins
-exports.cors = cors({ exposedHeaders: ['Refresh-JWT', 'refresh-token', 'records-total'] });
-
-// Operations allowed for whitelist origins
-exports.corsWithOptions = cors(corsOptionsCheck);
+exports.cors = cors(corsOptionsCheck);

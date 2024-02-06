@@ -25,7 +25,6 @@ const Account = require('../models/accounts');
 const { membership, preDefinedPermissions } = require('../models/membership');
 const auth = require('../authenticate');
 const { getLoginProcessToken, getToken, getRefreshToken } = require('../tokens');
-const cors = require('./cors');
 const mongoConns = require('../mongoConns.js')();
 const randomKey = require('../utils/random-key');
 const mailer = require('../utils/mailer')(
@@ -60,8 +59,8 @@ const formatErr = (err, msg) => {
 
 // register user
 router.route('/register')
-  .options(cors.cors, (req, res) => { res.sendStatus(200); })
-  .post(cors.cors, async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .post(async (req, res, next) => {
     let session = null;
     let registerUser = null;
     let registerAccount = null;
@@ -254,8 +253,8 @@ router.route('/register')
 
 // verify account again if user did not received a verification email
 router.route('/reverify-account')
-  .options(cors.cors, (req, res) => { res.sendStatus(200); })
-  .post(cors.cors, async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .post(async (req, res, next) => {
     const validateKey = randomKey(30);
     User.findOneAndUpdate(
       // Query, use the email
@@ -303,8 +302,8 @@ router.route('/reverify-account')
 
 // verify account
 router.route('/verify-account')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .post(cors.cors, async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .post(async (req, res, next) => {
     if (!req.body.id || !req.body.token || req.body.id === '' || req.body.token === '') {
       return next(createError(500, 'Verification Error'));
     }
@@ -444,8 +443,8 @@ const updatePassword = (req, res, next) => {
  * 2) type = update - make the actual update of the password
  */
 router.route('/reset-password')
-  .options(cors.cors, (req, res) => { res.sendStatus(200); })
-  .post(cors.cors, async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .post(async (req, res, next) => {
     if (!req.body.type) return next(createError(500, 'Password Reset Error'));
 
     // Call function based on request type
@@ -457,8 +456,8 @@ router.route('/reset-password')
 // Here, a check is made as to whether to allow the user to enter,
 // or whether he needs to pass another identification factor (like 2FA)
 router.route('/login')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .post(cors.corsWithOptions, auth.verifyUserLocal, async (req, res) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .post(auth.verifyUserLocal, async (req, res) => {
     // if user enabled 2fa or account forces using it- send login process token
     // else, allow login without mfa
     const isUserEnabledMfa = req.user?.mfa?.enabled;
@@ -474,8 +473,8 @@ router.route('/login')
 // This endpoint returns to the user his options,
 // which he can use to identify himself and enter the system
 router.route('/login/methods')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .get(cors.corsWithOptions, auth.verifyUserOrLoginJWT, async (req, res) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .get(auth.verifyUserOrLoginJWT, async (req, res) => {
     const methods = {
       recoveryCodes: 0,
       authenticatorApp: 0
@@ -497,8 +496,8 @@ router.route('/login/methods')
 
 // Authentication check is done within passport, if passed, no login error exists
 router.route('/auth')
-  .options(cors.cors, (req, res) => { res.sendStatus(200); })
-  .post(cors.cors, auth.verifyUserLocal, async (req, res) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .post(auth.verifyUserLocal, async (req, res) => {
     const orgs = await getUserOrganizations(req.user);
     res.status(200).json({
       email: req.user.email,
@@ -509,8 +508,8 @@ router.route('/auth')
 
 // Passport exposes a function logout() on the req object which removes the req.user
 router.route('/logout')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .get(cors.corsWithOptions, (req, res) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .get((req, res) => {
     req.logout();
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json');
@@ -520,16 +519,16 @@ router.route('/logout')
 // This endpoint checks if user enabled and verified 2FA for himself.
 // Once user enabled it, he cannot login without it.
 router.route('/mfa/isEnabled')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .get(cors.corsWithOptions, auth.verifyUserOrLoginJWT, async (req, res) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .get(auth.verifyUserOrLoginJWT, async (req, res) => {
     res.status(200).json({ isEnabled: req?.user?.mfa?.enabled });
   });
 
 // This endpoint generates for the user the URI that will be displayed in the UI as a QR code
 // that can be scanned by an authenticator application
 router.route('/mfa/getMfaConfigUri')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .get(cors.corsWithOptions, auth.verifyUserOrLoginJWT, async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .get(auth.verifyUserOrLoginJWT, async (req, res, next) => {
     // if verified - don't generate
     if (req.user.mfa.enabled) {
       return next(createError(500, 'Secret already verified'));
@@ -568,10 +567,9 @@ const verifyMfaRateLimit = rateLimit({
 
 // This endpoint verifies user code with his unique secret.
 router.route('/mfa/verify')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
+  .options((req, res) => { res.sendStatus(200); })
   .post(
     verifyMfaRateLimit,
-    cors.corsWithOptions,
     auth.verifyUserOrLoginJWT,
     async (req, res, next) => {
       if (!req.body.token) {
@@ -643,8 +641,8 @@ const sendJwtToken = async (req, res, mfaVerified) => {
 };
 
 router.route('/mfa/generateRecoveryCodes')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .get(cors.corsWithOptions, auth.verifyUserJWT, async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .get(auth.verifyUserJWT, async (req, res, next) => {
     if (!req?.user?.mfa?.enabled) {
       return next(createError(403, 'Two-Factor authentication is not configured'));
     }
@@ -672,8 +670,8 @@ router.route('/mfa/generateRecoveryCodes')
   });
 
 router.route('/mfa/verifyRecoveryCode')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .post(cors.corsWithOptions, auth.verifyUserOrLoginJWT, async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .post(auth.verifyUserOrLoginJWT, async (req, res, next) => {
     const userRecoveryCodes = req.user?.mfa?.recoveryCodes ?? [];
     if (userRecoveryCodes.length === 0) {
       return next(createError(401, 'Recovery codes are not generated for the user'));

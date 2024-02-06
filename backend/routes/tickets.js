@@ -16,7 +16,6 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 const express = require('express');
 const bodyParser = require('body-parser');
-const cors = require('./cors');
 const auth = require('../authenticate');
 const zendesk = require('node-zendesk');
 const createError = require('http-errors');
@@ -32,8 +31,8 @@ ticketsRouter.use(bodyParser.json());
 ticketsRouter
   .route('/')
   // When options message received, reply origin based on whitelist
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .get(cors.corsWithOptions, auth.verifyAdmin, async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .get(auth.verifyAdmin, async (req, res, next) => {
     try {
       if (!zendeskClient || !accountId) {
         return next(createError(500, 'Ticketing System Not Provisioned'));
@@ -50,8 +49,8 @@ ticketsRouter
 
 ticketsRouter
   .route('/:ticketId/comments')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .get(cors.corsWithOptions, auth.verifyAdmin, async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .get(auth.verifyAdmin, async (req, res, next) => {
     try {
       if (!zendeskClient || !accountId) {
         return next(createError(500, 'Ticketing System Not Provisioned'));

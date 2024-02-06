@@ -228,7 +228,6 @@ class ExpressServer {
     this.app.get('/api/version', (req, res) => res.json({ version }));
     this.app.get('/api/restServers', (req, res) => res.json({ version }));
 
-    this.app.use(cors.corsWithOptions);
     this.app.use(auth.verifyUserJWT);
     // this.app.use(auth.verifyPermission);
 
@@ -242,7 +241,7 @@ class ExpressServer {
       logger.error('Error: Can\'t connect OLD routes');
     }
 
-    // Intialize routes
+    // Initialize routes
     this.app.use('/api/admin', adminRouter);
     this.app.use('/api/tickets', ticketsRouter);
 

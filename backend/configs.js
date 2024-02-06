@@ -135,6 +135,8 @@ const configEnv = {
     agentBroker: ['local.flexiwan.com:3443'],
     // Whitelist of allowed domains for CORS checks
     corsWhiteList: ['http://local.flexiwan.com:3000', 'https://local.flexiwan.com:3000', 'https://local.flexiwan.com:3443', 'https://127.0.0.1:3000'],
+    // if true, requests with HTTP Origin request header with null value will be denied with an error
+    // TODO: originHttpHeaderRequired: true,
     // Client static root directory
     clientStaticDir: 'public',
     // Mgmt-Agent protocol version

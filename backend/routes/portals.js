@@ -17,7 +17,6 @@
 
 const express = require('express');
 const bodyParser = require('body-parser');
-const cors = require('./cors');
 const { verifyPermission } = require('../authenticate');
 const flexibilling = require('../flexibilling');
 const createError = require('http-errors');
@@ -27,8 +26,8 @@ router.use(bodyParser.json());
 
 // returns a customer self-service portal session URL used for billing
 router.route('/')
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .get(cors.corsWithOptions, verifyPermission('billing', 'get'), async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .get(verifyPermission('billing', 'get'), async (req, res, next) => {
     const customerId = req.user.defaultAccount.billingCustomerId;
     try {
       const result = await flexibilling.createPortalSession({

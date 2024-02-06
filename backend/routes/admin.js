@@ -17,7 +17,6 @@
 
 const express = require('express');
 const bodyParser = require('body-parser');
-const cors = require('./cors');
 const auth = require('../authenticate');
 const connections = require('../websocket/Connections')();
 const deviceStatus = require('../periodic/deviceStatus')();
@@ -38,8 +37,8 @@ adminRouter.use(bodyParser.json());
 adminRouter
   .route('/')
 // When options message received, reply origin based on whitelist
-  .options(cors.corsWithOptions, (req, res) => { res.sendStatus(200); })
-  .get(cors.corsWithOptions, auth.verifyAdmin, async (req, res, next) => {
+  .options((req, res) => { res.sendStatus(200); })
+  .get(auth.verifyAdmin, async (req, res, next) => {
     // users
     const registeredUsers = await getRegisteredUsers();
 
