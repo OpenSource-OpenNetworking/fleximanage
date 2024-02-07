@@ -457,9 +457,7 @@ class DevicesService {
             'deviceStatus.state': {
               $cond: [{ $eq: ['$isConnected', true] }, '$status', 'pending']
             },
-            'deviceStatus.reason': {
-              $cond: [{ $eq: ['$isConnected', true] }, '$reason', 'pending']
-            },
+            'deviceStatus.reason': '$deviceStatus.reason',
             'sync.statePrev': '$sync.state',
             'sync.state': {
               $cond: [{ $eq: ['$isConnected', true] }, '$sync.state', 'unknown']
