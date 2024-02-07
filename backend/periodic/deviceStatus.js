@@ -870,6 +870,7 @@ class DeviceStatus {
   /**
    * @param  {string} machineId   device machine Id
    * @param  {string} state       device state
+   * @param  {string} reason      a reason for device state (error usually)
    * @return {void}
    */
   async setDeviceState (machineId, newState, needToPublish = true, reason = '') {
@@ -1399,6 +1400,7 @@ class DeviceStatus {
    * @param  {string} org       org id
    * @param  {string} deviceID  device id
    * @param  {string} status    status
+   * @param  {string} status    status reason
    * @return {void}
    */
   setDevicesStatusByOrg (org, deviceID, status, reason = '') {
