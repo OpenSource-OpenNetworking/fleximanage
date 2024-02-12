@@ -689,6 +689,8 @@ const applyTunnelAdd = async (devices, user, data) => {
     dbTasks = dbTasks.concat(tasks);
   }
 
+  const tunnels = [];
+
   if (dbTasks.length > 1000) {
     Promise.allSettled(dbTasks).then(promiseStatus => {
       let failed = 0;
@@ -698,15 +700,20 @@ const applyTunnelAdd = async (devices, user, data) => {
           logger.error('Add tunnel error',
             { params: { error: elem.reason.message } }
           );
+        } else {
+          tunnels.push(elem.value);
         };
       });
-      const completed = dbTasks.length - failed;
-      logger.debug('Add tunnels operation finished',
-        { params: { completed, failed, durationMs: Date.now() - startedAt } }
-      );
+      sendAddTunnelsJobs(tunnels, userName).then(jobs => {
+        const completed = jobs.length;
+        logger.debug('Add tunnels operation finished',
+          { params: { completed, failed, durationMs: Date.now() - startedAt } }
+        );
+      });
     });
-    logger.debug('Adding more than 1000 jobs in progress', { params: { tunnels: dbTasks.length } });
-    let message = 'Adding more than 1000 jobs in progress, check the result on the Jobs page.';
+    logger.debug('Adding more than 1000 tunnels in progress',
+      { params: { tunnels: dbTasks.length } });
+    let message = 'Adding more than 1000 tunnels in progress, check the result on the Jobs page.';
     if (reasons.size > 0) {
       message = `${message} ${Array.from(reasons).join(' ')}`;
     }
@@ -717,28 +724,27 @@ const applyTunnelAdd = async (devices, user, data) => {
   logger.debug('Running tunnel promises', { params: { tunnels: dbTasks.length } });
 
   const promiseStatus = await Promise.allSettled(dbTasks);
-  const fulfilled = promiseStatus.reduce((arr, elem) => {
+  for (const elem of promiseStatus) {
     if (elem.status === 'fulfilled') {
-      const job = elem.value;
-      arr.push(job);
+      tunnels.push(elem.value);
     } else {
       reasons.add(elem.reason.message);
     };
-    return arr;
-  }, []);
+  };
 
-  const status = fulfilled.length < dbTasks.length
+  const jobs = await sendAddTunnelsJobs(tunnels, userName);
+  const status = jobs.length < dbTasks.length
     ? 'partially completed' : 'completed';
 
   const desired = dbTasks.flat().map(job => job.id);
-  const ids = fulfilled.flat().map(job => job.id);
-  let message = `${isPeer ? 'peer ' : ''}tunnel creation jobs added.`;
-  if (desired.length === 0 || fulfilled.flat().length === 0) {
+  const ids = jobs.map(job => job.id);
+  let message = `${isPeer ? 'peer ' : ''}tunnel creation tasks added.`;
+  if (desired.length === 0 || tunnels.length === 0) {
     message = 'No ' + message;
-  } else if (ids.length < desired.length) {
-    message = `${ids.length} of ${desired.length} ${message}`;
+  } else if (tunnels.length < desired.length) {
+    message = `${tunnels.length} of ${desired.length} ${message}`;
   } else {
-    message = `${ids.length} ${message}`;
+    message = `${tunnels.length} ${message}`;
   }
   if (reasons.size > 0) {
     message = `${message} ${Array.from(reasons).join(' ')}`;
@@ -750,35 +756,34 @@ const applyTunnelAdd = async (devices, user, data) => {
  * Complete tunnel add, called for each of the
  * devices that are connected by the tunnel.
  * @param  {number} jobId Kue job ID
- * @param  {Object} res   including the deviceA id, deviceB id, deviceSideConf
+ * @param  {Object} jobsData includes tunnels data for DB update
  * @return {void}
  */
-const completeTunnelAdd = (jobId, res) => {
-  if (!res || !res.tunnelId || !res.target || !res.username || !res.org) {
-    logger.warn('Got an invalid job result', { params: { result: res, jobId: jobId } });
-    return;
+const completeTunnelAdd = (jobId, jobsData) => {
+  const updateOps = [];
+  for (const { org, num, target } of jobsData.tunnels) {
+    updateOps.push({
+      updateOne: {
+        filter: { num, org, [target]: false },
+        update: {
+          [target]: true
+        },
+        upsert: false
+      }
+    });
   }
-
-  updateTunnelIsConnected(tunnelsModel, res.org,
-    res.tunnelId, res.target, true)(null, (err, res) => {
-    if (err) {
-      logger.error('Update tunnel connectivity failed', {
-        params: { jobId: jobId, reason: err.message }
-      });
-    }
-  }
-  );
+  bulkUpdate(updateOps);
 };
 
 /**
  * Complete handler for sync job
+ * @param  {number} jobId Kue job ID
+ * @param  {Object} jobsData tunnels data for complete adding tunnels function
  * @return void
  */
 const completeSync = async (jobId, jobsData) => {
   try {
-    for (const data of jobsData) {
-      await completeTunnelAdd(jobId, data);
-    }
+    await completeTunnelAdd(jobId, jobsData);
   } catch (err) {
     logger.error('Tunnels sync complete callback failed', {
       params: { jobsData, reason: err.message }
@@ -899,10 +904,10 @@ const generateTunnelPromise = async (user, org, pathLabel, deviceA, deviceB,
     if (tunnelnum === null) {
       throw new Error('Failed to get a new tunnel number');
     }
-    const tunnelJobs = await addTunnel(user, org, tunnelnum, encryptionMethod,
+    const tunnel = await addTunnel(user, org, tunnelnum, encryptionMethod,
       deviceA, deviceB, deviceAIntf, deviceBIntf, pathLabel,
       advancedOptions, peer, notificationsSettings);
-    return tunnelJobs;
+    return tunnel;
   } catch (err) {
     // there can be an exception in the addTunnel function
     // we need to set tunnel as inactive in case of not pending
@@ -923,124 +928,6 @@ const generateTunnelPromise = async (user, org, pathLabel, deviceA, deviceB,
       params: { tunnelnum, error: err.message }
     });
     throw new Error(err.message);
-  }
-};
-
-/**
- * Queues the tunnel creation/deletion jobs to both
- * of the devices that are connected via the tunnel
- * @param  {boolean} isAdd        a flag indicating creation/deletion
- * @param  {string} title         title of the task
- * @param  {Object} tasksDeviceA  device A tunnel job
- * @param  {Object} tasksDeviceB  device B tunnel job
- * @param  {string} user          user id of the requesting user
- * @param  {string} orgId           user's organization id
- * @param  {string} devAMachineID device A host id
- * @param  {string?} devBMachineID device B host id
- * @param  {string} devAOid       device A database mongodb object id
- * @param  {string?} devBOid      device B database mongodb object id
- * @param  {string} tunnelId      tunnel number
- * @param  {string} pathLabel     pathLabel
- * @param  {object?} peer         peer configurations
- * @return {void}
- */
-const queueTunnel = async (
-  isAdd,
-  title,
-  tasksDeviceA,
-  tasksDeviceB,
-  user,
-  orgId,
-  devAMachineID,
-  devBMachineID,
-  devAOid,
-  devBOid,
-  tunnelId,
-  pathLabel,
-  peer = null
-) => {
-  try {
-    const devices = { deviceA: devAOid, deviceB: devBOid };
-    const jobA = await deviceQueues.addJob(
-      devAMachineID,
-      user,
-      orgId,
-      // Data
-      {
-        title: title,
-        tasks: tasksDeviceA
-      },
-      // Response data
-      {
-        method: isAdd ? 'tunnels' : 'deltunnels',
-        data: {
-          username: user,
-          org: orgId,
-          tunnelId: tunnelId,
-          deviceA: devAOid,
-          deviceB: devBOid,
-          pathlabel: pathLabel,
-          target: 'deviceAconf',
-          peer
-        }
-      },
-      // Metadata
-      { priority: 'normal', attempts: 1, removeOnComplete: false },
-      // Complete callback
-      null
-    );
-
-    logger.info(`${isAdd ? 'Add' : 'Del'} tunnel job queued - deviceA`, {
-      params: { devices: devices },
-      job: jobA
-    });
-
-    const jobB = peer ? null : await deviceQueues.addJob(
-      devBMachineID,
-      user,
-      orgId,
-      // Data
-      {
-        title: title,
-        tasks: tasksDeviceB
-      },
-      // Response data
-      {
-        method: isAdd ? 'tunnels' : 'deltunnels',
-        data: {
-          username: user,
-          org: orgId,
-          tunnelId: tunnelId,
-          deviceA: devAOid,
-          deviceB: devBOid,
-          pathlabel: pathLabel,
-          target: 'deviceBconf'
-        }
-      },
-      // Metadata
-      { priority: 'normal', attempts: 1, removeOnComplete: false },
-      // Complete callback
-      null
-    );
-
-    logger.info(`${isAdd ? 'Add' : 'Del'} tunnel job queued - deviceB`, {
-      params: { devices: devices },
-      job: jobB
-    });
-
-    const res = [jobA];
-    if (jobB) res.push(jobB);
-    return res;
-  } catch (err) {
-    logger.error('Error queuing tunnel', {
-      params: { deviceAId: devAMachineID, deviceBId: devBMachineID, message: err.message }
-    });
-    if (peer) {
-      throw new Error(
-        `Error queuing peer tunnel for device ID ${devAMachineID} and peer ${peer.name}`);
-    } else {
-      throw new Error(`Error queuing tunnel for device IDs ${devAMachineID} and ${devBMachineID}`);
-    }
   }
 };
 
@@ -1314,7 +1201,7 @@ const prepareTunnelAddJob = async (
     }
   }
 
-  return [tasksDeviceA, tasksDeviceB, deviceAIntf, deviceBIntf];
+  return [tasksDeviceA, tasksDeviceB];
 };
 
 /**
@@ -1436,67 +1323,14 @@ const addTunnel = async (
   if (isPending) {
     throw new Error(`Tunnel #${tunnelnum} set as pending - ${pendingReason}`);
   }
-
-  return await sendAddTunnelsJobs([tunnel], user);
-};
-
-/**
- * Update tunnel device configuration
- * @param  {Object}  tunnelsModel mongoose tunnel schema
- * @param  {string}  org          organization initiated the request
- * @param  {string}  tunnelId     the id of the tunnel to update
- * @param  {string}  target       which parameter to update in the model
- * @param  {boolean} isAdd        update to configuration of true or false
- * @return {void}
- */
-const updateTunnelIsConnected = (
-  tunnelsModel,
-  org,
-  tunnelId,
-  target,
-  isAdd
-) => (inp, callback) => {
-  const params = {
-    org: org,
-    target: target,
-    isAdd: isAdd
-  };
-  logger.info('Updating tunnels connectivity', { params: params });
-  const update = {};
-  update[target] = isAdd;
-
-  tunnelsModel
-    .findOneAndUpdate(
-      // Query
-      { num: tunnelId, org: org },
-      // Update
-      update,
-      // Options
-      { upsert: false, new: true }
-    )
-    .then(
-      resp => {
-        if (resp != null) {
-          callback(null, { ok: 1 });
-        } else {
-          const err = new Error('Update tunnel connected status failure');
-          callback(err, false);
-        }
-      },
-      err => {
-        callback(err, false);
-      }
-    )
-    .catch(err => {
-      callback(err, false);
-    });
+  return tunnel;
 };
 
 const bulkUpdate = async (updateOps) => {
   if (updateOps.length) {
     try {
       const { matchedCount, modifiedCount } = await tunnelsModel.bulkWrite(updateOps);
-      if (modifiedCount !== updateOps.length) {
+      if (modifiedCount !== matchedCount) {
         logger.error('Updated tunnels count does not match requested',
           { params: { matchedCount, modifiedCount, updateOps } }
         );
@@ -1559,22 +1393,27 @@ const applyTunnelDel = async (devices, user, data) => {
     const org = tunnelsArray[0].org;
     const userName = user.username;
 
-    const delPromises = [];
+    const reasons = new Set();
     const updateOps = [];
-    tunnelsArray.forEach(tunnel => {
+
+    const removedTunnels = tunnelsArray.filter(async tunnel => {
       try {
-        const delPromise = delTunnel(tunnel, userName, org, updateOps);
-        delPromises.push(delPromise);
+        delTunnel(tunnel, org, updateOps);
       } catch (err) {
         logger.error('Delete tunnel error',
           { params: { tunnelID: tunnel._id, error: err.message } }
         );
+        reasons.add(err.message);
+        return false;
       }
+      return true;
     });
 
-    if (delPromises.length > 1000) {
-      logger.debug('More than 1000 jobs in progress', { params: { tunnels: delPromises.length } });
-      const message = 'More than 1000 jobs in progress, check the result on the Jobs page.';
+    const delPromises = await sendRemoveTunnelsJobs(removedTunnels, userName);
+    if (removedTunnels.length > 1000) {
+      logger.debug('Deleting more than 1000 tunnels in progress',
+        { params: { tunnels: removedTunnels.length } });
+      const message = 'Deleting more than 1000 tunnels, check the result on the Jobs page.';
       Promise.allSettled(delPromises).then(promiseStatus => {
         let failed = 0;
         bulkUpdate(updateOps);
@@ -1586,7 +1425,7 @@ const applyTunnelDel = async (devices, user, data) => {
             );
           };
         });
-        const completed = delPromises.length - failed;
+        const completed = promiseStatus.length - failed;
         logger.debug('Delete tunnels operation finished',
           { params: { completed, failed, durationMs: Date.now() - startedAt } }
         );
@@ -1594,23 +1433,20 @@ const applyTunnelDel = async (devices, user, data) => {
       return { ids: [], status: 'unknown', message };
     }
 
-    const promiseStatus = await Promise.allSettled(delPromises);
+    const promiseStatuses = await Promise.allSettled(delPromises);
     bulkUpdate(updateOps);
 
-    const { fulfilled, reasons } = promiseStatus.reduce(({ fulfilled, reasons }, elem) => {
+    const fulfilled = [];
+    for (const elem of promiseStatuses) {
       if (elem.status === 'fulfilled') {
         const job = elem.value;
-        if (job.length) {
-          fulfilled.push(job);
-        }
+        fulfilled.push(job);
       } else {
-        if (!reasons.includes(elem.reason.message)) {
-          reasons.push(elem.reason.message);
-        }
+        reasons.add(elem.reason.message);
       };
-      return { fulfilled, reasons };
-    }, { fulfilled: [], reasons: [] });
-    const status = fulfilled.length < tunnelsArray.length
+    };
+    const status = fulfilled.length < delPromises.length ||
+      removedTunnels.length < tunnelsArray.length
       ? 'partially completed' : 'completed';
 
     const desired = delPromises.flat().map(job => job.id);
@@ -1627,12 +1463,9 @@ const applyTunnelDel = async (devices, user, data) => {
       message = `${message} ${Array.from(reasons).join(' ')}`;
     }
 
-    const deletedTunnelNumbers = fulfilled.flat().map(
-      job => job.data.message.tasks[0].params['tunnel-id'].toString());
-
     // resolve tunnel notifications
     await notificationsMgr.resolveNotificationsOfDeletedTunnels(
-      deletedTunnelNumbers, data.org, true);
+      removedTunnels.map(t => t.num), data.org, true);
 
     return { ids: fulfilled.flat().map(job => job.id), status, message };
   } else {
@@ -1645,11 +1478,11 @@ const applyTunnelDel = async (devices, user, data) => {
 /**
  * Deletes a single tunnel.
  * @param  {object}   tunnel     the tunnel object
- * @param  {string}   user       the user id of the requesting user
  * @param  {string}   org        the user's organization
+ * @param  {array}    updateOps  an array of bulk update db operations
  * @return {array}    jobs created
  */
-const delTunnel = async (tunnel, user, org, updateOps) => {
+const delTunnel = (tunnel, org, updateOps) => {
   const { _id, isPending, num, deviceA, deviceB, peer } = tunnel;
 
   // Check if tunnel used by any static route
@@ -1684,13 +1517,6 @@ const delTunnel = async (tunnel, user, org, updateOps) => {
     }
   });
 
-  let tunnelJobs = [];
-
-  // don't send remove jobs for pending tunnels
-  if (!isPending) {
-    tunnelJobs = await sendRemoveTunnelsJobs([tunnel], user);
-  }
-
   // remove the tunnel status from memory
   const deviceStatus = require('../periodic/deviceStatus')();
   deviceStatus.clearTunnelStatus(deviceA.machineId, num);
@@ -1702,8 +1528,6 @@ const delTunnel = async (tunnel, user, org, updateOps) => {
   if (isPending) {
     throw new Error('Tunnel was in pending state');
   }
-
-  return tunnelJobs;
 };
 
 /**
@@ -1858,7 +1682,7 @@ const sync = async (deviceId, org) => {
 
   // Create add-tunnel messages
   const tunnelsRequests = [];
-  const completeCbData = [];
+  const completeCbData = { tunnels: [] };
   let callComplete = false;
   const devicesToSync = [];
   for (const tunnel of tunnels) {
@@ -1896,10 +1720,9 @@ const sync = async (deviceId, org) => {
       deviceId.toString() === deviceA._id.toString()
         ? 'deviceAconf'
         : 'deviceBconf';
-    completeCbData.push({
+    completeCbData.tunnels.push({
       org,
-      username: 'system',
-      tunnelId: num,
+      num,
       target
     });
     callComplete = true;
@@ -2150,88 +1973,66 @@ const prepareTunnelParams = (
 const sendRemoveTunnelsJobs = async (
   tunnels, username = 'system', includeDeviceConfigDependencies = false
 ) => {
-  let tunnelsJobs = [];
-
+  const jobs = [];
+  const jobsData = {};
   for (const tunnel of tunnels) {
-    const { org, deviceA, deviceB, interfaceA, interfaceB, pathlabel, peer } = tunnel;
-
-    const ifcA = tunnel.interfaceADetails ?? deviceA.interfaces.find(ifc => {
-      return ifc._id.toString() === interfaceA.toString();
-    });
-    const ifcB = peer ? null : tunnel.interfaceBDetails ?? deviceB.interfaces.find(ifc => {
-      return ifc._id.toString() === interfaceB.toString();
-    });
-
-    let [tasksDeviceA, tasksDeviceB] = await prepareTunnelRemoveJob(
+    const { deviceA, deviceB, org } = tunnel;
+    const [tasksDeviceA, tasksDeviceB] = await prepareTunnelRemoveJob(
       tunnel,
       includeDeviceConfigDependencies
     );
-
-    if (tasksDeviceA.length > 1) {
-      tasksDeviceA = [{
-        entity: 'agent',
-        message: 'aggregated',
-        params: { requests: tasksDeviceA }
-      }];
-    }
-
-    if (tasksDeviceB.length > 1) {
-      tasksDeviceB = [{
-        entity: 'agent',
-        message: 'aggregated',
-        params: { requests: tasksDeviceB }
-      }];
-    }
-
-    try {
-      let title = '';
-      if (peer) {
-        title = 'Delete peer tunnel between (' +
-        deviceA.hostname +
-        ',' +
-        ifcA.name +
-        ') and peer (' +
-        peer.name +
-        ')';
-      } else {
-        title = 'Delete tunnel between (' +
-        deviceA.hostname +
-        ',' +
-        ifcA.name +
-        ') and (' +
-        deviceB.hostname +
-        ',' +
-        ifcB.name +
-        ')';
-      };
-
-      const removeTunnelJobs = await queueTunnel(
-        false,
-        title,
-        tasksDeviceA,
-        tasksDeviceB,
-        username,
-        org._id,
-        deviceA.machineId,
-        peer ? null : deviceB.machineId,
-        deviceA._id,
-        peer ? null : deviceB._id,
-        tunnel.num,
-        pathlabel,
-        peer
-      );
-      logger.debug('Tunnel jobs queued', {
-        params: { jobA: removeTunnelJobs[0], jobB: removeTunnelJobs[1] }
-      });
-
-      tunnelsJobs = tunnelsJobs.concat(removeTunnelJobs);
-    } catch (err) {
-      logger.error('Delete tunnel error', { params: { reason: err.message } });
-      throw err;
+    for (const [device, tasks] of [
+      [deviceA, tasksDeviceA],
+      [deviceB, tasksDeviceB]
+    ]) {
+      if (tasks.length > 0) {
+        const deviceId = device._id.toString();
+        if (!jobsData[deviceId]) {
+          jobsData[deviceId] = { org, device, tasks: [] };
+        }
+        jobsData[deviceId].tasks.push(...tasks);
+      }
     }
   }
 
-  return tunnelsJobs;
+  for (const deviceId in jobsData) {
+    if (jobsData[deviceId].tasks.length === 0) {
+      continue;
+    }
+
+    const { org, device, tasks } = jobsData[deviceId];
+
+    try {
+      const job = await deviceQueues.addJob(
+        device.machineId,
+        username,
+        org._id,
+        // Data
+        {
+          title: `Remove tunnels for ${device.hostname}`,
+          tasks: tasks
+        },
+        // Response data
+        {
+          method: 'deltunnels',
+          data: null
+        },
+        // Metadata
+        { priority: 'normal', attempts: 1, removeOnComplete: false },
+        // Complete callback
+        null
+      );
+      logger.info('Remove tunnel jobs queued', {
+        params: { deviceId }
+      });
+      jobs.push(job);
+    } catch (err) {
+      logger.error('Failed to queue Remove tunnel jobs', {
+        params: { err: err.message }
+      });
+    };
+  }
+  return jobs;
 };
 
 /**
@@ -2241,84 +2042,68 @@ const sendRemoveTunnelsJobs = async (
  * @return {Array}             array of add-tunnel jobs
  */
 const sendAddTunnelsJobs = async (tunnels, username, includeDeviceConfigDependencies = false) => {
-  let jobs = [];
-  let orgId = null;
-  try {
-    for (const tunnel of tunnels) {
-      orgId = tunnel.org._id;
-
-      const {
-        deviceA,
-        deviceB,
-        num,
-        pathlabel,
-        peer,
-        org
-      } = tunnel;
-
-      let [tasksDeviceA, tasksDeviceB, ifcA, ifcB] = await prepareTunnelAddJob(
-        tunnel, org, includeDeviceConfigDependencies
-      );
-
-      if (tasksDeviceA.length > 1) {
-        tasksDeviceA = [{
-          entity: 'agent',
-          message: 'aggregated',
-          params: { requests: tasksDeviceA }
-        }];
+  const jobs = [];
+  const jobsData = {};
+  for (const tunnel of tunnels) {
+    const { num, deviceA, deviceB, org } = tunnel;
+    const [tasksDeviceA, tasksDeviceB] = await prepareTunnelAddJob(
+      tunnel, org, includeDeviceConfigDependencies
+    );
+    for (const [device, tasks, target] of [
+      [deviceA, tasksDeviceA, 'deviceAconf'],
+      [deviceB, tasksDeviceB, 'deviceBconf']
+    ]) {
+      if (tasks.length > 0) {
+        const deviceId = device._id.toString();
+        if (!jobsData[deviceId]) {
+          jobsData[deviceId] = { org, device, tasks: [], data: { tunnels: [] } };
+        }
+        jobsData[deviceId].tasks.push(...tasks);
+        jobsData[deviceId].data.tunnels.push({
+          org: org._id,
+          num,
+          target
+        });
       }
-
-      if (tasksDeviceB.length > 1) {
-        tasksDeviceB = [{
-          entity: 'agent',
-          message: 'aggregated',
-          params: { requests: tasksDeviceB }
-        }];
-      }
-
-      let title = '';
-      if (peer) {
-        title += 'Create peer tunnel between (' +
-          deviceA.hostname +
-          ',' +
-          ifcA.name +
-          ') and peer (' +
-          peer.name +
-          ')';
-      } else {
-        title += 'Create tunnel between (' +
-          deviceA.hostname +
-          ',' +
-          ifcA.name +
-          ') and (' +
-          deviceB.hostname +
-          ',' +
-          ifcB.name +
-          ')';
-      }
-      const tunnelJobs = await queueTunnel(
-        true,
-        title,
-        tasksDeviceA,
-        tasksDeviceB,
-        username,
-        orgId,
-        deviceA.machineId,
-        peer ? null : deviceB.machineId,
-        deviceA._id,
-        peer ? null : deviceB._id,
-        num,
-        pathlabel,
-        peer
-      );
-
-      jobs = jobs.concat(tunnelJobs);
     }
-  } catch (err) {
-    logger.error('Failed to queue Add tunnel jobs', {
-      params: { err: err.message }
-    });
-  };
+  }
+
+  for (const deviceId in jobsData) {
+    const { org, device, tasks, data } = jobsData[deviceId];
+    if (tasks.length === 0) {
+      continue;
+    }
+
+    try {
+      const job = await deviceQueues.addJob(
+        device.machineId,
+        username,
+        org._id,
+        // Data
+        {
+          title: `Add tunnels for ${device.hostname}`,
+          tasks: tasks
+        },
+        // Response data
+        {
+          method: 'tunnels',
+          data: data
+        },
+        // Metadata
+        { priority: 'normal', attempts: 1, removeOnComplete: false },
+        // Complete callback
+        null
+      );
+      logger.info('Add tunnel jobs queued', {
+        params: { deviceId, tasks, data }
+      });
+      jobs.push(job);
+    } catch (err) {
+      logger.error('Failed to queue Add tunnel jobs', {
+        params: { err: err.message }
+      });
+    };
+  }
   return jobs;
 };
 
