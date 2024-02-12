@@ -262,7 +262,9 @@ const configEnv = {
     // GTM tag in the format of GTM-XXXXXXX
     gtmTag: '',
     // Should we use flexiWAN AI
-    useFlexiAi: false
+    useFlexiAi: false,
+    // Config sent to client to save JWT token in SessionStorage (if true) or LocalStorage (if false)
+    jwtInSessionStorage: false
   },
   // Override for development environment, default environment if not specified
   development: {
@@ -520,7 +522,8 @@ class Configs {
       vpnBaseUrl: vpnBaseUrl + '/',
       registerRedirectUrl: this.get('registerRedirectUrl'),
       gtmTag: this.get('gtmTag'),
-      useFlexiAi: this.get('useFlexiAi')
+      useFlexiAi: this.get('useFlexiAi'),
+      jwtInSessionStorage: this.get('jwtInSessionStorage', 'boolean')
     };
   }
 }
