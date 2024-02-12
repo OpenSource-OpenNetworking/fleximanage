@@ -32,7 +32,7 @@ const logger = require('../logging/logging')({ module: module.filename, type: 'j
  */
 const sendMsg = (org, machineID, msg, job, curTask, tasksLength) => (inp, done) => {
   logger.debug('Starting new task', { params: { message: msg, input: inp }, job: job });
-  connections.deviceSendMessage(org, machineID, msg, undefined, job.id)
+  connections.deviceSendMessage(org, machineID, msg, undefined, `${job.id}/${curTask}`)
     .then((rmsg) => {
       if (rmsg !== null && rmsg.ok === 1) {
         logger.debug('Finished task', { params: { reply: rmsg, jobId: job.id } });
