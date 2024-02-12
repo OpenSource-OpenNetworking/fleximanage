@@ -643,8 +643,8 @@ class DeviceQueues {
   async getOPendingJobsCount (deviceId) {
     let activeCount = 0;
     let inactiveCount = 0;
-    await this.iterateJobs('active', () => activeCount++, deviceId);
-    await this.iterateJobs('inactive', () => inactiveCount++, deviceId);
+    await this.iterateJobs('active', j => j._state === 'active' && activeCount++, deviceId);
+    await this.iterateJobs('inactive', j => j._state === 'inactive' && inactiveCount++, deviceId);
     // this function is called when updating the sync status of connected devices
     // no active job with existing inactive jobs means the queue stuck
     if (activeCount === 0 && inactiveCount > 0) {
