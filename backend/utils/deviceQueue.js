@@ -251,6 +251,12 @@ class DeviceQueues {
       // If onComplete callback defined, set it
       if (onComplete) job.on('complete', (res) => { onComplete(job.id, res); });
 
+      job.on('progress', (progress, data) => {
+        // Update TTL on jobs progress
+        const ttl = Date.now() - job.created_at + configs.get('jobTimeout', 'number');
+        job.ttl(ttl);
+      });
+
       // For init message, wait for completion
       if (init) {
         job
