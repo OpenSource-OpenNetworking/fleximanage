@@ -220,6 +220,9 @@ const handleTunnels = async (
 
         for (let idxA = 0; idxA < deviceAIntfs.length; idxA++) {
           for (let idxB = 0; idxB < deviceBIntfs.length; idxB++) {
+            // prevent CPU resources blocking in large loops
+            await new Promise(resolve => setImmediate(resolve));
+
             const wanIfcA = deviceAIntfs[idxA];
             const wanIfcB = deviceBIntfs[idxB];
             const ifcALabels = wanIfcA.labelsSet;
