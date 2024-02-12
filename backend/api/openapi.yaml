@@ -13909,13 +13909,20 @@ components:
           properties:
             answer:
               type: string
+            found:
+              type: boolean
             sources:
               items:
                 type: string
               type: array
+            tool:
+              type: string
       example:
         session: '1234567'
-        response: 'flexiWAN is an SD-WAN solution'
+        response:
+          answer: 'flexiWAN is an SD-WAN solution'
+          found: true
+          tool: create_tunnels
     AiChatUpdate:
       type: object
       required:

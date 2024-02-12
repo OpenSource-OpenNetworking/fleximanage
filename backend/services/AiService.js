@@ -15,10 +15,12 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+const configs = require('../configs')();
 const Service = require('./Service');
 const FlexiAi = require('../flexiai');
 const aiChatLog = require('../models/analytics/aiChatLog');
 const { getAccessTokenOrgList } = require('../utils/membershipUtils');
+const logger = require('../logging/logging')({ module: module.filename, type: 'req' });
 
 class AiService {
   /**
@@ -27,26 +29,73 @@ class AiService {
    * returns response for the given session
    **/
   static async aiChatQueryPOST ({ session, query, history, org }, { user }) {
+    let response, log;
     try {
+      // History must be even length, each message is Human, Assistant
+      if (history.length % 2 !== 0) throw new Error('History must have even number of elements');
+      // Allow only 3x2 messages in history, check for 6 as each include Human, Assistant
+      if (history.length > 6) throw new Error('History too long, must contain up to 3x2 messages');
       const orgList = await getAccessTokenOrgList(user, org, true);
 
-      const response = await FlexiAi.chatQuery(session, query, history);
-      // const response = { answer: 'test', sources: [] };
+      // Check that account is under its chat quota for this month
+      // Get current month
+      const date = new Date();
+      date.setDate(1);
+      date.setHours(0, 0, 0, 0);
+      const queryMonthCount = await aiChatLog.aggregate([
+        { $match: { account: user.defaultAccount._id, createdAt: { $gte: date } } },
+        { $project: { count: { $size: '$transactions' } } },
+        { $group: { _id: null, total_count: { $sum: '$count' } } }
+      ]).allowDiskUse(true);
+      if (queryMonthCount.length > 0 &&
+        queryMonthCount[0].total_count > configs.get('chatAccountQuota', 'number')) {
+        response = {
+          answer: 'You\'ve reached your query quota limit for this month. ' +
+          'Please contact flexiWAN support for additional quota',
+          sources: [],
+          found: true
+        };
+      } else { // Enough quota
+        response = await FlexiAi.chatQuery(session, query, history);
+        // const response = { answer: 'test', sources: [], found: true };
 
-      const log = await aiChatLog.create({
-        org: orgList[0],
-        session,
-        query,
-        answer: response.answer,
-        sources: response.sources
-      });
+        log = await aiChatLog.findOneAndUpdate({
+          account: user.defaultAccount._id,
+          org: orgList[0],
+          session
+        }, {
+          $push: {
+            transactions: {
+              query,
+              answer: response.answer,
+              found: response.found,
+              sources: response.sources
+            }
+          }
+        }, {
+          upsert: true,
+          new: true,
+          fields: { _id: 1 }
+        });
+      }
+    } catch (e) {
+      logger.error('Chat query error', { params: { message: e.message } });
+      // On error, return response to print the error in the chat
+      response = {
+        answer: 'Error getting response, please try again',
+        sources: [],
+        found: false
+      };
+    }
 
+    try {
       return Service.successResponse({
-        _id: log.id,
+        _id: log?._id || '',
         session,
         response
       });
     } catch (e) {
+      // On error, return success to print the error in the chat
       return Service.rejectResponse(
         e.message || 'Internal Server Error',
         e.status || 500
@@ -71,7 +120,7 @@ class AiService {
       { useFindAndModify: false, upsert: false, new: true });
 
       return Service.successResponse({
-        _id: log.id,
+        _id: log._id,
         session,
         useful: log.useful
       });

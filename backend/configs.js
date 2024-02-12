@@ -232,6 +232,8 @@ const configEnv = {
     // Notification cool down period (3600000ms = 1 hour).
     // Aggregates similar event counts to minimize repetitive notifications within this time frame.
     notificationCoolDownPeriod: 3600000,
+    // AI chat monthly quota per account
+    chatAccountQuota: 100,
     /****************************************************/
     /*         Client Fields                            */
     /****************************************************/

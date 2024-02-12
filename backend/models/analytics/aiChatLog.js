@@ -23,6 +23,12 @@ const mongoConns = require('../../mongoConns.js')();
  * AI Chat Log Schema
  */
 const aiChatLogSchema = new Schema({
+  // Account
+  account: {
+    type: Schema.Types.ObjectId,
+    ref: 'accounts',
+    required: true
+  },
   // Organization
   org: {
     type: Schema.Types.ObjectId,
@@ -34,28 +40,42 @@ const aiChatLogSchema = new Schema({
     type: Schema.Types.String,
     required: true
   },
-  // Query
-  query: {
-    type: Schema.Types.String,
-    required: true
-  },
-  // Answer
-  answer: {
-    type: Schema.Types.String,
-    required: true
+  transactions: {
+    type: [{
+    // Query
+      query: {
+        type: Schema.Types.String,
+        required: true
+      },
+      // Answer
+      answer: {
+        type: Schema.Types.String,
+        required: true
+      },
+      // If answer found
+      found: {
+        type: Boolean,
+        default: true
+      },
+      // List of recommended sources
+      sources: [String]
+    }],
+    default: []
   },
   // Is useful response
   useful: {
     type: Schema.Types.Boolean,
     required: false,
     default: null
-  },
-  // List of recommended sources
-  sources: [String]
+  }
+},
+{
+  timestamps: { createdAt: true, updatedAt: false }
 });
 
 // Indexes
 aiChatLogSchema.index({ session: 1 });
+aiChatLogSchema.index({ createdAt: 1, account: 1 });
 
 const aiChatLog = mongoConns.getAnalyticsDB()
   .model('aiChatLog', aiChatLogSchema);
