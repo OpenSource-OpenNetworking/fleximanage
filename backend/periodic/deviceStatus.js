@@ -870,8 +870,16 @@ class DeviceStatus {
   /**
    * @param  {string} machineId   device machine Id
    * @param  {string} state       device state
-   * @param  {string} reason      a reason for device state (error usually)
+   * @param  {string} reason      device state reason, a stringified object
    * @return {void}
+   * @example device state reason
+   * {
+   *  "reason": "failed to start router",
+   *  "extended":
+   * "failed to add devices to /etc/vpp/startup.conf: vpp_startup_conf_add_dpdk_config(
+   * {'vpp_config_filename': '/etc/vpp/startup.conf', 'devices':
+   * ['pci:0000:00:08.00', 'pci:0000:00:09.00']}): Failed to configure interface",
+   * "job_id": "88985", "received_at": "Jan 30, 2024, 11:33 AM"}
    */
   async setDeviceState (machineId, newState, needToPublish = true, reason = '') {
     // Generate a notification if there was a transition in the device's status
@@ -905,7 +913,7 @@ class DeviceStatus {
       this.setDevicesStatusByOrg(org, deviceId, newState, reason);
     }
     this.setDeviceStatsField(machineId, 'state', newState);
-    this.status[machineId].reason = !reason || JSON.parse(reason);
+    this.status[machineId].reason = reason ? JSON.parse(reason) : {};
     // status updated in memory, publish it to other hosts
     if (needToPublish) {
       connections.publishStatus(machineId, this.status[machineId]);
@@ -1400,7 +1408,7 @@ class DeviceStatus {
    * @param  {string} org       org id
    * @param  {string} deviceID  device id
    * @param  {string} status    status
-   * @param  {string} status    status reason
+   * @param  {string} reason    status reason as a stringified object
    * @return {void}
    */
   setDevicesStatusByOrg (org, deviceID, status, reason = '') {
