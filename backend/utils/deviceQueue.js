@@ -236,9 +236,14 @@ class DeviceQueues {
         jobUpdated: false
       };
 
+      const tasksCount = message.tasks ? message.tasks.length > 1 ? message.tasks.length
+        : message.tasks[0].params.requests?.length ?? 1 : 0;
+      // set TTL as default job timeout plus 1 sec per every task
+      const jobTimeout = configs.get('jobTimeout', 'number') + tasksCount * 1000;
+
       const job = this.queue
-        .create(deviceId, { message, response, metadata })
-        .ttl(configs.get('jobTimeout', 'number') + 60000);
+        .create(deviceId, { title: message.title, message, response, metadata })
+        .ttl(jobTimeout);
 
       if (priority) job.priority(priority);
       if (attempts) job.attempts(attempts);
@@ -529,7 +534,7 @@ class DeviceQueues {
         if (devicesByMachineId[orgJob.type] !== undefined) {
           jobObj.device = devicesByMachineId[orgJob.type];
         }
-        if (orgJob.data.metadata.org === org && (!filters || passFilters(jobObj, filters))) {
+        if (orgJob.data.metadata?.org === org && (!filters || passFilters(jobObj, filters))) {
           if (skipped < skip) skipped += 1;
           else {
             if (callback(orgJob)) return true; // job done
