@@ -557,7 +557,7 @@ const applyTunnelAdd = async (devices, user, data) => {
      * Request body holds the list of devices ids to connect tunnel between
      */
   const selectedDevices = data.devices;
-  const startedAt = Date.now();
+
   logger.info('Creating tunnels between devices', {
     params: { devices: selectedDevices }
   });
@@ -673,6 +673,99 @@ const applyTunnelAdd = async (devices, user, data) => {
     }
   }
 
+  if (!peers && getDesiredTunnelsNumber(opDevices, pathLabels, hub) > 1000) {
+    const startedAt = Date.now();
+    addTunnels(data, user, opDevices, hubIdx).then(({ ids, status, message }) => {
+      logger.debug('Add tunnels operation finished',
+        { params: { ids, status, message, durationMs: Date.now() - startedAt } }
+      );
+    });
+    logger.debug('Adding more than 1000 tunnels in progress');
+    const message = 'Adding more than 1000 tunnels in progress, check the result on the Jobs page.';
+    return { ids: [], status: 'unknown', message };
+  }
+  return await addTunnels(data, user, opDevices, hubIdx);
+};
+
+/**
+ * Quick calculation of desired tunnels number
+ * @param  {Array}    opDevices   an array of the devices
+ * @param  {Array}    pathLabels  an array of the path labels
+ * @param  {string}   hub         id of the hub device
+ * @return {number}   desired number of created tunnels
+ */
+const getDesiredTunnelsNumber = (opDevices, pathLabels, hub) => {
+  let desiredTunnelsNumber = 0;
+  let devicesIfcsCount = 0;
+  let hubIfcsCount = 0;
+  const useLabels = pathLabels.length > 0;
+  const useAllLabels = pathLabels.includes('FFFFFF');
+  const devicesLabels = {};
+  const hubLabels = {};
+  for (const dev of opDevices) {
+    const isHub = (hub && dev._id.toString() === hub);
+    for (const ifc of dev.interfaces) {
+      if (ifc.isAssigned && ifc.type === 'WAN') {
+        if (useLabels) {
+          for (const label of ifc.pathlabels) {
+            const labelId = label._id.toString();
+            if (label.type === 'Tunnel' && (useAllLabels || pathLabels.includes(labelId))) {
+              if (isHub) {
+                hubLabels[labelId] = true;
+              } else {
+                devicesLabels[labelId] = (devicesLabels[labelId] ?? 0) + 1;
+              }
+            }
+          }
+        } else {
+          if (isHub) {
+            hubIfcsCount++;
+          } else {
+            devicesIfcsCount++;
+          }
+        }
+      }
+    }
+  };
+  if (hub) {
+    if (useLabels) {
+      for (const labelId in hubLabels) {
+        if (devicesLabels[labelId]) {
+          desiredTunnelsNumber += devicesLabels[labelId];
+        }
+      }
+    } else {
+      desiredTunnelsNumber = hubIfcsCount * devicesIfcsCount;
+    }
+  } else {
+    if (useLabels) {
+      for (const labelId in devicesLabels) {
+        desiredTunnelsNumber += devicesLabels[labelId] * (devicesLabels[labelId] - 1) / 2;
+      }
+    } else {
+      desiredTunnelsNumber = devicesIfcsCount * (devicesIfcsCount - 1) / 2;
+    }
+  }
+  return desiredTunnelsNumber;
+};
+
+/**
+ * Handles adding tunnels
+ * @async
+ * @param  {Array}    opDevices an array of the devices
+ * @param  {Object}   user      User object
+ * @param  {Object}   data      Additional data used by caller
+ * @param  {number}   hubIdx    index of the hub device in opDevices array or -1
+ * @return {None}
+ */
+
+const addTunnels = async (opDevices, user, data, hubIdx) => {
+  const {
+    pathLabels, advancedOptions, tunnelType,
+    peers, topology, notificationsSettings = null
+  } = data.meta;
+  const isPeer = tunnelType === 'peer';
+
   let dbTasks = [];
   const userName = user.username;
   const org = data.org;
@@ -693,35 +786,6 @@ const applyTunnelAdd = async (devices, user, data) => {
   }
 
   const tunnels = [];
-
-  if (dbTasks.length > 1000) {
-    Promise.allSettled(dbTasks).then(promiseStatus => {
-      let failed = 0;
-      promiseStatus.forEach(elem => {
-        if (elem.status !== 'fulfilled') {
-          failed++;
-          logger.error('Add tunnel error',
-            { params: { error: elem.reason.message } }
-          );
-        } else {
-          tunnels.push(elem.value);
-        };
-      });
-      sendAddTunnelsJobs(tunnels, userName).then(jobs => {
-        const completed = jobs.length;
-        logger.debug('Add tunnels operation finished',
-          { params: { completed, failed, durationMs: Date.now() - startedAt } }
-        );
-      });
-    });
-    logger.debug('Adding more than 1000 tunnels in progress',
-      { params: { tunnels: dbTasks.length } });
-    let message = 'Adding more than 1000 tunnels in progress, check the result on the Jobs page.';
-    if (reasons.size > 0) {
-      message = `${message} ${Array.from(reasons).join(' ')}`;
-    }
-    return { ids: [], status: 'unknown', message };
-  }
 
   // Execute all promises
   logger.debug('Running tunnel promises', { params: { tunnels: dbTasks.length } });
