@@ -378,7 +378,7 @@ const validateConfiguration = (deviceInterface, configurationReq) => {
  * @param {array}  interfaces - interfaces of the device to check for device-specific rules
  * @return {{valid: boolean, err: string}}  test result + error, if rules are invalid
  */
-const validateFirewallRules = (rules, org, interfaces = undefined) => {
+const validateFirewallRules = (rules, org, interfaces = []) => {
   const inboundRuleTypes = ['edgeAccess', 'portForward', 'nat1to1'];
 
   const tunnelPort = +getOrgDefaultTunnelPort(org);
