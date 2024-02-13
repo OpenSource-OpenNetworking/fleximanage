@@ -1809,7 +1809,7 @@ const _isNeedToSkipModifyJob = (messageParams, modifiedIfcsMap, device) => {
 
 const processModifyJob = async (tasks, device, orgId, user, ignoreTasks = [], jobResponse = {}) => {
   // during the process, can be duplications in tasks so here we clean it
-  let finalTasks = uniqWith(tasks, isEqual);
+  const finalTasks = uniqWith(tasks, isEqual);
 
   // remove the ignored tasks
   // "ignoreTasks" is array of tasks that should be removed from the final list.
@@ -1825,15 +1825,6 @@ const processModifyJob = async (tasks, device, orgId, user, ignoreTasks = [], jo
 
   if (finalTasks.length === 0) {
     return { modifyJob: null, finalTasks: null };
-  }
-
-  if (finalTasks.length > 1) {
-    // convert the tasks to one aggregated request
-    finalTasks = [{
-      entity: 'agent',
-      message: 'aggregated',
-      params: { requests: finalTasks }
-    }];
   }
 
   try {
