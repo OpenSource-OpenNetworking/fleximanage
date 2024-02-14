@@ -667,7 +667,7 @@ class MembersService {
           line-height:1.5;border-radius:.25rem;
           cursor:pointer">Set Password</button></a></p>`
           // eslint-disable-next-line max-len
-          : `<br>You can login to <a href=${restUiUrl}> flexiManage </a> with your current account credentials to access it.</br>`) +
+          : `<br>You can login to <a href=${restUiUrl}>flexiManage</a> with your current account credentials to access it.</br>`) +
           (`<p>Your friends @ ${configs.get('companyName')}</p>`));
 
       await session.commitTransaction();
