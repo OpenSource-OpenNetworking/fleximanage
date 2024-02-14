@@ -675,7 +675,7 @@ const applyTunnelAdd = async (devices, user, data) => {
 
   if (!peers && getDesiredTunnelsNumber(opDevices, pathLabels, hub) > 1000) {
     const startedAt = Date.now();
-    addTunnels(data, user, opDevices, hubIdx).then(({ ids, status, message }) => {
+    addTunnels(opDevices, user, data, hubIdx).then(({ ids, status, message }) => {
       logger.debug('Add tunnels operation finished',
         { params: { ids, status, message, durationMs: Date.now() - startedAt } }
       );
@@ -684,7 +684,7 @@ const applyTunnelAdd = async (devices, user, data) => {
     const message = 'Adding more than 1000 tunnels in progress, check the result on the Jobs page.';
     return { ids: [], status: 'unknown', message };
   }
-  return await addTunnels(data, user, opDevices, hubIdx);
+  return await addTunnels(opDevices, user, data, hubIdx);
 };
 
 /**
