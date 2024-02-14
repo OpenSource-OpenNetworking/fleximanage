@@ -55,6 +55,12 @@ const interfacesSchema = new Schema({
     },
     required: [true, 'Interface name must be set']
   },
+  // interface description
+  description: {
+    type: String,
+    default: '',
+    required: false
+  },
   // Device bus address
   devId: {
     type: String,

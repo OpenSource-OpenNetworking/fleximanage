@@ -11308,6 +11308,8 @@ components:
           type: string
         name:
           type: string
+        description:
+          type: string
         IPv6Mask:
           type: string
         pathlabels:

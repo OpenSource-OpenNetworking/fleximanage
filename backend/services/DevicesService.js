@@ -210,6 +210,7 @@ class DevicesService {
           'driver',
           'IPv4Mask',
           'name',
+          'description',
           'devId',
           'parentDevId',
           'vlanTag',
