@@ -188,12 +188,17 @@ class DeviceStatus {
       }).allow({}).optional(),
       dhcp: Joi.object({
         leases: Joi.array().items(Joi.object({
-          MAC: Joi.string(),
-          IP: Joi.string(),
-          HOSTNAME: Joi.string(),
-          BEGIN: Joi.string(),
-          END: Joi.string(),
-          MANUFACTURER: Joi.string()
+          hwaddr: Joi.string().allow(''),
+          address: Joi.string().allow(''),
+          client_id: Joi.string().allow(''),
+          valid_lifetime: Joi.string().allow(''),
+          expire: Joi.string().allow(''),
+          subnet_id: Joi.string().allow(''),
+          fqdn_fwd: Joi.string().allow(''),
+          fqdn_rev: Joi.string().allow(''),
+          hostname: Joi.string().allow(''),
+          state: Joi.string().allow(''),
+          user_context: Joi.string().allow('')
         })).optional()
       }).optional()
     });
