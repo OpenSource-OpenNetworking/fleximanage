@@ -33,7 +33,6 @@ const dummyVersionObject = {
   },
   versionDeadline: new Date(0)
 };
-const connections = require('../websocket/Connections')();
 
 /***
  * This class serves as the software update manager, responsible for
@@ -89,7 +88,7 @@ class SwVersionUpdateManager {
           $group: {
             _id: '$org',
             devices: {
-              $push: { _id: '$$ROOT._id', machineId: '$$ROOT.machineId' }
+              $push: { _id: '$$ROOT._id', name: '$$ROOT.name' }
             }
           }
         }
@@ -97,12 +96,10 @@ class SwVersionUpdateManager {
 
       for (const orgDevices of orgDevicesList) {
         for (const device of orgDevices.devices) {
-          const deviceInfo = connections.getDeviceInfo(device.machineId);
-          const { name } = deviceInfo;
           notifications.push({
             org: orgDevices._id,
             title: 'Device upgrade',
-            details: `The device ${name} requires an upgrade to version ${versions.device}`,
+            details: `The device ${device.name} requires an upgrade to version ${versions.device}`,
             targets: {
               deviceId: device._id,
               tunnelId: null,
