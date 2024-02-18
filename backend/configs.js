@@ -258,7 +258,9 @@ const configEnv = {
     // Post registration redirect URL
     registerRedirectUrl: '',
     // GTM tag in the format of GTM-XXXXXXX
-    gtmTag: ''
+    gtmTag: '',
+    // Config sent to client to save JWT token in SessionStorage (if true) or LocalStorage (if false)
+    jwtInSessionStorage: false
   },
   // Override for development environment, default environment if not specified
   development: {
@@ -515,7 +517,8 @@ class Configs {
       qualifiedAccountsURL: this.get('qualifiedAccountsURL'),
       vpnBaseUrl: vpnBaseUrl + '/',
       registerRedirectUrl: this.get('registerRedirectUrl'),
-      gtmTag: this.get('gtmTag')
+      gtmTag: this.get('gtmTag'),
+      jwtInSessionStorage: this.get('jwtInSessionStorage', 'boolean')
     };
   }
 }

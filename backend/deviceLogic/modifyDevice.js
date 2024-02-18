@@ -1375,14 +1375,20 @@ const apply = async (device, user, data) => {
   const updNatRules = [];
   const origNatRules = [];
   for (const rule of updDevice.firewall.rules.toObject()) {
-    if (rule.direction === 'lanNat' && rule.enabled) {
+    if (!rule.enabled) {
+      continue;
+    }
+    if (rule.direction === 'lanNat') {
       updNatRules.push(rule);
     } else {
       updFwRules.push(rule);
     }
   }
   for (const rule of origDevice.firewall.rules.toObject()) {
-    if (rule.direction === 'lanNat' && rule.enabled) {
+    if (!rule.enabled) {
+      continue;
+    }
+    if (rule.direction === 'lanNat') {
       origNatRules.push(rule);
     } else {
       origFwRules.push(rule);
@@ -1415,11 +1421,11 @@ const apply = async (device, user, data) => {
     !(updNatRules.length === origNatRules.length && updNatRules.every((updatedRule, index) =>
       isEqual(
         omit(updatedRule.classification?.source, ['_id']),
-        omit(origFwRules[index]?.classification?.source, ['_id'])
+        omit(origNatRules[index]?.classification?.source, ['_id'])
       ) &&
       isEqual(
         omit(updatedRule.classification?.destination, ['_id']),
-        omit(origFwRules[index]?.classification?.destination, ['_id'])
+        omit(origNatRules[index]?.classification?.destination, ['_id'])
       )
     ));
 
