@@ -306,10 +306,11 @@ class TunnelsService {
               }
             ).session(session);
 
+            const isPeer = tunnel.peer;
             const majorVersionA = getMajorVersion(tunnel.deviceA.versions.agent);
-            const majorVersionB = getMajorVersion(tunnel.deviceB.versions.agent);
+            const majorVersionB = !isPeer ? getMajorVersion(tunnel.deviceB.versions.agent) : 0;
             const minorVersionA = getMinorVersion(tunnel.deviceA.versions.agent);
-            const minorVersionB = getMinorVersion(tunnel.deviceB.versions.agent);
+            const minorVersionB = !isPeer ? getMinorVersion(tunnel.deviceB.versions.agent) : 0;
 
             const isDeviceAVersionSupported =
                     (majorVersionA > 6 || (majorVersionA === 6 && minorVersionA >= 3));
