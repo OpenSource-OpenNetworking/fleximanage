@@ -69,6 +69,8 @@ class AiService {
               query,
               answer: response.answer,
               found: response.found,
+              isQuestion: response.isQuestion,
+              tool: response.tool,
               sources: response.sources
             }
           }
@@ -120,9 +122,9 @@ class AiService {
       { useFindAndModify: false, upsert: false, new: true });
 
       return Service.successResponse({
-        _id: log._id,
+        _id: log?._id || '',
         session,
-        useful: log.useful
+        useful: useful
       });
     } catch (e) {
       return Service.rejectResponse(

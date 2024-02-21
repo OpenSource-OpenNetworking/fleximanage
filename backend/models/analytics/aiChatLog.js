@@ -57,6 +57,14 @@ const aiChatLogSchema = new Schema({
         type: Boolean,
         default: true
       },
+      isQuestion: {
+        type: Boolean,
+        default: true
+      },
+      tool: {
+        type: Schema.Types.String,
+        default: ''
+      },
       // List of recommended sources
       sources: [String]
     }],

@@ -262,7 +262,7 @@ const configEnv = {
     // GTM tag in the format of GTM-XXXXXXX
     gtmTag: '',
     // Should we use flexiWAN AI
-    useFlexiAi: false,
+    useFlexiAi: true,
     // Config sent to client to save JWT token in SessionStorage (if true) or LocalStorage (if false)
     jwtInSessionStorage: false
   },

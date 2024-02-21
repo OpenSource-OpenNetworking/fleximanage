@@ -13915,6 +13915,8 @@ components:
               items:
                 type: string
               type: array
+            isQuestion:
+              type: boolean
             tool:
               type: string
       example:
@@ -13922,6 +13924,7 @@ components:
         response:
           answer: 'flexiWAN is an SD-WAN solution'
           found: true
+          isQuestion: true
           tool: create_tunnels
     AiChatUpdate:
       type: object
