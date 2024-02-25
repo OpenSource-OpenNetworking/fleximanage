@@ -80,6 +80,11 @@ const deviceProcessor = async (job) => {
   const mId = job.data.metadata.target;
   const org = job.data.metadata.org;
   return new Promise((resolve, reject) => {
+    if (job.data.message.ready === false) {
+      // for heavy requests an empty job is created and tasks are pushed dynamically
+      logger.info('Waiting for tasks', { params: { job } });
+      return resolve(false);
+    }
     operations.push((callback) => { callback(null, 'Start Job Tasks, job ID=' + job.id); });
     tasks.forEach((task) => {
       operations.push(devUtils.sendMsg(org, mId, task, job, ++curTask, tasksLength));
