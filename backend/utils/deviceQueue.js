@@ -237,9 +237,9 @@ class DeviceQueues {
       };
 
       const tasksCount = message.tasks ? message.tasks.length > 1 ? message.tasks.length
-        : message.tasks[0].params.requests?.length ?? 1 : 0;
-      // set TTL as default job timeout plus 1 sec per every task
-      const jobTimeout = configs.get('jobTimeout', 'number') + tasksCount * 1000;
+        : message.tasks[0]?.params?.requests?.length ?? 1 : 0;
+      // set TTL as default job timeout plus 5 sec per every task
+      const jobTimeout = configs.get('jobTimeout', 'number') + tasksCount * 5000;
 
       const job = this.queue
         .create(deviceId, { title: message.title, message, response, metadata })
