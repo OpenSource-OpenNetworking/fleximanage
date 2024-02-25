@@ -74,7 +74,6 @@ class DeviceStatus {
     this.devicesStatusReasonByOrg = {};
     this.setDevicesStatusByOrg = this.setDevicesStatusByOrg.bind(this);
     this.getDevicesStatusByOrg = this.getDevicesStatusByOrg.bind(this);
-    this.getDevicesStatusReasonByOrg = this.getDevicesStatusReasonByOrg.bind(this);
     this.clearDevicesStatusByOrg = this.clearDevicesStatusByOrg.bind(this);
 
     this.tunnelsStatusByOrg = {};
@@ -913,7 +912,14 @@ class DeviceStatus {
       this.setDevicesStatusByOrg(org, deviceId, newState, reason);
     }
     this.setDeviceStatsField(machineId, 'state', newState);
-    this.status[machineId].reason = reason ? JSON.parse(reason) : {};
+    try {
+      this.status[machineId].reason = reason ? JSON.parse(reason) : {};
+    } catch (error) {
+      logger.debug('failed to get router failure reason', {
+        params: { reason }
+      });
+    }
+
     // status updated in memory, publish it to other hosts
     if (needToPublish) {
       connections.publishStatus(machineId, this.status[machineId]);
@@ -1441,10 +1447,6 @@ class DeviceStatus {
    */
   getDevicesStatusByOrg (org) {
     return this.devicesStatusByOrg[org];
-  }
-
-  getDevicesStatusReasonByOrg (org) {
-    return this.devicesStatusReasonByOrg[org];
   }
 
   /**

@@ -172,24 +172,6 @@ class StatusesInDb {
           });
         }
       }
-
-      const devicesStatusesReasons = deviceStatus.getDevicesStatusReasonByOrg(org);
-      if (devicesStatusesReasons && Object.keys(devicesStatusesReasons).length > 0) {
-        const devicesByStateReason = {};
-        for (const deviceId in devicesStatusesReasons) {
-          const reason = devicesStatusesReasons[deviceId];
-          if (!devicesByStateReason[reason]) devicesByStateReason[reason] = [];
-          devicesByStateReason[reason].push(mongoose.Types.ObjectId(deviceId));
-        }
-        for (const reason in devicesByStateReason) {
-          updateDiffs.push({
-            updateMany: {
-              filter: { _id: { $in: devicesByStateReason[reason] } },
-              update: { $set: { reason: reason } }
-            }
-          });
-        }
-      }
     }
     if (updateDiffs.length > 0) {
       // Clear diff in memory before the db update
