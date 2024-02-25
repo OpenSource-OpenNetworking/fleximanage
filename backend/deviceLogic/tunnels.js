@@ -68,13 +68,14 @@ const intersectIfcLabels = (ifcLabelsA, ifcLabelsB) => {
  * @param  {Object}   advancedOptions advanced tunnel options: MTU, MSS Clamp, OSPF cost, routing
  * @param  {String}   topology topology of created tunnels (hubAndSpoke|fullMesh)
  * @param  {Number}   hubIdx index of the hub in 'Hub and Spoke' topology
+ * @param  {Object}   tunnelsJobs a dictionary of prepared tunnels jobs and reasons by deviceId
  * @param  {set}      reasons reference to Set of reasons
  * @param  {Dictionary}   notificationsSettings an object of notification settings
  * @return {array}    A promises array of tunnels creations
  */
 const handleTunnels = async (
   org, userName, opDevices, pathLabels,
-  advancedOptions, topology, hubIdx, reasons, notificationsSettings = null
+  advancedOptions, topology, hubIdx, tunnelsJobs, reasons, notificationsSettings = null
 ) => {
   const devicesLen = opDevices.length;
   const tasks = [];
@@ -152,6 +153,12 @@ const handleTunnels = async (
           params: { reason: 'Router version mismatch', versions: { verA: verA, verB: verB } }
         });
         reasons.add('Router version mismatch for some devices.');
+        tunnelsJobs[deviceB._id].reasons.add(
+          `Router version mismatch with ${deviceA.hostname}`
+        );
+        tunnelsJobs[deviceA._id].reasons.add(
+          `Router version mismatch with ${deviceB.hostname}`
+        );
         continue;
       }
 
@@ -186,6 +193,7 @@ const handleTunnels = async (
               params: { reason, machineId: device.machineId }
             });
             reasons.add(`${reason} on some of devices.`);
+            tunnelsJobs[device._id].reasons.add(reason);
             ikev2Validated = false;
           }
         }
@@ -241,12 +249,24 @@ const handleTunnels = async (
                 if (tunnelExists[tunnelKey] || tunnelExists[tunnelKey2]) {
                   logger.debug('Found tunnel', { params: { tunnelKey } });
                   reasons.add('Some tunnels exist already.');
+                  tunnelsJobs[deviceA._id].reasons.add(
+                    `Tunnel with ${deviceB.hostname} on ${wanIfcB.name} exists already`
+                  );
+                  tunnelsJobs[deviceB._id].reasons.add(
+                    `Tunnel with ${deviceA.hostname} on ${wanIfcA.name} exists already`
+                  );
                 } else if ((tunnelsPerDevice[deviceA._id] ?? 0) > MAX_TUNNELS_PER_DEVICE - 1) {
                   logger.warn('Exceeded limit of tunnels on device', { params: { deviceA } });
                   reasons.add(`Exceeded limit of ${MAX_TUNNELS_PER_DEVICE} tunnels per device.`);
+                  tunnelsJobs[deviceA._id].reasons.add(
+                    `Exceeded limit of ${MAX_TUNNELS_PER_DEVICE} tunnels per device`
+                  );
                 } else if ((tunnelsPerDevice[deviceB._id] ?? 0) > MAX_TUNNELS_PER_DEVICE - 1) {
                   logger.warn('Exceeded limit of tunnels on device', { params: { deviceB } });
                   reasons.add(`Exceeded limit of ${MAX_TUNNELS_PER_DEVICE} tunnels per device.`);
+                  tunnelsJobs[deviceB._id].reasons.add(
+                    `Exceeded limit of ${MAX_TUNNELS_PER_DEVICE} tunnels per device`
+                  );
                 } else {
                   tunnelsPerDevice[deviceA._id] = (tunnelsPerDevice[deviceA._id] ?? 0) + 1;
                   tunnelsPerDevice[deviceB._id] = (tunnelsPerDevice[deviceB._id] ?? 0) + 1;
@@ -259,6 +279,16 @@ const handleTunnels = async (
                 reasons.add(
                   'No Path Labels specified but some devices have interfaces with Path Labels.'
                 );
+                if (ifcALabels.size > 0) {
+                  tunnelsJobs[deviceA._id].reasons.add(
+                    `Path Labels specified on interface ${wanIfcA.name}`
+                  );
+                }
+                if (ifcBLabels.size > 0) {
+                  tunnelsJobs[deviceB._id].reasons.add(
+                    `Path Labels specified on interface ${wanIfcB.name}`
+                  );
+                }
               }
             } else {
               // Create a list of path labels that are common to both interfaces.
@@ -278,14 +308,26 @@ const handleTunnels = async (
                 if (tunnelExists[tunnelKey] || tunnelExists[tunnelKey2]) {
                   logger.debug('Found tunnel', { params: { tunnelKey } });
                   reasons.add('Some tunnels exist already.');
+                  tunnelsJobs[deviceA._id].reasons.add(
+                    `Tunnel with ${deviceB.hostname} on ${wanIfcB.name} exists already`
+                  );
+                  tunnelsJobs[deviceB._id].reasons.add(
+                    `Tunnel with ${deviceA.hostname} on ${wanIfcA.name} exists already`
+                  );
                   continue;
                 } else if ((tunnelsPerDevice[deviceA._id] ?? 0) > MAX_TUNNELS_PER_DEVICE - 1) {
                   logger.warn('Exceeded limit of tunnels on device', { params: { deviceA } });
                   reasons.add(`Exceeded limit of ${MAX_TUNNELS_PER_DEVICE} tunnels per device.`);
+                  tunnelsJobs[deviceA._id].reasons.add(
+                    `Exceeded limit of ${MAX_TUNNELS_PER_DEVICE} tunnels per device`
+                  );
                   continue;
                 } else if ((tunnelsPerDevice[deviceB._id] ?? 0) > MAX_TUNNELS_PER_DEVICE - 1) {
                   logger.warn('Exceeded limit of tunnels on device', { params: { deviceB } });
                   reasons.add(`Exceeded limit of ${MAX_TUNNELS_PER_DEVICE} tunnels per device.`);
+                  tunnelsJobs[deviceA._id].reasons.add(
+                    `Exceeded limit of ${MAX_TUNNELS_PER_DEVICE} tunnels per device`
+                  );
                   continue;
                 }
                 tunnelsPerDevice[deviceA._id] = (tunnelsPerDevice[deviceA._id] ?? 0) + 1;
@@ -302,6 +344,12 @@ const handleTunnels = async (
 
         if (!isFoundInterfacesWithCommonLabels) {
           reasons.add('Some devices have interfaces without specified Path Labels.');
+          tunnelsJobs[deviceA._id].reasons.add(
+            `No Path Labels intersection with ${deviceB.hostname}`
+          );
+          tunnelsJobs[deviceB._id].reasons.add(
+            `No Path Labels intersection with ${deviceA.hostname}`
+          );
         }
       } else {
         logger.info('Failed to connect tunnel between devices', {
@@ -312,6 +360,12 @@ const handleTunnels = async (
           }
         });
         reasons.add('Some devices have no valid WAN interfaces.');
+        if (deviceAIntfs.length === 0) {
+          tunnelsJobs[deviceA._id].reasons.add('No valid WAN interfaces');
+        }
+        if (deviceBIntfs.length === 0) {
+          tunnelsJobs[deviceB._id].reasons.add('No valid WAN interfaces');
+        }
       }
     }
   }
@@ -328,11 +382,12 @@ const handleTunnels = async (
  * @param  {array}    pathLabels array of selected path labels
  * @param  {Object}   advancedOptions advanced tunnel options: MTU, MSS Clamp, OSPF cost, routing
  * @param  {array}    peersIds array of peers ids
+ * @param  {Object}   tunnelsJobs a dictionary of prepared tunnels jobs and reasons by deviceId
  * @param  {set}      reasons reference to Set of reasons
  * @return {array}    A promises array of tunnels creations
  */
 const handlePeers = async (
-  org, userName, opDevices, pathLabels, advancedOptions, peersIds, reasons
+  org, userName, opDevices, pathLabels, advancedOptions, peersIds, tunnelsJobs, reasons
 ) => {
   const tasks = [];
 
@@ -362,6 +417,9 @@ const handlePeers = async (
     if (majorAgentVersion < 5) {
       reasons.add('Selected devices do not run required flexiWAN version for peering. ' +
         'Please upgrade and try again');
+      tunnelsJobs[device._id].reasons.add(
+        'Peer tunnels supported from major version 5'
+      );
       continue;
     };
 
@@ -378,6 +436,7 @@ const handlePeers = async (
         }
       });
       reasons.add('Some devices have no valid WAN interfaces.');
+      tunnelsJobs[device._id].reasons.add('No valid WAN interfaces');
       continue;
     }
 
@@ -409,6 +468,9 @@ const handlePeers = async (
             params: { device: device.hostname, interface: wanIfc.name, reason }
           });
           reasons.add(reason);
+          tunnelsJobs[device._id].reasons.add(
+            `No Path Labels specified on interface ${wanIfc.name}`
+          );
           continue;
         }
 
@@ -420,12 +482,18 @@ const handlePeers = async (
             logger.debug('Found same peer in the device', { params: { peer: peer } });
             reasons.add(`A peer tunnel with the selected profile (${peer.name}) \
             already exists in the selected devices (${device.name}). `);
+            tunnelsJobs[device._id].reasons.add(
+              `A peer tunnel (${peer.name}) exists already`
+            );
             continue;
           }
 
           const srcDst = `${wanIfc.IPv4}_${peer.remoteIP}`;
           if (srcDst in srcDstKeys) {
             reasons.add('Some peer tunnels with same source and destination IP already exists. ');
+            tunnelsJobs[device._id].reasons.add(
+              `A peer tunnel with ${wanIfc.IPv4} and ${peer.remoteIP} exists already`
+            );
             continue;
           }
 
@@ -451,6 +519,9 @@ const handlePeers = async (
                 }
               });
             reasons.add('The system skipped interfaces that have multiple path labels.');
+            tunnelsJobs[device._id].reasons.add(
+              `The ${wanIfc.name} interface has multiple path labels`
+            );
             continue;
           }
         }
@@ -470,12 +541,18 @@ const handlePeers = async (
               logger.debug('Found same peer in the device', { params: { peer: peer } });
               reasons.add(`A peer tunnel with the selected profile (${peer.name}) \
               already exists in the selected device (${device.name}). `);
+              tunnelsJobs[device._id].reasons.add(
+                `A peer tunnel (${peer.name}) exists already`
+              );
               continue;
             }
 
             const srcDst = `${wanIfc.IPv4}_${peer.remoteIP}`;
             if (srcDst in srcDstKeys) {
               reasons.add('Some peer tunnels with same source and destination IP already exists. ');
+              tunnelsJobs[device._id].reasons.add(
+                `A peer tunnel with ${wanIfc.IPv4} and ${peer.remoteIP} exists already`
+              );
               continue;
             }
 
@@ -490,6 +567,9 @@ const handlePeers = async (
     }
     if (!isFoundInterfacesWithSpecifiedLabels) {
       reasons.add('Some devices have interfaces without specified Path Labels.');
+      tunnelsJobs[device._id].reasons.add(
+        'None of the selected Path Labels is set on the device'
+      );
     }
   }
 
@@ -673,9 +753,46 @@ const applyTunnelAdd = async (devices, user, data) => {
     }
   }
 
+  const tunnelsJobs = {};
+  for (const device of opDevices) {
+    const { _id: deviceId, machineId, hostname } = device;
+    try {
+      const job = await deviceQueues.addJob(
+        machineId,
+        user.username,
+        data.org,
+        // Data
+        {
+          title: `Add tunnels on ${hostname}`,
+          tasks: [{
+            message: 'Preparation of tunnel tasks'
+          }],
+          ready: false
+        },
+        // Response data
+        {
+          method: 'tunnels',
+          data: {}
+        },
+        // Metadata
+        { priority: 'normal', attempts: 1, removeOnComplete: false },
+        // Complete callback
+        null
+      );
+      logger.info('Add tunnels job created', {
+        params: { deviceId, machineId, hostname, job }
+      });
+      tunnelsJobs[deviceId] = { job, reasons: new Set() };
+    } catch (err) {
+      logger.error('Failed to create Add tunnels job', {
+        params: { err: err.message }
+      });
+    };
+  }
+
   if (!peers && getDesiredTunnelsNumber(opDevices, pathLabels, hub) > 1000) {
     const startedAt = Date.now();
-    addTunnels(opDevices, user, data, hubIdx).then(({ ids, status, message }) => {
+    addTunnels(opDevices, user, data, hubIdx, tunnelsJobs).then(({ ids, status, message }) => {
       logger.debug('Add tunnels operation finished',
         { params: { ids, status, message, durationMs: Date.now() - startedAt } }
       );
@@ -684,7 +801,8 @@ const applyTunnelAdd = async (devices, user, data) => {
     const message = 'Adding more than 1000 tunnels in progress, check the result on the Jobs page.';
     return { ids: [], status: 'unknown', message };
   }
-  return await addTunnels(opDevices, user, data, hubIdx);
+  const { ids, status, message } = await addTunnels(opDevices, user, data, hubIdx, tunnelsJobs);
+  return { ids, status, message };
 };
 
 /**
@@ -756,10 +874,11 @@ const getDesiredTunnelsNumber = (opDevices, pathLabels, hub) => {
  * @param  {Object}   user      User object
  * @param  {Object}   data      Additional data used by caller
  * @param  {number}   hubIdx    index of the hub device in opDevices array or -1
+ * @param  {Object}   tunnelsJobs a dictionary of prepared tunnels jobs and reasons by deviceId
  * @return {None}
  */
 
-const addTunnels = async (opDevices, user, data, hubIdx) => {
+const addTunnels = async (opDevices, user, data, hubIdx, tunnelsJobs = {}) => {
   const {
     pathLabels, advancedOptions, tunnelType,
     peers, topology, notificationsSettings = null
@@ -776,12 +895,12 @@ const addTunnels = async (opDevices, user, data, hubIdx) => {
 
   if (isPeer) {
     const tasks = await handlePeers(
-      org, userName, opDevices, pathLabels, advancedOptions, peers, reasons);
+      org, userName, opDevices, pathLabels, advancedOptions, peers, tunnelsJobs, reasons);
     dbTasks = dbTasks.concat(tasks);
   } else {
     const tasks = await handleTunnels(
       org, userName, opDevices, pathLabels, advancedOptions,
-      topology, hubIdx, reasons, notificationsSettings);
+      topology, hubIdx, tunnelsJobs, reasons, notificationsSettings);
     dbTasks = dbTasks.concat(tasks);
   }
 
@@ -799,7 +918,7 @@ const addTunnels = async (opDevices, user, data, hubIdx) => {
     };
   };
 
-  const jobs = await sendAddTunnelsJobs(tunnels, userName);
+  const jobs = await sendAddTunnelsJobs(tunnels, userName, false, tunnelsJobs);
   const status = jobs.length < dbTasks.length
     ? 'partially completed' : 'completed';
 
@@ -2076,7 +2195,7 @@ const sendRemoveTunnelsJobs = async (
         org._id,
         // Data
         {
-          title: `Remove tunnels for ${device.hostname}`,
+          title: `Remove tunnels on ${device.hostname}`,
           tasks: tasks
         },
         // Response data
@@ -2106,9 +2225,12 @@ const sendRemoveTunnelsJobs = async (
  * Send tunnels add jobs
  * @param  {Array}   tunnelIds an array of ids of the tunnels to create
  * @param  {string}  username  the name of the user that requested the device change
+ * @param  {Object}  tunnelsJobs a dictionary of prepared tunnels jobs and reasons by deviceId
  * @return {Array}             array of add-tunnel jobs
  */
-const sendAddTunnelsJobs = async (tunnels, username, includeDeviceConfigDependencies = false) => {
+const sendAddTunnelsJobs = async (
+  tunnels, username, includeDeviceConfigDependencies = false, tunnelsJobs = {}
+) => {
   const jobs = [];
   const jobsData = {};
   for (const tunnel of tunnels) {
@@ -2140,6 +2262,22 @@ const sendAddTunnelsJobs = async (tunnels, username, includeDeviceConfigDependen
     if (tasks.length === 0) {
       continue;
     }
+    if (tunnelsJobs[deviceId]) {
+      // only update data of the existing job
+      const { job } = tunnelsJobs[deviceId];
+      job.data.message.tasks = tasks;
+      job.data.message.ready = true;
+      job.data.response.data = data;
+
+      job.update(() => {
+        logger.info('Add tunnels job updated', {
+          params: { deviceId, job }
+        });
+      });
+
+      jobs.push(job);
+      continue;
+    }
 
     try {
       const job = await deviceQueues.addJob(
@@ -2148,7 +2286,7 @@ const sendAddTunnelsJobs = async (tunnels, username, includeDeviceConfigDependen
         org._id,
         // Data
         {
-          title: `Add tunnels for ${device.hostname}`,
+          title: `Add tunnels on ${device.hostname}`,
           tasks: tasks
         },
         // Response data
@@ -2161,16 +2299,29 @@ const sendAddTunnelsJobs = async (tunnels, username, includeDeviceConfigDependen
         // Complete callback
         null
       );
-      logger.info('Add tunnel jobs queued', {
+      logger.info('Add tunnels job queued', {
         params: { deviceId, tasks, data }
       });
       jobs.push(job);
     } catch (err) {
-      logger.error('Failed to queue Add tunnel jobs', {
+      logger.error('Failed to queue Add tunnels job', {
         params: { err: err.message }
       });
     };
   }
+  for (const deviceId in tunnelsJobs) {
+    // remove all not updated jobs
+    const { job, reasons } = tunnelsJobs[deviceId];
+    if (job.data.message.ready === false) {
+      // nothing to send to device, the job should be failed
+      job.data.message.ready = true;
+      const errorMessage = reasons.size > 0 ? Array.from(reasons).join('. \n') : 'General Error';
+      job.update().error(errorMessage).failed();
+      logger.warn('Failed to create tunnels', {
+        params: { deviceId, job }
+      });
+    }
+  };
   return jobs;
 };
 
