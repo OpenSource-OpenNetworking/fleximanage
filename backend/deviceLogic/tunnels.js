@@ -130,6 +130,7 @@ const handleTunnels = async (
     aLoopStart = hubIdx;
     aLoopStop = hubIdx + 1;
   }
+  let iteration = 0;
 
   // Connecting tunnels done by double loop. The logic per topology is:
   // Hub and Spoke
@@ -228,9 +229,6 @@ const handleTunnels = async (
 
         for (let idxA = 0; idxA < deviceAIntfs.length; idxA++) {
           for (let idxB = 0; idxB < deviceBIntfs.length; idxB++) {
-            // prevent CPU resources blocking in large loops
-            await new Promise(resolve => setImmediate(resolve));
-
             const wanIfcA = deviceAIntfs[idxA];
             const wanIfcB = deviceBIntfs[idxB];
             const ifcALabels = wanIfcA.labelsSet;
@@ -270,6 +268,10 @@ const handleTunnels = async (
                 } else {
                   tunnelsPerDevice[deviceA._id] = (tunnelsPerDevice[deviceA._id] ?? 0) + 1;
                   tunnelsPerDevice[deviceB._id] = (tunnelsPerDevice[deviceB._id] ?? 0) + 1;
+                  if (iteration++ % 100 === 0) {
+                    // prevent CPU resources blocking in large loops
+                    await new Promise(resolve => setImmediate(resolve));
+                  }
                   tasks.push(generateTunnelPromise(userName, org, null,
                     { ...deviceA.toObject() }, { ...deviceB.toObject() },
                     { ...wanIfcA }, { ...wanIfcB }, encryptionMethod, advancedOptions,
@@ -332,6 +334,10 @@ const handleTunnels = async (
                 }
                 tunnelsPerDevice[deviceA._id] = (tunnelsPerDevice[deviceA._id] ?? 0) + 1;
                 tunnelsPerDevice[deviceB._id] = (tunnelsPerDevice[deviceB._id] ?? 0) + 1;
+                if (iteration++ % 100 === 0) {
+                  // prevent CPU resources blocking in large loops
+                  await new Promise(resolve => setImmediate(resolve));
+                }
                 // Use a copy of devices objects as promise runs later
                 tasks.push(generateTunnelPromise(userName, org, label,
                   { ...deviceA.toObject() }, { ...deviceB.toObject() },
