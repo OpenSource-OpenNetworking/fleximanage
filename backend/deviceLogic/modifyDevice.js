@@ -1833,6 +1833,27 @@ const processModifyJob = async (tasks, device, orgId, user, ignoreTasks = [], jo
     return { modifyJob: null, finalTasks: null };
   }
 
+  // sort modify-device tasks in correct order
+  const priority = {
+    'remove-route': 1,
+    'remove-tunnel': 2,
+    'remove-*': 3,
+    'remove-interface': 4,
+    '*': 5,
+    'add-interface': 6,
+    'add-tunnel': 7,
+    'add-route': 8,
+    'add-*': 9
+  };
+
+  finalTasks.sort((taskA, taskB) => {
+    const a = taskA.message;
+    const b = taskB.message;
+    const aPriority = priority[a] || priority[a.replace(/-.*/, '-*')] || priority['*'];
+    const bPriority = priority[b] || priority[b.replace(/-.*/, '-*')] || priority['*'];
+    return aPriority - bPriority;
+  });
+
   try {
     const modifyJob = await queueJob(
       orgId,
