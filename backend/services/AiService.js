@@ -57,7 +57,14 @@ class AiService {
         };
       } else { // Enough quota
         response = await FlexiAi.chatQuery(session, query, history);
-        // const response = { answer: 'test', sources: [], found: true };
+        // response = {
+        //   answer: 'A test response!\nNot from LLM',
+        //   sources: [],
+        //   found: true,
+        //   isQuestion: false,
+        //   tool: '',
+        //   api: ''
+        // };
 
         log = await aiChatLog.findOneAndUpdate({
           account: user.defaultAccount._id,
@@ -77,7 +84,7 @@ class AiService {
         }, {
           upsert: true,
           new: true,
-          fields: { _id: 1 }
+          fields: { 'transactions._id': 1 }
         });
       }
     } catch (e) {
@@ -92,7 +99,7 @@ class AiService {
 
     try {
       return Service.successResponse({
-        _id: log?._id || '',
+        _id: log?.transactions ? log.transactions[log.transactions.length - 1]._id : '',
         session,
         response
       });
@@ -117,8 +124,8 @@ class AiService {
       const log = await aiChatLog.findOneAndUpdate({
         org: orgList[0],
         session,
-        _id
-      }, { $set: { useful: useful } },
+        transactions: { $elemMatch: { _id: _id } }
+      }, { $set: { 'transactions.$.useful': useful } },
       { useFindAndModify: false, upsert: false, new: true });
 
       return Service.successResponse({

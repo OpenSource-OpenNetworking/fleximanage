@@ -66,15 +66,15 @@ const aiChatLogSchema = new Schema({
         default: ''
       },
       // List of recommended sources
-      sources: [String]
+      sources: [String],
+      // Is useful response
+      useful: {
+        type: Schema.Types.Boolean,
+        required: false,
+        default: null
+      }
     }],
     default: []
-  },
-  // Is useful response
-  useful: {
-    type: Schema.Types.Boolean,
-    required: false,
-    default: null
   }
 },
 {
