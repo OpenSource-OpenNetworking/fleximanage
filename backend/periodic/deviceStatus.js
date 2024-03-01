@@ -71,7 +71,6 @@ class DeviceStatus {
     this.deviceConnectionClosed = this.deviceConnectionClosed.bind(this);
 
     this.devicesStatusByOrg = {};
-    this.devicesStatusReasonByOrg = {};
     this.setDevicesStatusByOrg = this.setDevicesStatusByOrg.bind(this);
     this.getDevicesStatusByOrg = this.getDevicesStatusByOrg.bind(this);
     this.clearDevicesStatusByOrg = this.clearDevicesStatusByOrg.bind(this);
@@ -909,7 +908,7 @@ class DeviceStatus {
 
       this.handleNotificationSending(notification);
 
-      this.setDevicesStatusByOrg(org, deviceId, newState, reason);
+      this.setDevicesStatusByOrg(org, deviceId, newState);
     }
     this.setDeviceStatsField(machineId, 'state', newState);
     try {
@@ -1107,7 +1106,7 @@ class DeviceStatus {
     }
 
     let stateReason = '';
-    if (rawStats.hasOwnProperty('stateReason')) { // Agent v1.X.X
+    if (rawStats.hasOwnProperty('stateReason')) {
       stateReason = rawStats.stateReason;
     }
 
@@ -1414,20 +1413,14 @@ class DeviceStatus {
    * @param  {string} org       org id
    * @param  {string} deviceID  device id
    * @param  {string} status    status
-   * @param  {string} reason    status reason as a stringified object
    * @return {void}
    */
-  setDevicesStatusByOrg (org, deviceID, status, reason = '') {
+  setDevicesStatusByOrg (org, deviceID, status) {
     if (org && deviceID && status !== undefined) {
       if (!this.devicesStatusByOrg.hasOwnProperty(org)) {
         this.devicesStatusByOrg[org] = {};
       }
       this.devicesStatusByOrg[org][deviceID] = status;
-
-      if (!this.devicesStatusReasonByOrg.hasOwnProperty(org)) {
-        this.devicesStatusReasonByOrg[org] = {};
-      }
-      this.devicesStatusReasonByOrg[org][deviceID] = reason;
     }
   }
 
